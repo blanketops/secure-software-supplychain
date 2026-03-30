@@ -21,6 +21,8 @@ const (
 
 	workspaceSource   = "source"
 	workspaceSSHCreds = "ssh-creds"
+
+	workspaceDockerConfig = "docker-config"
 )
 
 func BuildPipelineRun(
@@ -56,12 +58,19 @@ func BuildPipelineRun(
 						SecretName: sc.Spec.Image.CloneSecretRef,
 					},
 				},
+				{
+					Name: workspaceDockerConfig,
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sc.Spec.Image.RegistrySecretRef,
+					},
+				},
 			},
 
 			PipelineSpec: &tektonv1.PipelineSpec{
 				Workspaces: []tektonv1.PipelineWorkspaceDeclaration{
 					{Name: workspaceSource},
 					{Name: workspaceSSHCreds},
+					{Name: workspaceDockerConfig},
 				},
 
 				Params: []tektonv1.ParamSpec{
@@ -70,10 +79,7 @@ func BuildPipelineRun(
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
 
-				Tasks: []tektonv1.PipelineTask{
-					gitCloneTask(),
-					kanikoTask(imageRef, stepGitClone),
-				},
+				Tasks: buildTaskList(sc, ib, imageRef),
 			},
 
 			Params: tektonv1.Params{
@@ -101,6 +107,56 @@ func BuildPipelineRun(
 			},
 		},
 	}
+}
+
+func buildTaskList(
+	sc *supplyv1alpha1.SupplyChain,
+	ib *supplyv1alpha1.ImageBuild,
+	imageRef string,
+) []tektonv1.PipelineTask {
+
+	tasks := []tektonv1.PipelineTask{}
+
+	// Step 0: git clone
+	tasks = append(tasks, gitCloneTask())
+	last := stepGitClone
+
+	// Step 1: build
+	if sc.Spec.Steps.Buildpacks {
+		tasks = append(tasks, kanikoTask(imageRef, last))
+		last = stepKaniko
+	}
+
+	// Step 2: sonar
+	if sc.Spec.Steps.SonarQube != nil {
+		tasks = append(tasks, sonarQubeTask(sc, last))
+		last = stepSonarQube
+	}
+
+	// Step 3: trivy
+	if sc.Spec.Steps.Trivy {
+		tasks = append(tasks, trivyTask(imageRef, last))
+		last = stepTrivy
+	}
+
+	// Step 4: sign
+	if sc.Spec.Steps.Sign {
+		tasks = append(tasks, signTask(sc, imageRef, last))
+		last = stepSign
+	}
+
+	// Step 5: attest
+	if sc.Spec.Steps.Attest {
+		tasks = append(tasks, attestTask(imageRef, last))
+		last = stepAttest
+	}
+
+	// Step 6: grafeas
+	if sc.Spec.Steps.Grafeas != nil {
+		tasks = append(tasks, grafeasTask(sc, imageRef, last))
+	}
+
+	return tasks
 }
 
 func gitCloneTask() tektonv1.PipelineTask {
@@ -154,13 +210,15 @@ func kanikoTask(imageRef, runAfter string) tektonv1.PipelineTask {
 		TaskRef:  &tektonv1.TaskRef{Name: "kaniko"},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
 			{Name: "source", Workspace: workspaceSource},
+			{Name: "docker-config", Workspace: workspaceDockerConfig},
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "DOCKERFILE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(workspaces.source.path)/Dockerfile"}},
+			{Name: "DOCKERFILE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "Dockerfile"}},
 			{Name: "CONTEXT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "."}},
 		},
 	}
+
 }
 
 func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
