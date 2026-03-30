@@ -1,0 +1,29 @@
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChain
+metadata:
+  labels:
+    app.kubernetes.io/name: blanketops-environments-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: for-kaniko-app
+spec:
+  repository: ntlaletsi70/for-kaniko-app
+  image:
+    registry: docker.io
+    name: nkanyezisolutions/for-kaniko-app
+    tagStrategy: git-sha
+    cloneSecret: github-ssh-credentials
+    registrySecret: registry-credentials
+  steps:
+    buildpacks: true
+    trivy: true
+    sign: true
+    attest: true
+    sonarQube:
+      serverURL: http://sonarqube.blanketops-supply-chain.svc.cluster.local:9000
+      tokenSecretRef: sonarqube-token
+    grafeas:
+      serverURL: http://grafeas.blanketops-supply-chain.svc.cluster.local:8080
+  signing:
+    fulcioURL: https://fulcio.sigstore.dev
+    rekorURL: https://rekor.sigstore.dev
+  serviceAccountName: supply-chain-runner

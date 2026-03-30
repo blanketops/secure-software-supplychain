@@ -1,0 +1,15 @@
+# ImageBuild — create this manually to trigger a build
+# Future: the BlanketOps Environments Build CR will own and create these
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: ImageBuild
+metadata:
+  labels:
+    app.kubernetes.io/name: blanketops-environments-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: imagebuild-sample
+spec:
+  supplyChainRef:
+    name: for-kaniko-app
+  gitRef:
+    url: git@github.com:ntlaletsi70/for-kaniko-app.git
+    revision: master
