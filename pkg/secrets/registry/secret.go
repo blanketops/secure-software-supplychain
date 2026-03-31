@@ -76,12 +76,7 @@ func (r *RegistrySecretReconciler) Reconcile(
 				"target": map[string]any{
 					"name": secretName,
 					"template": map[string]any{
-						// Opaque type — key is config.json, mounted by the Tekton
-						// kaniko Task into /kaniko/.docker/config.json via the
-						// dockerconfig workspace. Kaniko reads it from there directly.
-						"type": "Opaque",
-						// tekton.dev/docker-0 wires this secret to the registry host
-						// in Tekton's credential initializer so Kaniko can push.
+						"type": "kubernetes.io/dockerconfigjson",
 						"metadata": map[string]any{
 							"annotations": map[string]any{
 								"tekton.dev/docker-0": registryAnnotation,
@@ -91,7 +86,7 @@ func (r *RegistrySecretReconciler) Reconcile(
 				},
 				"data": []any{
 					map[string]any{
-						"secretKey": "config.json",
+						"secretKey": ".dockerconfigjson",
 						"remoteRef": map[string]any{
 							"key": "/supplychain/registry/config",
 						},
