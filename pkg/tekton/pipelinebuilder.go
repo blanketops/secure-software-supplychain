@@ -5,6 +5,7 @@ import (
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
@@ -47,9 +48,21 @@ func BuildPipelineRun(
 			},
 
 			Workspaces: []tektonv1.WorkspaceBinding{
+				// REPLACE WITH THIS
 				{
-					Name:     workspaceShared,
-					EmptyDir: &corev1.EmptyDirVolumeSource{},
+					Name: workspaceShared,
+					VolumeClaimTemplate: &corev1.PersistentVolumeClaim{
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes: []corev1.PersistentVolumeAccessMode{
+								corev1.ReadWriteOnce,
+							},
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
 				},
 				{
 					Name: workspaceSSHCreds,
@@ -195,14 +208,8 @@ func kanikoTask(imageRef, runAfter string) tektonv1.PipelineTask {
 		RunAfter: after(runAfter),
 		TaskRef:  &tektonv1.TaskRef{Name: "kaniko"},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-			{
-				Name:      "source",
-				Workspace: workspaceShared,
-			},
-			{
-				Name:      "dockerconfig",
-				Workspace: workspaceDockerConfig,
-			},
+			{Name: "source", Workspace: workspaceShared},
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
 		},
 		Params: tektonv1.Params{
 			{
