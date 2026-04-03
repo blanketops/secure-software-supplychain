@@ -30,7 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"ithub.com/ntlaletsi70/blanketops-environments-supply-chain/test/utils"
+	"github.com/ntlaletsi70/blanketops-environments-supply-chain/test/utils"
 )
 
 // namespace where the project is deployed in
