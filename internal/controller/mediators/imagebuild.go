@@ -17,6 +17,7 @@ import (
 	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
 	git "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/git"
 	registry "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/registry"
+	sonarqube "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/sonarqube"
 )
 
 type Mediator struct {
@@ -24,8 +25,10 @@ type Mediator struct {
 	Scheme                           *runtime.Scheme
 	Log                              logr.Logger
 	Recorder                         record.EventRecorder
-	GitSSHSecretReconciler           *git.GitSSHSecretReconciler
+	GitSSHExternalSecretReconciler   *git.GitSSHSecretReconciler
 	RegistryExternalSecretReconciler *registry.RegistrySecretReconciler
+
+	SonarQubeExternalSecretReconciler *sonarqube.SonarQubeSecretReconciler
 }
 
 func New(
@@ -35,12 +38,13 @@ func New(
 	recorder record.EventRecorder,
 ) *Mediator {
 	return &Mediator{
-		Client:                           c,
-		Scheme:                           scheme,
-		Log:                              log,
-		Recorder:                         recorder,
-		GitSSHSecretReconciler:           git.NewGitSSHSecretReconciler(c, log),
-		RegistryExternalSecretReconciler: registry.NewRegistrySecretReconciler(c, log),
+		Client:                            c,
+		Scheme:                            scheme,
+		Log:                               log,
+		Recorder:                          recorder,
+		GitSSHExternalSecretReconciler:    git.NewGitSSHSecretReconciler(c, log),
+		RegistryExternalSecretReconciler:  registry.NewRegistrySecretReconciler(c, log),
+		SonarQubeExternalSecretReconciler: sonarqube.NewSonarQubeSecretReconciler(c, log),
 	}
 }
 
@@ -63,7 +67,7 @@ func (m *Mediator) EnsurePrerequisites(
 	// -------------------------------------------------
 
 	log.Info("reconciling git SSH ExternalSecret")
-	if err := m.GitSSHSecretReconciler.Reconcile(ctx, sc, ib); err != nil {
+	if err := m.GitSSHExternalSecretReconciler.Reconcile(ctx, sc, ib); err != nil {
 		log.Error(err, "git SSH secret reconcile failed")
 		m.recordWarning(ib, "GitSSHSecretFailed", err)
 		return false, fmt.Errorf("git SSH secret: %w", err)
@@ -76,13 +80,20 @@ func (m *Mediator) EnsurePrerequisites(
 		return false, fmt.Errorf("registry secret: %w", err)
 	}
 
+	log.Info("reconciling SonarQube ExternalSecret")
+	if err := m.SonarQubeExternalSecretReconciler.Reconcile(ctx, sc, ib); err != nil {
+		log.Error(err, "SonarQube secret reconcile failed")
+		m.recordWarning(ib, "SonarQubeSecretFailed", err)
+		return false, fmt.Errorf("SonarQube secret: %w", err)
+	}
+
 	// -------------------------------------------------
 	// 2. Convergence: wait for secrets
 	// -------------------------------------------------
 
 	gitSecretName := sc.Spec.Image.CloneSecretRef
 	registrySecretName := sc.Spec.Image.RegistrySecretRef
-
+	sonarqubeSecretName := sc.Spec.Steps.SonarQube.TokenSecretRef
 	if !m.secretExists(ctx, gitSecretName, ib.Namespace) {
 		log.Info("git SSH secret not ready yet", "secret", gitSecretName)
 		return false, nil
@@ -90,6 +101,11 @@ func (m *Mediator) EnsurePrerequisites(
 
 	if !m.secretExists(ctx, registrySecretName, ib.Namespace) {
 		log.Info("registry secret not ready yet", "secret", registrySecretName)
+		return false, nil
+	}
+
+	if !m.secretExists(ctx, sonarqubeSecretName, ib.Namespace) {
+		log.Info("SonarQube secret not ready yet", "secret", sonarqubeSecretName)
 		return false, nil
 	}
 
@@ -137,6 +153,7 @@ func (m *Mediator) ensureServiceAccount(
 		Secrets: []corev1.ObjectReference{
 			{Name: "github-ssh-credentials"},
 			{Name: "docker-registry-credentials"},
+			{Name: "sonarqube-credentials"},
 		},
 	}
 

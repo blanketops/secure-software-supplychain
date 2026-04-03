@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,33 +12,36 @@ import (
 	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
 )
 
-type RegistrySecretReconciler struct {
+type SonarQubeSecretReconciler struct {
 	Client client.Client
 	Log    logr.Logger
 }
 
-func NewRegistrySecretReconciler(
+func NewSonarQubeSecretReconciler(
 	c client.Client,
 	log logr.Logger,
-) *RegistrySecretReconciler {
-	return &RegistrySecretReconciler{
+) *SonarQubeSecretReconciler {
+	return &SonarQubeSecretReconciler{
 		Client: c,
 		Log:    log,
 	}
 }
 
-func (r *RegistrySecretReconciler) Reconcile(
+func (r *SonarQubeSecretReconciler) Reconcile(
 	ctx context.Context,
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
 ) error {
-	if sc.Spec.Image.RegistrySecretRef == "" {
+	if sc.Spec.Steps.SonarQube == nil {
 		return nil
 	}
 
-	secretName := sc.Spec.Image.RegistrySecretRef
+	secretName := sc.Spec.Steps.SonarQube.TokenSecretRef
+	if secretName == "" {
+		return nil
+	}
+
 	namespace := ib.Namespace
-	registryAnnotation := fmt.Sprintf("https://%s", sc.Spec.Image.Registry)
 
 	// -------------------------------------------------------------------------
 	// Desired ExternalSecret (UNSTRUCTURED)
@@ -53,7 +55,7 @@ func (r *RegistrySecretReconciler) Reconcile(
 				"namespace": namespace,
 				"labels": map[string]any{
 					"blanketops.dev/managed":      "true",
-					"blanketops.dev/purpose":      "registry",
+					"blanketops.dev/purpose":      "sonarqube",
 					"blanketops.dev/supply-chain": sc.Name,
 					"blanketops.dev/image-build":  ib.Name,
 				},
@@ -67,22 +69,15 @@ func (r *RegistrySecretReconciler) Reconcile(
 				"target": map[string]any{
 					"name": secretName,
 					"template": map[string]any{
-						// Opaque so Kubernetes accepts config.json as the key
-						// Kaniko reads /kaniko/.docker/config.json directly
 						"type": "Opaque",
-						"metadata": map[string]any{
-							"annotations": map[string]any{
-								"tekton.dev/docker-0": registryAnnotation,
-							},
-						},
 					},
 				},
 				"data": []any{
 					map[string]any{
-						// config.json mounts as /kaniko/.docker/config.json
-						"secretKey": "config.json",
+						// Tekton sonarqube task reads env var from secret key "token"
+						"secretKey": "token",
 						"remoteRef": map[string]any{
-							"key": "/supplychain/registry/config",
+							"key": "/supplychain/sonarqube/token",
 						},
 					},
 				},
@@ -120,7 +115,7 @@ func (r *RegistrySecretReconciler) Reconcile(
 	}
 
 	r.Log.Info(
-		"Creating ExternalSecret for registry credentials",
+		"Creating ExternalSecret for SonarQube token",
 		"supply-chain", sc.Name,
 		"image-build", ib.Name,
 		"secret", secretName,
