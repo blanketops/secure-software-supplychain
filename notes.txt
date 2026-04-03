@@ -1,0 +1,2 @@
+Create API Results -> Maps to a results driven lifecycle space utilizing as much as we can from TektonResult Type
+Create API Prune -> Maps to a Tekton Pruner driven by a cronjob instance?

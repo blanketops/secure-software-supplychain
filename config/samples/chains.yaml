@@ -1,0 +1,24 @@
+apiVersion: operator.tekton.dev/v1alpha1
+kind: TektonChain
+metadata:
+  name: blanketops-environments-supply-chain
+spec:
+  artifacts.oci.format: simplesigning
+  artifacts.oci.signer: x509
+  artifacts.oci.storage: oci
+  artifacts.pipelinerun.enable-deep-inspection: "true"
+  artifacts.pipelinerun.format: in-toto
+  artifacts.pipelinerun.signer: x509
+  artifacts.pipelinerun.storage: oci
+  artifacts.taskrun.format: in-toto
+  artifacts.taskrun.signer: x509
+  artifacts.taskrun.storage: oci
+  builddefinition.buildtype: https://tekton.dev/chains/v2/slsa
+  builder.id: https://tekton.dev/chains/v2
+  signers.x509.fulcio.address: https://fulcio.sigstore.dev
+  signers.x509.fulcio.enabled: "true"
+  signers.x509.fulcio.issuer: https://accounts.google.com
+  signers.x509.fulcio.provider: google
+  storage.oci.repository: docker.io/nkanyezisolutions/for-kaniko-app
+  transparency.enabled: "true"
+  transparency.url: https://rekor.sigstore.dev

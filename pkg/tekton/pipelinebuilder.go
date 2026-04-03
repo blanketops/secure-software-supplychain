@@ -253,7 +253,7 @@ func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.Pip
 		TaskRef:  &tektonv1.TaskRef{Name: "sonarqube-scanner"},
 		Params: tektonv1.Params{
 			{Name: "SONAR_HOST_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ServerURL}},
-			{Name: "SONAR_PROJECT_KEY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Repository}},
+			{Name: "SONAR_PROJECT_KEY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ProjectKey}},
 			{Name: "SONAR_TOKEN_SECRET", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.TokenSecretRef}},
 		},
 	}
@@ -264,6 +264,9 @@ func trivyTask(imageRef, runAfter string) tektonv1.PipelineTask {
 		Name:     stepTrivy,
 		RunAfter: after(runAfter),
 		TaskRef:  &tektonv1.TaskRef{Name: "trivy-scanner"},
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "manifest-dir", Workspace: workspaceShared},
+		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
 			{Name: "ARGS", Value: tektonv1.ParamValue{

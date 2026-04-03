@@ -22,6 +22,8 @@ spec:
       #serverURL: http://sonarqube-sonarqube.blanketops-supply-chain.svc.cluster.local:9000 #deployed
       serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000
       tokenSecretRef: sonarqube-token
+      projectKey: ntlaletsi70_for-kaniko-app
+
     grafeas:
       #serverURL: http://grafeas.blanketops-supply-chain.svc.cluster.local:8080 #deployed
       serverURL: http://grafeas.default.svc.cluster.local:8080

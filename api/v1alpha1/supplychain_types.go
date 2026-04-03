@@ -95,6 +95,10 @@ type SonarQubeSpec struct {
 	ServerURL string `json:"serverURL"`
 	// TokenSecretRef references a Secret with the SonarQube token
 	TokenSecretRef string `json:"tokenSecretRef"`
+
+	// ProjectKey is the SonarQube project key (alphanumeric, -, _, ., : only)
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9\-_.:]+$`
+	ProjectKey string `json:"projectKey"`
 }
 
 // GrafeasSpec configures the Grafeas artifact metadata step

@@ -27,4 +27,13 @@ resources:
   kind: ImageBuild
   path: ithub.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: blanketops.dev
+  group: supplychain
+  kind: RepositorySource
+  path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
+  version: v1alpha1
 version: "3"
