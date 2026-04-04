@@ -391,7 +391,41 @@ func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
 		Name:     stepAttest,
 		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "tekton-chains-attest"},
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
+		},
+		TaskSpec: &tektonv1.EmbeddedTask{
+			TaskSpec: tektonv1.TaskSpec{
+				Params: []tektonv1.ParamSpec{
+					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+				},
+				Workspaces: []tektonv1.WorkspaceDeclaration{
+					{Name: "dockerconfig"},
+				},
+				Results: []tektonv1.TaskResult{
+					{Name: "IMAGE_URL", Description: "Image URL for Tekton Chains"},
+					{Name: "IMAGE_DIGEST", Description: "Image digest for Tekton Chains attestation"},
+				},
+				Steps: []tektonv1.Step{
+					{
+						Name:  "attest",
+						Image: "alpine/crane:latest",
+						Env: []corev1.EnvVar{
+							{Name: "IMAGE", Value: imageRef},
+							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+						},
+						Script: `#!/bin/sh
+set -e
+digest=$(crane digest ${IMAGE})
+printf '%s' "${IMAGE}" > $(results.IMAGE_URL.path)
+printf '%s' "${digest}" > $(results.IMAGE_DIGEST.path)
+echo "IMAGE_URL=${IMAGE}"
+echo "IMAGE_DIGEST=${digest}"
+`,
+					},
+				},
+			},
+		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
 		},
