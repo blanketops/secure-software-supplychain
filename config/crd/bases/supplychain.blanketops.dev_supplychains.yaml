@@ -1,0 +1,285 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: supplychains.supplychain.blanketops.dev
+spec:
+  group: supplychain.blanketops.dev
+  names:
+    kind: SupplyChain
+    listKind: SupplyChainList
+    plural: supplychains
+    shortNames:
+    - sc
+    singular: supplychain
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.repository
+      name: Repository
+      type: string
+    - jsonPath: .spec.image.registry
+      name: Registry
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.lastImageBuild
+      name: Last Build
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SupplyChain is the Schema for the supplychains API.
+          One SupplyChain per repository — this is law.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of SupplyChain
+            properties:
+              image:
+                description: Image defines how the container image is built and where
+                  it's pushed
+                properties:
+                  builderImage:
+                    default: paketobuildpacks/builder-jammy-base
+                    description: BuilderImage is the Cloud Native Buildpacks builder
+                      image
+                    type: string
+                  cloneSecret:
+                    description: CloneSecretRef references a Secret with git ssh credentials
+                    type: string
+                  name:
+                    description: Name is the image name (without tag)
+                    type: string
+                  registry:
+                    description: Registry is the image registry to push to (e.g. ttl.sh,
+                      ghcr.io)
+                    type: string
+                  registrySecret:
+                    description: PushSecretRef references a Secret with registry credentials
+                    type: string
+                  tagStrategy:
+                    default: git-sha
+                    description: Tag strategy for the built image
+                    enum:
+                    - git-sha
+                    - semver
+                    - latest
+                    type: string
+                required:
+                - name
+                - registry
+                type: object
+              repository:
+                description: |-
+                  INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                  The following markers will use OpenAPI v3 schema to validate the value
+                  More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+                  Repository is the GitHub repo this supply chain is bound to (owner/name format).
+                  One SupplyChain per repository — this is law.
+                type: string
+              serviceAccountName:
+                default: default
+                description: ServiceAccountName is the k8s SA used by Tekton TaskRuns
+                type: string
+              signing:
+                description: Signing defines Sigstore signing configuration
+                properties:
+                  fulcioURL:
+                    default: https://fulcio.sigstore.dev
+                    description: FulcioURL is the Fulcio OIDC certificate authority
+                      endpoint
+                    type: string
+                  oidcIssuer:
+                    default: https://oauth2.sigstore.dev/auth
+                    description: OIDCIssuer is the OIDC issuer for keyless signing
+                    type: string
+                  rekorURL:
+                    default: https://rekor.sigstore.dev
+                    description: RekorURL is the Rekor transparency log endpoint
+                    type: string
+                type: object
+              steps:
+                description: Steps defines which pipeline steps are enabled and their
+                  configuration
+                properties:
+                  attest:
+                    default: true
+                    description: Attest enables provenance attestation via Tekton
+                      Chains
+                    type: boolean
+                  buildpacks:
+                    default: true
+                    description: Buildpacks enables the Cloud Native Buildpacks build
+                      step
+                    type: boolean
+                  grafeas:
+                    description: Grafeas enables artifact metadata publishing to Grafeas
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled toggles this step
+                        type: boolean
+                      serverURL:
+                        description: ServerURL is the Grafeas server endpoint
+                        type: string
+                    required:
+                    - serverURL
+                    type: object
+                  sign:
+                    default: true
+                    description: Sign enables image signing via Cosign + Sigstore
+                    type: boolean
+                  sonarQube:
+                    description: SonarQube enables static analysis via SonarQube
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled toggles this step
+                        type: boolean
+                      projectKey:
+                        description: 'ProjectKey is the SonarQube project key (alphanumeric,
+                          -, _, ., : only)'
+                        pattern: ^[a-zA-Z0-9\-_.:]+$
+                        type: string
+                      serverURL:
+                        description: ServerURL is the SonarQube server endpoint
+                        type: string
+                      tokenSecretRef:
+                        description: TokenSecretRef references a Secret with the SonarQube
+                          token
+                        type: string
+                    required:
+                    - projectKey
+                    - serverURL
+                    - tokenSecretRef
+                    type: object
+                  trivy:
+                    default: true
+                    description: Trivy enables vulnerability scanning
+                    type: boolean
+                type: object
+            required:
+            - image
+            - repository
+            - steps
+            type: object
+          status:
+            description: status defines the observed state of SupplyChain
+            properties:
+              conditions:
+                description: |-
+                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                  For Kubernetes API conventions, see:
+                  https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+                  conditions represent the current state of the SupplyChain resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastImageBuild:
+                description: LastImageBuild is the name of the most recent ImageBuild
+                  created
+                type: string
+              phase:
+                description: Phase is the current lifecycle phase of the SupplyChain
+                enum:
+                - Ready
+                - Degraded
+                - Error
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
