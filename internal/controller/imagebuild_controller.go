@@ -17,7 +17,7 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
 	imagebuildMediator "github.com/ntlaletsi70/blanketops-environments-supply-chain/internal/controller/mediators"
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/tekton"
+	pipeline "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/tekton/pipeline"
 )
 
 type ImageBuildReconciler struct {
@@ -156,7 +156,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 		imageTag,
 	)
 
-	pr := tekton.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef)
+	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef)
 
 	if err := controllerutil.SetControllerReference(ib, pr, r.Scheme); err != nil {
 		return nil, nil, err
