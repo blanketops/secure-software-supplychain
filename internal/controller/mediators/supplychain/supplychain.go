@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,12 +123,63 @@ func (m *Mediator) EnsurePrerequisites(
 	}
 
 	// -------------------------------------------------
+	// 4. Authorization: SubjectAccessReview
+	// -------------------------------------------------
+	if err := m.verifySigningPermission(ctx, sc, ib); err != nil {
+		log.Error(err, "signing permission denied")
+		m.recordWarning(ib, "SigningPermissionDenied", err)
+		return false, err
+	}
+
+	// -------------------------------------------------
 	// READY
 	// -------------------------------------------------
 
 	log.Info("mediator ready — prerequisites converged")
 
 	return true, nil
+}
+
+func (m *Mediator) verifySigningPermission(
+	ctx context.Context,
+	sc *supplyv1alpha1.SupplyChain,
+	ib *supplyv1alpha1.ImageBuild,
+) error {
+	saName := sc.Spec.ServiceAccountName
+	if saName == "" {
+		saName = "default"
+	}
+
+	sar := &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			User: fmt.Sprintf("system:serviceaccount:%s:%s", ib.Namespace, saName),
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace: ib.Namespace,
+				Verb:      "create",
+				Group:     "supplychain.blanketops.dev",
+				Resource:  "imagesignatures",
+			},
+		},
+	}
+
+	if err := m.Client.Create(ctx, sar); err != nil {
+		return fmt.Errorf("SubjectAccessReview failed: %w", err)
+	}
+
+	if !sar.Status.Allowed {
+		return fmt.Errorf(
+			"SA %s is not permitted to sign images: %s",
+			saName,
+			sar.Status.Reason,
+		)
+	}
+
+	m.Log.Info("signing permission granted",
+		"serviceAccount", saName,
+		"namespace", ib.Namespace,
+	)
+
+	return nil
 }
 
 func (m *Mediator) ensureServiceAccount(
@@ -151,9 +203,9 @@ func (m *Mediator) ensureServiceAccount(
 			},
 		},
 		Secrets: []corev1.ObjectReference{
-			{Name: "github-ssh-credentials"},
-			{Name: "docker-registry-credentials"},
-			{Name: "sonarqube-credentials"},
+			{Name: sc.Spec.Image.CloneSecretRef},
+			{Name: sc.Spec.Image.RegistrySecretRef},
+			{Name: sc.Spec.Steps.SonarQube.TokenSecretRef},
 		},
 	}
 

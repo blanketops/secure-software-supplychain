@@ -4,5 +4,4 @@ resources:
 - supplychain_v1alpha1_supplychain.yaml
 - supplychain_v1alpha1_imagebuild.yaml
 
-- supplychain_v1alpha1_repositorysource.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
