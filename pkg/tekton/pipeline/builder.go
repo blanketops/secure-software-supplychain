@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	stepGitClone  = "git-clone"
-	stepKaniko    = "kaniko"
-	stepSonarQube = "sonarqube"
-	stepTrivy     = "trivy"
-	stepSign      = "sign"
-	stepAttest    = "attest"
-	stepGrafeas   = "grafeas"
+	stepGitClone   = "git-clone"
+	stepKaniko     = "kaniko"
+	stepSonarQube  = "sonarqube"
+	stepTrivy      = "trivy"
+	stepAuthFulcio = "auth-fulcio"
+	stepSign       = "sign"
+	stepAttest     = "attest"
+	stepGrafeas    = "grafeas"
 
 	workspaceShared       = "shared-data"
 	workspaceSSHCreds     = "ssh-creds"
@@ -31,7 +32,6 @@ func BuildPipelineRun(
 	ib *supplyv1alpha1.ImageBuild,
 	imageRef string,
 ) *tektonv1.PipelineRun {
-
 	sa := sc.Spec.ServiceAccountName
 	if sa == "" {
 		sa = "default"
@@ -46,9 +46,7 @@ func BuildPipelineRun(
 			TaskRunTemplate: tektonv1.PipelineTaskRunTemplate{
 				ServiceAccountName: sa,
 			},
-
 			Workspaces: []tektonv1.WorkspaceBinding{
-				// REPLACE WITH THIS
 				{
 					Name: workspaceShared,
 					VolumeClaimTemplate: &corev1.PersistentVolumeClaim{
@@ -77,23 +75,19 @@ func BuildPipelineRun(
 					},
 				},
 			},
-
 			PipelineSpec: &tektonv1.PipelineSpec{
 				Workspaces: []tektonv1.PipelineWorkspaceDeclaration{
 					{Name: workspaceShared},
 					{Name: workspaceSSHCreds},
 					{Name: workspaceDockerConfig},
 				},
-
 				Params: []tektonv1.ParamSpec{
 					{Name: "image-ref", Type: tektonv1.ParamTypeString},
 					{Name: "git-url", Type: tektonv1.ParamTypeString},
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
-
 				Tasks: buildTaskList(sc, ib, imageRef),
 			},
-
 			Params: tektonv1.Params{
 				{
 					Name: "image-ref",
@@ -126,14 +120,13 @@ func buildTaskList(
 	ib *supplyv1alpha1.ImageBuild,
 	imageRef string,
 ) []tektonv1.PipelineTask {
-
 	tasks := []tektonv1.PipelineTask{}
 
 	// Step 0: git clone
 	tasks = append(tasks, gitCloneTask())
 	last := stepGitClone
 
-	// Step 1: build (always include kaniko for now)
+	// Step 1: build
 	tasks = append(tasks, kanikoTask(imageRef, last))
 	last = stepKaniko
 
@@ -149,9 +142,10 @@ func buildTaskList(
 		last = stepTrivy
 	}
 
-	// Step 4: sign
+	// Step 4: auth-fulcio + sign
 	if sc.Spec.Steps.Sign {
-		tasks = append(tasks, signTask(sc, imageRef, last))
+		tasks = append(tasks, authFulcioTask(sc, last))
+		tasks = append(tasks, signTask(sc, imageRef, stepAuthFulcio))
 		last = stepSign
 	}
 
@@ -174,14 +168,8 @@ func gitCloneTask() tektonv1.PipelineTask {
 		Name:    stepGitClone,
 		TaskRef: &tektonv1.TaskRef{Name: "git-clone"},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-			{
-				Name:      "output",
-				Workspace: workspaceShared,
-			},
-			{
-				Name:      "ssh-directory",
-				Workspace: workspaceSSHCreds,
-			},
+			{Name: "output", Workspace: workspaceShared},
+			{Name: "ssh-directory", Workspace: workspaceSSHCreds},
 		},
 		Params: tektonv1.Params{
 			{
@@ -212,38 +200,11 @@ func kanikoTask(imageRef, runAfter string) tektonv1.PipelineTask {
 			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
 		},
 		Params: tektonv1.Params{
-			{
-				Name: "IMAGE",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: imageRef,
-				},
-			},
-			{
-				Name: "DOCKERFILE",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: "Dockerfile",
-				},
-			},
-			{
-				Name: "CONTEXT",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: ".",
-				},
-			},
+			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+			{Name: "DOCKERFILE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "Dockerfile"}},
+			{Name: "CONTEXT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "."}},
 		},
 	}
-}
-
-// ---------------- OTHER TASKS ----------------
-
-func after(task string) []string {
-	if task == "" {
-		return nil
-	}
-	return []string{task}
 }
 
 func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
@@ -277,10 +238,76 @@ func trivyTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	}
 }
 
+func authFulcioTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
+	fulcio := "https://fulcio.sigstore.dev"
+	if sc.Spec.Signing != nil && sc.Spec.Signing.FulcioURL != "" {
+		fulcio = sc.Spec.Signing.FulcioURL
+	}
+
+	return tektonv1.PipelineTask{
+		Name:     stepAuthFulcio,
+		RunAfter: after(runAfter),
+		TaskSpec: &tektonv1.EmbeddedTask{
+			TaskSpec: tektonv1.TaskSpec{
+				Params: []tektonv1.ParamSpec{
+					{Name: "FULCIO_URL", Type: tektonv1.ParamTypeString},
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "oidc-info",
+						VolumeSource: corev1.VolumeSource{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+											Path:              "oidc-token",
+											ExpirationSeconds: int64Ptr(600),
+											Audience:          "sigstore",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				Steps: []tektonv1.Step{
+					{
+						Name:  "verify-fulcio",
+						Image: "curlimages/curl:latest",
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "oidc-info",
+								MountPath: "/var/run/sigstore/cosign",
+							},
+						},
+						Script: `#!/bin/sh
+set -e
+TOKEN=$(cat /var/run/sigstore/cosign/oidc-token)
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: OIDC token is empty"
+  exit 1
+fi
+echo "OIDC token acquired successfully"
+echo "Verifying Fulcio endpoint: $(params.FULCIO_URL)"
+curl -sf $(params.FULCIO_URL)/api/v1/rootCert > /dev/null
+echo "Fulcio reachable and ready"
+`,
+					},
+				},
+			},
+		},
+		Params: tektonv1.Params{
+			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{
+				Type:      tektonv1.ParamTypeString,
+				StringVal: fulcio,
+			}},
+		},
+	}
+}
+
 func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
 	fulcio := "https://fulcio.sigstore.dev"
 	rekor := "https://rekor.sigstore.dev"
-
 	if sc.Spec.Signing != nil {
 		if sc.Spec.Signing.FulcioURL != "" {
 			fulcio = sc.Spec.Signing.FulcioURL
@@ -293,7 +320,65 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 	return tektonv1.PipelineTask{
 		Name:     stepSign,
 		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "cosign-sign"},
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
+		},
+		TaskSpec: &tektonv1.EmbeddedTask{
+			TaskSpec: tektonv1.TaskSpec{
+				Params: []tektonv1.ParamSpec{
+					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+					{Name: "FULCIO_URL", Type: tektonv1.ParamTypeString},
+					{Name: "REKOR_URL", Type: tektonv1.ParamTypeString},
+				},
+				Workspaces: []tektonv1.WorkspaceDeclaration{
+					{Name: "dockerconfig"},
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: "oidc-info",
+						VolumeSource: corev1.VolumeSource{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{
+										ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+											Path:              "oidc-token",
+											ExpirationSeconds: int64Ptr(600),
+											Audience:          "sigstore",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				Steps: []tektonv1.Step{
+					{
+						Name:  "sign",
+						Image: "gcr.io/projectsigstore/cosign:v2.2.3",
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "oidc-info",
+								MountPath: "/var/run/sigstore/cosign",
+							},
+						},
+						Env: []corev1.EnvVar{
+							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
+							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
+							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+						},
+						Args: []string{
+							"sign",
+							"--fulcio-url=$(params.FULCIO_URL)",
+							"--rekor-url=$(params.REKOR_URL)",
+							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
+							"--insecure-skip-verify",
+							"--yes",
+							"$(params.IMAGE)",
+						},
+					},
+				},
+			},
+		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
 			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: fulcio}},
@@ -324,4 +409,15 @@ func grafeasTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tekt
 			{Name: "PROJECT_ID", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: fmt.Sprintf("blanketops/%s", sc.Spec.Repository)}},
 		},
 	}
+}
+
+func after(task string) []string {
+	if task == "" {
+		return nil
+	}
+	return []string{task}
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
 }

@@ -28,6 +28,6 @@ spec:
       #serverURL: http://grafeas.blanketops-supply-chain.svc.cluster.local:8080 #deployed
       serverURL: http://grafeas.default.svc.cluster.local:8080
   signing:
-    fulcioURL: https://fulcio.sigstore.dev
-    rekorURL: https://rekor.sigstore.dev
+    fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
+    rekorURL: http://rekor-server.rekor-system.svc.cluster.local
   serviceAccountName: supply-chain-runner
