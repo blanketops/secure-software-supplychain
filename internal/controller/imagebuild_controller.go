@@ -16,14 +16,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
-	imagebuildMediator "github.com/ntlaletsi70/blanketops-environments-supply-chain/internal/controller/mediators"
+	supplychain "github.com/ntlaletsi70/blanketops-environments-supply-chain/internal/controller/mediators/supplychain"
 	pipeline "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/tekton/pipeline"
 )
 
 type ImageBuildReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Mediator *imagebuildMediator.Mediator
+	Mediator *supplychain.Mediator
 }
 
 func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -238,7 +238,7 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Mediator owns all infrastructure prerequisites — secrets wired here,
 	// not on the controller struct directly.
-	r.Mediator = imagebuildMediator.New(
+	r.Mediator = supplychain.New(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		log.WithName("mediator"),

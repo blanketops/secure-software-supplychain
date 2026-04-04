@@ -174,6 +174,11 @@ force-uninstall: manifests kustomize ## Patch out finalizers then uninstall CRDs
 		while read ns name; do \
 			[ -n "$$name" ] && kubectl patch imagebuild $$name -n $$ns -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true; \
 		done
+	@echo "Patching out finalizers from RepositorySource resources..."
+	@kubectl get repositorysource --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+		while read ns name; do \
+			[ -n "$$name" ] && kubectl patch repositorysource $$name -n $$ns -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true; \
+		done	
 	@$(MAKE) uninstall
 
 .PHONY: deploy
