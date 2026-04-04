@@ -5,17 +5,8 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - supplychain.blanketops.dev
   resources:
-  - repositorysources
   - supplychains
   verbs:
   - create
@@ -28,14 +19,12 @@ rules:
 - apiGroups:
   - supplychain.blanketops.dev
   resources:
-  - repositorysources/finalizers
   - supplychains/finalizers
   verbs:
   - update
 - apiGroups:
   - supplychain.blanketops.dev
   resources:
-  - repositorysources/status
   - supplychains/status
   verbs:
   - get
