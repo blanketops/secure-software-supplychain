@@ -4,6 +4,7 @@
 resources:
 - bases/supplychain.blanketops.dev_supplychains.yaml
 - bases/supplychain.blanketops.dev_imagebuilds.yaml
+- bases/supplychain.blanketops.dev_imagesignatures.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

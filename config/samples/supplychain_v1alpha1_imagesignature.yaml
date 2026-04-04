@@ -1,0 +1,9 @@
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: ImageSignature
+metadata:
+  labels:
+    app.kubernetes.io/name: blanketops-environments-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: imagesignature-sample
+spec:
+  # TODO(user): Add fields here
