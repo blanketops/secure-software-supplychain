@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafeas
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafeas
+  template:
+    metadata:
+      labels:
+        app: grafeas
+    spec:
+      containers:
+      - name: grafeas
+        image: emunari/grafeas-server
+        args:
+        - --grpc-port=8080
+        - --http-port=8081
+        ports:
+        - containerPort: 8080
+        - containerPort: 8081
+      - name: grafeas-gateway
+        image: ghcr.io/fullstorydev/grpcurl:latest
+        command: [ "/bin/sh", "-c" ]
+        args:
+        - |
+          apk add --no-cache git && \
+          git clone https://github.com/grafeas/grafeas.git /proto && \
+          while true; do sleep 3600; done
