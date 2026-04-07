@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafeas-probe
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "/probe/probe.sh", "http://grafeas:8081", "blanketops", "debug/image:latest"]
+        volumeMounts:
+        - name: script
+          mountPath: /probe
+      volumes:
+      - name: script
+        configMap:
+          name: grafeas-probe-script
+          defaultMode: 0755

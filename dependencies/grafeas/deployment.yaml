@@ -21,11 +21,3 @@ spec:
         ports:
         - containerPort: 8080
         - containerPort: 8081
-      - name: grafeas-gateway
-        image: ghcr.io/fullstorydev/grpcurl:latest
-        command: [ "/bin/sh", "-c" ]
-        args:
-        - |
-          apk add --no-cache git && \
-          git clone https://github.com/grafeas/grafeas.git /proto && \
-          while true; do sleep 3600; done

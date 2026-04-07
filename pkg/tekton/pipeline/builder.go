@@ -433,123 +433,23 @@ echo "IMAGE_DIGEST=${digest}"
 }
 
 func grafeasTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
-	// ✅ Keep Grafeas project flat (NO slashes)
-	projectID := "blanketops"
-
-	grafeasURL := sc.Spec.Steps.Grafeas.ServerURL
-
-	// Normalize to host:port for grpcurl
-	grpcHost := strings.TrimPrefix(grafeasURL, "http://")
-	grpcHost = strings.TrimPrefix(grpcHost, "https://")
+	// Strip protocol — grpcurl needs host:port only. HTTP was 8081, gRPC is 8080.
+	grpcHost := strings.TrimPrefix(sc.Spec.Steps.Grafeas.ServerURL, "https://")
+	grpcHost = strings.TrimPrefix(grpcHost, "http://")
+	grpcHost = strings.Replace(grpcHost, ":8081", ":8080", 1)
 
 	return tektonv1.PipelineTask{
 		Name:     stepGrafeas,
 		RunAfter: after(runAfter),
-		TaskSpec: &tektonv1.EmbeddedTask{
-			TaskSpec: tektonv1.TaskSpec{
-				Params: []tektonv1.ParamSpec{
-					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
-					{Name: "GRAFEAS_URL", Type: tektonv1.ParamTypeString},
-					{Name: "PROJECT_ID", Type: tektonv1.ParamTypeString},
-				},
-				Steps: []tektonv1.Step{
-					{
-						Name: "publish",
-						// ✅ Use a prebuilt image (YOU should build this once)
-						Image: "ghcr.io/your-org/grafeas-client:latest",
-						Env: []corev1.EnvVar{
-							{Name: "GRAFEAS_HOST", Value: grpcHost},
-							{Name: "PROJECT_ID", Value: projectID},
-							{Name: "IMAGE_REF", Value: imageRef},
-						},
-						Script: `#!/bin/sh
-set -ex
-
-echo "Using Grafeas host: ${GRAFEAS_HOST}"
-echo "Project: ${PROJECT_ID}"
-echo "Image: ${IMAGE_REF}"
-
-PROTO_PATH="/opt/grafeas/proto"
-
-echo "🔎 Checking Grafeas connectivity..."
-grpcurl -plaintext ${GRAFEAS_HOST} list || {
-  echo "❌ Cannot reach Grafeas gRPC endpoint"
-  exit 1
-}
-
-echo "📝 Creating Grafeas note (idempotent)..."
-grpcurl -plaintext \
-  -import-path ${PROTO_PATH} \
-  -proto grafeas/v1beta1/grafeas.proto \
-  -d "{
-    \"name\": \"projects/${PROJECT_ID}/notes/build\",
-    \"short_description\": \"BlanketOps build note\",
-    \"kind\": \"NOTE_KIND_BUILD\",
-    \"build\": {
-      \"builder_version\": \"blanketops-v1\"
-    }
-  }" \
-  ${GRAFEAS_HOST} \
-  grafeas.v1beta1.GrafeasV1Beta1/CreateNote \
-  || echo "⚠️ Note may already exist"
-
-echo "📦 Publishing occurrence..."
-grpcurl -plaintext \
-  -import-path ${PROTO_PATH} \
-  -proto grafeas/v1beta1/grafeas.proto \
-  -d "{
-    \"resource_uri\": \"${IMAGE_REF}\",
-    \"note_name\": \"projects/${PROJECT_ID}/notes/build\",
-    \"kind\": \"NOTE_KIND_BUILD\",
-    \"build\": {
-      \"provenance\": {
-        \"id\": \"blanketops-run\",
-        \"project_id\": \"${PROJECT_ID}\",
-        \"built_artifacts\": [{
-          \"id\": \"${IMAGE_REF}\",
-          \"names\": [\"${IMAGE_REF}\"]
-        }]
-      }
-    }
-  }" \
-  ${GRAFEAS_HOST} \
-  grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence \
-  || {
-    echo "❌ Failed to create occurrence"
-    exit 1
-  }
-
-echo "✅ Metadata successfully published to Grafeas"
-`,
-					},
-				},
-			},
-		},
+		TaskRef:  &tektonv1.TaskRef{Name: "grafeas-publish"},
 		Params: tektonv1.Params{
-			{
-				Name: "IMAGE",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: imageRef,
-				},
-			},
-			{
-				Name: "GRAFEAS_URL",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: grafeasURL,
-				},
-			},
-			{
-				Name: "PROJECT_ID",
-				Value: tektonv1.ParamValue{
-					Type:      tektonv1.ParamTypeString,
-					StringVal: projectID,
-				},
-			},
+			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+			{Name: "GRAFEAS_HOST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: grpcHost}},
+			{Name: "PROJECT_ID", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "blanketops"}},
 		},
 	}
 }
+
 func after(task string) []string {
 	if task == "" {
 		return nil

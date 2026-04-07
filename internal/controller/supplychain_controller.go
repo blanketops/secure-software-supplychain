@@ -23,7 +23,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -100,27 +99,21 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-// reconcileTasks ensures all custom Tekton Tasks exist in the namespace.
+// reconcileTasks ensures all custom Tekton Tasks exist and are up-to-date in the namespace.
 // Hub Tasks (buildpacks, git-clone, trivy-scanner) are cluster prerequisites.
 func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {
 	logger := log.FromContext(ctx)
 
-	for _, task := range customTasks(sc.Namespace) {
-		var existing tektonv1.Task
-		err := r.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: task.Namespace}, &existing)
-		if err == nil {
-			logger.Info("task already exists", "task", task.Name)
-			continue
+	for _, desired := range customTasks(sc.Namespace) {
+		task := desired
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, &task, func() error {
+			task.Spec = desired.Spec
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("reconciling Task %q: %w", task.Name, err)
 		}
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("checking Task %q: %w", task.Name, err)
-		}
-
-		logger.Info("creating task", "task", task.Name)
-		if err := r.Create(ctx, &task); err != nil {
-			return fmt.Errorf("creating Task %q: %w", task.Name, err)
-		}
-		logger.Info("task created", "task", task.Name)
+		logger.Info("task reconciled", "task", task.Name, "result", result)
 	}
 
 	return nil
@@ -250,34 +243,69 @@ func grafeasPublishTask(namespace string) tektonv1.Task {
 		Spec: tektonv1.TaskSpec{
 			Params: []tektonv1.ParamSpec{
 				{Name: "IMAGE", Type: tektonv1.ParamTypeString, Description: "Fully qualified image reference"},
-				{Name: "GRAFEAS_URL", Type: tektonv1.ParamTypeString, Description: "Grafeas server URL"},
+				{Name: "GRAFEAS_HOST", Type: tektonv1.ParamTypeString, Description: "Grafeas gRPC host:port"},
 				{Name: "PROJECT_ID", Type: tektonv1.ParamTypeString, Description: "Grafeas project ID"},
 			},
 			Steps: []tektonv1.Step{
 				{
 					Name:  "publish",
-					Image: "curlimages/curl:latest",
+					Image: "alpine:latest",
 					Script: `#!/bin/sh
 set -e
-echo "Publishing artifact metadata to Grafeas"
-curl -sf -X POST \
-  $(params.GRAFEAS_URL)/v1/projects/$(params.PROJECT_ID)/occurrences \
-  -H "Content-Type: application/json" \
+
+echo "Installing tools..."
+apk add --no-cache git 2>/dev/null
+wget -qO /tmp/grpcurl.tar.gz \
+  https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz
+tar -xzf /tmp/grpcurl.tar.gz -C /usr/local/bin grpcurl
+
+echo "Fetching grafeas protos..."
+git clone --quiet --depth=1 --filter=blob:none \
+  https://github.com/grafeas/grafeas.git /tmp/grafeas
+git clone --quiet --depth=1 --filter=blob:none \
+  https://github.com/googleapis/googleapis.git /tmp/googleapis
+
+HOST="$(params.GRAFEAS_HOST)"
+PROJECT="$(params.PROJECT_ID)"
+IMAGE="$(params.IMAGE)"
+GRPC="-plaintext -import-path /tmp/grafeas -import-path /tmp/googleapis -proto proto/v1beta1/grafeas.proto"
+
+echo "Creating note (idempotent)..."
+grpcurl $GRPC \
   -d "{
-    \"resourceUri\": \"$(params.IMAGE)\",
-    \"noteName\": \"projects/$(params.PROJECT_ID)/notes/build\",
-    \"kind\": \"BUILD\",
-    \"build\": {
-      \"provenance\": {
-        \"id\": \"$(context.taskRun.name)\",
-        \"projectId\": \"$(params.PROJECT_ID)\",
-        \"builtArtifacts\": [{
-          \"id\": \"$(params.IMAGE)\",
-          \"names\": [\"$(params.IMAGE)\"]
-        }]
+    \"parent\": \"projects/${PROJECT}\",
+    \"noteId\": \"build\",
+    \"note\": {
+      \"shortDescription\": \"BlanketOps build note\",
+      \"kind\": \"BUILD\",
+      \"build\": {\"builderVersion\": \"blanketops-v1\"}
+    }
+  }" \
+  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote \
+  || echo "Note may already exist, continuing..."
+
+echo "Publishing occurrence..."
+grpcurl $GRPC \
+  -d "{
+    \"parent\": \"projects/${PROJECT}\",
+    \"occurrence\": {
+      \"resource\": {\"uri\": \"${IMAGE}\"},
+      \"noteName\": \"projects/${PROJECT}/notes/build\",
+      \"kind\": \"BUILD\",
+      \"build\": {
+        \"provenance\": {
+          \"id\": \"$(context.taskRun.name)\",
+          \"projectId\": \"${PROJECT}\",
+          \"builtArtifacts\": [{
+            \"id\": \"${IMAGE}\",
+            \"names\": [\"${IMAGE}\"]
+          }]
+        }
       }
     }
-  }"
+  }" \
+  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence
+
 echo "Metadata published successfully"`,
 				},
 			},
