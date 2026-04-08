@@ -1,0 +1,30 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sonarqube-scanner
+spec:
+  params:
+  - description: SonarQube server URL
+    name: SONAR_HOST_URL
+    type: string
+  - description: SonarQube project key
+    name: SONAR_PROJECT_KEY
+    type: string
+  - default: sonarqube-token
+    description: Secret name containing the SonarQube token
+    name: SONAR_TOKEN_SECRET
+    type: string
+  steps:
+  - args:
+    - -Dsonar.host.url=$(params.SONAR_HOST_URL)
+    - -Dsonar.projectKey=$(params.SONAR_PROJECT_KEY)
+    - -Dsonar.login=$(SONAR_TOKEN)
+    computeResources: {}
+    env:
+    - name: SONAR_TOKEN
+      valueFrom:
+        secretKeyRef:
+          key: token
+          name: $(params.SONAR_TOKEN_SECRET)
+    image: sonarsource/sonar-scanner-cli:latest
+    name: sonar-scan

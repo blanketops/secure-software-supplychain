@@ -1,0 +1,77 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: grafeas-publish
+spec:
+  params:
+  - description: Fully qualified image reference
+    name: IMAGE
+    type: string
+  - description: Grafeas gRPC host:port
+    name: GRAFEAS_HOST
+    type: string
+  - description: Grafeas project ID
+    name: PROJECT_ID
+    type: string
+  steps:
+  - computeResources: {}
+    image: alpine:latest
+    name: publish
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "Installing tools..."
+      apk add --no-cache git 2>/dev/null
+      wget -qO /tmp/grpcurl.tar.gz \
+        https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz
+      tar -xzf /tmp/grpcurl.tar.gz -C /usr/local/bin grpcurl
+
+      echo "Fetching grafeas protos..."
+      git clone --quiet --depth=1 --filter=blob:none \
+        https://github.com/grafeas/grafeas.git /tmp/grafeas
+      git clone --quiet --depth=1 --filter=blob:none \
+        https://github.com/googleapis/googleapis.git /tmp/googleapis
+
+      HOST="$(params.GRAFEAS_HOST)"
+      PROJECT="$(params.PROJECT_ID)"
+      IMAGE="$(params.IMAGE)"
+      GRPC="-plaintext -import-path /tmp/grafeas -import-path /tmp/googleapis -proto proto/v1beta1/grafeas.proto"
+
+      echo "Creating note (idempotent)..."
+      grpcurl $GRPC \
+        -d "{
+          \"parent\": \"projects/${PROJECT}\",
+          \"noteId\": \"build\",
+          \"note\": {
+            \"shortDescription\": \"BlanketOps build note\",
+            \"kind\": \"BUILD\",
+            \"build\": {\"builderVersion\": \"blanketops-v1\"}
+          }
+        }" \
+        ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote \
+        || echo "Note may already exist, continuing..."
+
+      echo "Publishing occurrence..."
+      grpcurl $GRPC \
+        -d "{
+          \"parent\": \"projects/${PROJECT}\",
+          \"occurrence\": {
+            \"resource\": {\"uri\": \"${IMAGE}\"},
+            \"noteName\": \"projects/${PROJECT}/notes/build\",
+            \"kind\": \"BUILD\",
+            \"build\": {
+              \"provenance\": {
+                \"id\": \"$(context.taskRun.name)\",
+                \"projectId\": \"${PROJECT}\",
+                \"builtArtifacts\": [{
+                  \"id\": \"${IMAGE}\",
+                  \"names\": [\"${IMAGE}\"]
+                }]
+              }
+            }
+          }
+        }" \
+        ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence
+
+      echo "Metadata published successfully"

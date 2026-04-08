@@ -1,0 +1,28 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: tekton-chains-attest
+spec:
+  params:
+  - description: Image reference to attest
+    name: IMAGE
+    type: string
+  results:
+  - description: Image URL for Tekton Chains
+    name: IMAGE_URL
+    type: string
+  - description: Image digest for Tekton Chains attestation
+    name: IMAGE_DIGEST
+    type: string
+  steps:
+  - computeResources: {}
+    image: gcr.io/go-containerregistry/crane:latest
+    name: attest
+    script: |
+      #!/bin/sh
+      set -e
+      digest=$(crane digest $(params.IMAGE))
+      echo -n "$(params.IMAGE)" | tee $(results.IMAGE_URL.path)
+      echo -n "${digest}" | tee $(results.IMAGE_DIGEST.path)
+      echo "IMAGE_URL=$(params.IMAGE)"
+      echo "IMAGE_DIGEST=${digest}"

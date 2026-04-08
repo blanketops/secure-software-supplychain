@@ -1,0 +1,30 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cosign-sign
+spec:
+  params:
+  - description: Image reference to sign
+    name: IMAGE
+    type: string
+  - default: https://fulcio.sigstore.dev
+    description: Fulcio CA URL
+    name: FULCIO_URL
+    type: string
+  - default: https://rekor.sigstore.dev
+    description: Rekor transparency log URL
+    name: REKOR_URL
+    type: string
+  steps:
+  - args:
+    - sign
+    - --fulcio-url=$(params.FULCIO_URL)
+    - --rekor-url=$(params.REKOR_URL)
+    - --yes
+    - $(params.IMAGE)
+    computeResources: {}
+    env:
+    - name: COSIGN_EXPERIMENTAL
+      value: '1'
+    image: gcr.io/projectsigstore/cosign:v2.2.3
+    name: sign

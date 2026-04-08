@@ -13,7 +13,7 @@ import (
 
 const (
 	stepGitClone   = "git-clone"
-	stepBuildImage = "build-image"
+	stepBuildImage = "build-image-kaniko"
 	stepSonarQube  = "code-scan-sonarqube"
 	stepTrivy      = "vulnerability-scan-trivy"
 	stepAuthFulcio = "authentication-fulcio"
