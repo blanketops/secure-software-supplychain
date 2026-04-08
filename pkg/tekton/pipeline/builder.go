@@ -194,7 +194,7 @@ func buildImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
 		Name:     stepBuildImage,
 		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "build-image"},
+		TaskRef:  &tektonv1.TaskRef{Name: "kaniko"},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
 			{Name: "source", Workspace: workspaceShared},
 			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
