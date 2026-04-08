@@ -1,0 +1,7 @@
+resources:
+- buildpacks.yaml
+- cosignsign.yaml
+- grafeaspublish.yaml
+- sonarqubescanner.yaml
+- tektonchainattest.yaml
+- trivvyscanner.yaml
