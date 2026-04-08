@@ -13,13 +13,13 @@ import (
 
 const (
 	stepGitClone   = "git-clone"
-	stepKaniko     = "kaniko"
-	stepSonarQube  = "sonarqube"
-	stepTrivy      = "trivy"
-	stepAuthFulcio = "auth-fulcio"
-	stepSign       = "sign"
-	stepAttest     = "attest"
-	stepGrafeas    = "grafeas"
+	stepBuildImage = "build-image"
+	stepSonarQube  = "code-scan-sonarqube"
+	stepTrivy      = "vulnerability-scan-trivy"
+	stepAuthFulcio = "authentication-fulcio"
+	stepSign       = "sign-image-cosign"
+	stepAttest     = "attest-image-rekor-fulcio"
+	stepGrafeas    = "publish-metadata-grafeas"
 
 	workspaceShared       = "shared-data"
 	workspaceSSHCreds     = "ssh-creds"
@@ -127,8 +127,8 @@ func buildTaskList(
 	last := stepGitClone
 
 	// Step 1: build
-	tasks = append(tasks, kanikoTask(imageRef, last))
-	last = stepKaniko
+	tasks = append(tasks, buildImageTask(imageRef, last))
+	last = stepBuildImage
 
 	// Step 2: sonar
 	if sc.Spec.Steps.SonarQube != nil {
@@ -190,11 +190,11 @@ func gitCloneTask() tektonv1.PipelineTask {
 	}
 }
 
-func kanikoTask(imageRef, runAfter string) tektonv1.PipelineTask {
+func buildImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
-		Name:     stepKaniko,
+		Name:     stepBuildImage,
 		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "kaniko"},
+		TaskRef:  &tektonv1.TaskRef{Name: "build-image"},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
 			{Name: "source", Workspace: workspaceShared},
 			{Name: "dockerconfig", Workspace: workspaceDockerConfig},

@@ -45,4 +45,12 @@ resources:
   kind: ImageSignature
   path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: blanketops.dev
+  group: supplychain
+  kind: ImageBuildResult
+  path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
+  version: v1alpha1
 version: "3"

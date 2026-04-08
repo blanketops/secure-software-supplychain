@@ -20,7 +20,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-
 	// +kubebuilder:scaffold:imports
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"

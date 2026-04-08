@@ -6,4 +6,5 @@ resources:
 - supplychain_v1alpha1_signingrole.yaml
 - supplychain_v1alpha1_imagesignature.yaml
 
+- supplychain_v1alpha1_imagebuildresult.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
