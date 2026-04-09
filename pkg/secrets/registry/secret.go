@@ -41,58 +41,84 @@ func (r *RegistrySecretReconciler) Reconcile(
 	namespace := ib.Namespace
 	registryAnnotation := fmt.Sprintf("https://%s", sc.Spec.Image.Registry)
 
-	// -------------------------------------------------------------------------
-	// Desired ExternalSecret (UNSTRUCTURED)
-	// -------------------------------------------------------------------------
-	desired := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "external-secrets.io/v1",
-			"kind":       "ExternalSecret",
-			"metadata": map[string]any{
-				"name":      secretName,
-				"namespace": namespace,
-				"labels": map[string]any{
-					"blanketops.dev/managed":      "true",
-					"blanketops.dev/purpose":      "registry",
-					"blanketops.dev/supply-chain": sc.Name,
-					"blanketops.dev/image-build":  ib.Name,
-				},
-			},
-			"spec": map[string]any{
-				"refreshInterval": "0s",
-				"secretStoreRef": map[string]any{
-					"name": "blanketops-supply-chain-store",
-					"kind": "ClusterSecretStore",
-				},
-				"target": map[string]any{
-					"name": secretName,
-					"template": map[string]any{
-						// Opaque so Kubernetes accepts config.json as the key
-						// Kaniko reads /kaniko/.docker/config.json directly
-						"type": "Opaque",
-						"metadata": map[string]any{
-							"annotations": map[string]any{
-								"tekton.dev/docker-0": registryAnnotation,
-							},
-						},
-					},
-				},
-				"data": []any{
-					map[string]any{
-						// config.json mounts as /kaniko/.docker/config.json
-						"secretKey": "config.json",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/registry/config",
-						},
-					},
-				},
-			},
-		},
+	// 1. Kaniko secret (Opaque, config.json key)
+	if err := r.reconcileExternalSecret(ctx, sc, ib, kanikoSecretSpec{
+		name:               secretName,
+		namespace:          namespace,
+		registryAnnotation: registryAnnotation,
+	}); err != nil {
+		return fmt.Errorf("kaniko registry secret: %w", err)
 	}
 
-	// -------------------------------------------------------------------------
-	// Ownership (ImageBuild → ExternalSecret)
-	// -------------------------------------------------------------------------
+	// 2. Chains secret (dockerconfigjson, .dockerconfigjson key)
+	if err := r.reconcileExternalSecret(ctx, sc, ib, chainsSecretSpec{
+		name:               fmt.Sprintf("%s-chains", secretName),
+		namespace:          namespace,
+		registryAnnotation: registryAnnotation,
+	}); err != nil {
+		return fmt.Errorf("chains registry secret: %w", err)
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------------
+// Secret spec types
+// -------------------------------------------------------------------------
+
+type kanikoSecretSpec struct {
+	name               string
+	namespace          string
+	registryAnnotation string
+}
+
+func (s kanikoSecretSpec) toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured {
+	return newExternalSecret(externalSecretParams{
+		name:               s.name,
+		namespace:          s.namespace,
+		sc:                 sc,
+		ib:                 ib,
+		secretType:         "Opaque",
+		secretKey:          "config.json",
+		registryAnnotation: s.registryAnnotation,
+	})
+}
+
+type chainsSecretSpec struct {
+	name               string
+	namespace          string
+	registryAnnotation string
+}
+
+func (s chainsSecretSpec) toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured {
+	return newExternalSecret(externalSecretParams{
+		name:               s.name,
+		namespace:          s.namespace,
+		sc:                 sc,
+		ib:                 ib,
+		secretType:         "kubernetes.io/dockerconfigjson",
+		secretKey:          ".dockerconfigjson",
+		registryAnnotation: s.registryAnnotation,
+	})
+}
+
+// secretSpec is anything that can produce the desired ExternalSecret.
+type secretSpec interface {
+	toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured
+}
+
+// -------------------------------------------------------------------------
+// Shared reconcile logic (create-only)
+// -------------------------------------------------------------------------
+
+func (r *RegistrySecretReconciler) reconcileExternalSecret(
+	ctx context.Context,
+	sc *supplyv1alpha1.SupplyChain,
+	ib *supplyv1alpha1.ImageBuild,
+	spec secretSpec,
+) error {
+	desired := spec.toUnstructured(sc, ib)
+
 	if err := controllerutil.SetControllerReference(
 		ib,
 		desired,
@@ -101,19 +127,12 @@ func (r *RegistrySecretReconciler) Reconcile(
 		return err
 	}
 
-	// -------------------------------------------------------------------------
-	// Fetch existing (CREATE-ONLY semantics — existence is enough)
-	// -------------------------------------------------------------------------
 	var existing unstructured.Unstructured
 	existing.SetGroupVersionKind(desired.GroupVersionKind())
 
-	err := r.Client.Get(
-		ctx,
-		client.ObjectKeyFromObject(desired),
-		&existing,
-	)
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if err == nil {
-		return nil
+		return nil // already exists
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -123,8 +142,66 @@ func (r *RegistrySecretReconciler) Reconcile(
 		"Creating ExternalSecret for registry credentials",
 		"supply-chain", sc.Name,
 		"image-build", ib.Name,
-		"secret", secretName,
+		"secret", desired.GetName(),
 	)
-
 	return r.Client.Create(ctx, desired)
+}
+
+// -------------------------------------------------------------------------
+// ExternalSecret builder
+// -------------------------------------------------------------------------
+
+type externalSecretParams struct {
+	name               string
+	namespace          string
+	sc                 *supplyv1alpha1.SupplyChain
+	ib                 *supplyv1alpha1.ImageBuild
+	secretType         string // "Opaque" or "kubernetes.io/dockerconfigjson"
+	secretKey          string // "config.json" or ".dockerconfigjson"
+	registryAnnotation string
+}
+
+func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "external-secrets.io/v1",
+			"kind":       "ExternalSecret",
+			"metadata": map[string]any{
+				"name":      p.name,
+				"namespace": p.namespace,
+				"labels": map[string]any{
+					"blanketops.dev/managed":      "true",
+					"blanketops.dev/purpose":      "registry",
+					"blanketops.dev/supply-chain": p.sc.Name,
+					"blanketops.dev/image-build":  p.ib.Name,
+				},
+			},
+			"spec": map[string]any{
+				"refreshInterval": "0s",
+				"secretStoreRef": map[string]any{
+					"name": "blanketops-supply-chain-store",
+					"kind": "ClusterSecretStore",
+				},
+				"target": map[string]any{
+					"name": p.name,
+					"template": map[string]any{
+						"type": p.secretType,
+						"metadata": map[string]any{
+							"annotations": map[string]any{
+								"tekton.dev/docker-0": p.registryAnnotation,
+							},
+						},
+					},
+				},
+				"data": []any{
+					map[string]any{
+						"secretKey": p.secretKey,
+						"remoteRef": map[string]any{
+							"key": "/supplychain/registry/config",
+						},
+					},
+				},
+			},
+		},
+	}
 }

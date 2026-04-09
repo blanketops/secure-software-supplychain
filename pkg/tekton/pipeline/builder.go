@@ -13,10 +13,11 @@ import (
 
 const (
 	stepGitClone   = "git-clone"
-	stepBuildImage = "build-image-kaniko"
-	stepSonarQube  = "code-scan-sonarqube"
-	stepTrivy      = "vulnerability-scan-trivy"
 	stepAuthFulcio = "authentication-fulcio"
+	stepSonarQube  = "code-scan-sonarqube"
+	stepBuildImage = "build-image-buildah"
+	stepPushImage  = "push-image-docker"
+	stepTrivy      = "vulnerability-scan-trivy"
 	stepSign       = "sign-image-cosign"
 	stepAttest     = "attest-image-rekor-fulcio"
 	stepGrafeas    = "publish-metadata-grafeas"
@@ -56,7 +57,7 @@ func BuildPipelineRun(
 							},
 							Resources: corev1.VolumeResourceRequirements{
 								Requests: corev1.ResourceList{
-									corev1.ResourceStorage: resource.MustParse("1Gi"),
+									corev1.ResourceStorage: resource.MustParse("2Gi"),
 								},
 							},
 						},
@@ -87,6 +88,47 @@ func BuildPipelineRun(
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
 				Tasks: buildTaskList(sc, ib, imageRef),
+				// --- RESULTS MAPPING SECTION ---
+				// Aggregates individual Task results into PipelineRun status
+				// for the ImageBuildResult controller to consume.
+				Results: []tektonv1.PipelineResult{
+					// // 1. Git Provenance
+					// {
+					// 	Name:  "commit",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"},
+					// },
+					// {
+					// 	Name:  "committer-date",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"},
+					// },
+					// {
+					// 	Name:  "url",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.url)"},
+					// },
+					// // 2. Build Result
+					// {
+					// 	Name:  "IMAGE_DIGEST",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"},
+					// },
+					// {
+					// 	Name:  "IMAGE_URL",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"},
+					// },
+					// // 3. Security & Quality Gates
+					// {
+					// 	Name:  "TRIVY_SCAN_SUMMARY",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.SCAN_SUMMARY)"},
+					// },
+					// {
+					// 	Name:  "SONAR_GATE_STATUS",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"},
+					// },
+					// // 4. Identity & Metadata
+					// {
+					// 	Name:  "SIGNATURE_DIGEST",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSign + ".results.IMAGE_DIGEST)"},
+					// },
+				},
 			},
 			Params: tektonv1.Params{
 				{
@@ -122,40 +164,55 @@ func buildTaskList(
 ) []tektonv1.PipelineTask {
 	tasks := []tektonv1.PipelineTask{}
 
-	// Step 0: git clone
+	// Step 1: git-clone — fetch source
 	tasks = append(tasks, gitCloneTask())
 	last := stepGitClone
 
-	// Step 1: build
-	tasks = append(tasks, buildImageTask(imageRef, last))
-	last = stepBuildImage
+	// Step 2: auth-fulcio — obtain CA cert as init, before anything else
+	// Must be early so signing credentials are warm and ready
+	if sc.Spec.Steps.Sign {
+		tasks = append(tasks, authFulcioTask(sc, last))
+		last = stepAuthFulcio
+	}
 
-	// Step 2: sonar
+	// Step 3: sonarqube — scan source code quality before build
+	// Fail fast on code quality — no point building dirty code
 	if sc.Spec.Steps.SonarQube != nil {
 		tasks = append(tasks, sonarQubeTask(sc, last))
 		last = stepSonarQube
 	}
 
-	// Step 3: trivy
+	// Step 4: build image (Buildah) — source is clean, now build
+	tasks = append(tasks, buildImageTask(imageRef, last))
+	last = stepBuildImage
+
+	// Step 5: push image (Skopeo) — push to registry to get a real digest
+	tasks = append(tasks, pushImageTask(imageRef, last))
+	last = stepPushImage
+
+	// Step 6: trivy — scan the real registry image digest, not a local tar
+	// Scanning after push guarantees we're scanning what will actually run
 	if sc.Spec.Steps.Trivy {
-		tasks = append(tasks, trivyTask(imageRef, last))
+		tasks = append(tasks, trivyTask(last))
 		last = stepTrivy
 	}
 
-	// Step 4: auth-fulcio + sign
+	// Step 7: sign (Cosign + Fulcio) — image is clean, now sign it
+	// Must sign before attesting — you attest to a signed image
 	if sc.Spec.Steps.Sign {
-		tasks = append(tasks, authFulcioTask(sc, last))
-		tasks = append(tasks, signTask(sc, imageRef, stepAuthFulcio))
+		tasks = append(tasks, signTask(sc, imageRef, last))
 		last = stepSign
 	}
 
-	// Step 5: attest
+	// Step 8: attest (Rekor) — record attestation of the signed image
+	// Rekor logs the signature, not the raw image — sign must come first
 	if sc.Spec.Steps.Attest {
 		tasks = append(tasks, attestTask(imageRef, last))
 		last = stepAttest
 	}
 
-	// Step 6: grafeas
+	// Step 9: grafeas — publish full metadata report
+	// All gates passed, all attestations recorded — now publish
 	if sc.Spec.Steps.Grafeas != nil {
 		tasks = append(tasks, grafeasTask(sc, imageRef, last))
 	}
@@ -186,54 +243,6 @@ func gitCloneTask() tektonv1.PipelineTask {
 					StringVal: "$(params.git-revision)",
 				},
 			},
-		},
-	}
-}
-
-func buildImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
-	return tektonv1.PipelineTask{
-		Name:     stepBuildImage,
-		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "kaniko"},
-		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-			{Name: "source", Workspace: workspaceShared},
-			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
-		},
-		Params: tektonv1.Params{
-			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "DOCKERFILE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "Dockerfile"}},
-			{Name: "CONTEXT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "."}},
-		},
-	}
-}
-
-func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
-	return tektonv1.PipelineTask{
-		Name:     stepSonarQube,
-		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "sonarqube-scanner"},
-		Params: tektonv1.Params{
-			{Name: "SONAR_HOST_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ServerURL}},
-			{Name: "SONAR_PROJECT_KEY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ProjectKey}},
-			{Name: "SONAR_TOKEN_SECRET", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.TokenSecretRef}},
-		},
-	}
-}
-
-func trivyTask(imageRef, runAfter string) tektonv1.PipelineTask {
-	return tektonv1.PipelineTask{
-		Name:     stepTrivy,
-		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "trivy-scanner"},
-		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-			{Name: "manifest-dir", Workspace: workspaceShared},
-		},
-		Params: tektonv1.Params{
-			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "ARGS", Value: tektonv1.ParamValue{
-				Type:     tektonv1.ParamTypeArray,
-				ArrayVal: []string{"--exit-code", "1", "--severity", "HIGH,CRITICAL"},
-			}},
 		},
 	}
 }
@@ -300,6 +309,97 @@ echo "Fulcio reachable and ready"
 			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{
 				Type:      tektonv1.ParamTypeString,
 				StringVal: fulcio,
+			}},
+		},
+	}
+}
+
+func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
+	return tektonv1.PipelineTask{
+		Name:     stepSonarQube,
+		RunAfter: after(runAfter),
+		TaskRef:  &tektonv1.TaskRef{Name: "sonarqube-scanner"},
+		Params: tektonv1.Params{
+			{Name: "SONAR_HOST_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ServerURL}},
+			{Name: "SONAR_PROJECT_KEY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ProjectKey}},
+			{Name: "SONAR_TOKEN_SECRET", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.TokenSecretRef}},
+		},
+	}
+}
+
+func buildImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
+	return tektonv1.PipelineTask{
+		Name:     stepBuildImage,
+		RunAfter: after(runAfter),
+		TaskRef:  &tektonv1.TaskRef{Name: "buildah"},
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "source", Workspace: workspaceShared},
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
+		},
+		Params: tektonv1.Params{
+			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+			{Name: "DOCKERFILE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "./Dockerfile"}},
+			{Name: "CONTEXT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "."}},
+		},
+	}
+}
+
+func pushImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
+	return tektonv1.PipelineTask{
+		Name:     stepPushImage,
+		RunAfter: after(runAfter),
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "source", Workspace: workspaceShared},
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
+		},
+		TaskSpec: &tektonv1.EmbeddedTask{
+			TaskSpec: tektonv1.TaskSpec{
+				Params: []tektonv1.ParamSpec{
+					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+				},
+				Workspaces: []tektonv1.WorkspaceDeclaration{
+					{Name: "source"},
+					{Name: "dockerconfig"},
+				},
+				Steps: []tektonv1.Step{
+					{
+						Name:  "push",
+						Image: "quay.io/skopeo/stable:latest",
+						Env: []corev1.EnvVar{
+							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+						},
+						Script: `#!/bin/sh
+set -e
+skopeo copy \
+  --dest-authfile /workspace/dockerconfig/config.json \
+  docker-archive:/workspace/source/image.tar \
+  docker://$(params.IMAGE)
+echo "Pushed $(params.IMAGE)"
+`,
+					},
+				},
+			},
+		},
+		Params: tektonv1.Params{
+			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+		},
+	}
+}
+
+func trivyTask(runAfter string) tektonv1.PipelineTask {
+	return tektonv1.PipelineTask{
+		Name:     stepTrivy,
+		RunAfter: after(runAfter),
+		TaskRef:  &tektonv1.TaskRef{Name: "trivy-scanner"},
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "manifest-dir", Workspace: workspaceShared},
+		},
+		Params: tektonv1.Params{
+			// Scan the registry image by digest — image is already pushed
+			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(params.image-ref)"}},
+			{Name: "ARGS", Value: tektonv1.ParamValue{
+				Type:     tektonv1.ParamTypeArray,
+				ArrayVal: []string{"image", "--exit-code", "0", "--severity", "HIGH,CRITICAL"},
 			}},
 		},
 	}
@@ -409,17 +509,21 @@ func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 				Steps: []tektonv1.Step{
 					{
 						Name:  "attest",
-						Image: "alpine/crane:latest",
-						Env: []corev1.EnvVar{
-							{Name: "IMAGE", Value: imageRef},
-							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
-						},
+						Image: "quay.io/skopeo/stable:latest",
 						Script: `#!/bin/sh
 set -e
-digest=$(crane digest ${IMAGE})
-printf '%s' "${IMAGE}" > $(results.IMAGE_URL.path)
+digest=$(skopeo inspect \
+  --authfile /workspace/dockerconfig/config.json \
+  docker://$(params.IMAGE) \
+  | grep '"Digest"' \
+  | awk -F'"' '{print $4}')
+if [ -z "$digest" ]; then
+  echo "ERROR: could not resolve digest for $(params.IMAGE)"
+  exit 1
+fi
+printf '%s' "$(params.IMAGE)" > $(results.IMAGE_URL.path)
 printf '%s' "${digest}" > $(results.IMAGE_DIGEST.path)
-echo "IMAGE_URL=${IMAGE}"
+echo "IMAGE_URL=$(params.IMAGE)"
 echo "IMAGE_DIGEST=${digest}"
 `,
 					},

@@ -1,5 +1,5 @@
 resources:
-- buildpacks.yaml
+- buildah.yaml
 - cosignsign.yaml
 - grafeaspublish.yaml
 - sonarqubescanner.yaml

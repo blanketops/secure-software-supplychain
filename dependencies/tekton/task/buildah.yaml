@@ -1,0 +1,78 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Image Build
+    tekton.dev/displayName: Build and push container image using Buildah
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64
+    tekton.dev/tags: image-build
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: buildah
+spec:
+  description: Builds a container image from a Dockerfile using Buildah and pushes it to a registry. Stores IMAGE_URL and IMAGE_DIGEST results for Tekton Chains attestation.
+  params:
+  - description: Name (reference) of the image to build and push.
+    name: IMAGE
+    type: string
+  - default: ./Dockerfile
+    description: Path to the Dockerfile to build.
+    name: DOCKERFILE
+    type: string
+  - default: .
+    description: The build context directory.
+    name: CONTEXT
+    type: string
+  - default: 'true'
+    description: Verify TLS on the registry endpoint.
+    name: TLSVERIFY
+    type: string
+  - default: quay.io/buildah/stable:v1.35.0
+    description: Buildah image to use.
+    name: BUILDER_IMAGE
+    type: string
+  results:
+  - description: Digest of the image just built.
+    name: IMAGE_DIGEST
+    type: string
+  - description: URL of the image just built.
+    name: IMAGE_URL
+    type: string
+  steps:
+  - name: build
+    image: $(params.BUILDER_IMAGE)
+    workingDir: $(workspaces.source.path)
+    env:
+    - name: DOCKER_CONFIG
+      value: $(workspaces.dockerconfig.path)
+    script: |
+      #!/usr/bin/env bash
+      set -e
+      mkdir -p /etc/containers
+      echo 'unqualified-search-registries = ["docker.io"]' > /etc/containers/registries.conf
+
+      buildah --storage-driver=vfs bud \
+        --file=$(params.DOCKERFILE) \
+        --tag=$(params.IMAGE) \
+        $(params.CONTEXT)
+
+      # Save to docker-archive tar — no push yet.
+      # Only clean images (passing all chain checks) will be pushed by a later step.
+      # --digestfile writes the manifest digest of the tar, not the base image digest.
+      buildah --storage-driver=vfs push \
+        --digestfile "$(results.IMAGE_DIGEST.path)" \
+        $(params.IMAGE) \
+        docker-archive:$(workspaces.source.path)/image.tar:$(params.IMAGE)
+
+      printf '%s' "$(params.IMAGE)" > "$(results.IMAGE_URL.path)"
+    securityContext:
+      capabilities:
+        add:
+        - SETFCAP
+  workspaces:
+  - description: Holds the source and Dockerfile.
+    name: source
+  - description: Docker config.json for registry authentication.
+    name: dockerconfig
+    optional: true

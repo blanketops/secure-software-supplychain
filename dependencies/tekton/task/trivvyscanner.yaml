@@ -26,6 +26,10 @@ spec:
   - description: Image or Path to be scanned by trivy.
     name: IMAGE_PATH
     type: string
+  results:
+  - description: Scan result summary (PASS if no HIGH/CRITICAL vulns found, FAIL otherwise).
+    name: SCAN_SUMMARY
+    type: string
   steps:
   - args:
     - $(params.ARGS)
@@ -34,10 +38,17 @@ spec:
     name: trivy-scan
     script: |
       #!/usr/bin/env sh
-        cmd="trivy $* $(params.IMAGE_PATH)"
-        echo "Running trivy task with command below"
-        echo "$cmd"
-        eval "$cmd"
+      cmd="trivy $* $(params.IMAGE_PATH)"
+      echo "Running trivy task with command below"
+      echo "$cmd"
+      exit_code=0
+      eval "$cmd" || exit_code=$?
+      if [ $exit_code -eq 0 ]; then
+        printf 'PASS' > $(results.SCAN_SUMMARY.path)
+      else
+        printf 'FAIL' > $(results.SCAN_SUMMARY.path)
+      fi
+      exit $exit_code
 
     workingDir: $(workspaces.manifest-dir.path)
   workspaces:

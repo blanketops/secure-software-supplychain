@@ -14,6 +14,10 @@ spec:
     description: Secret name containing the SonarQube token
     name: SONAR_TOKEN_SECRET
     type: string
+  results:
+  - description: Quality gate status returned by SonarQube API (OK or ERROR).
+    name: GATE_STATUS
+    type: string
   steps:
   - args:
     - -Dsonar.host.url=$(params.SONAR_HOST_URL)
@@ -28,3 +32,20 @@ spec:
           name: $(params.SONAR_TOKEN_SECRET)
     image: sonarsource/sonar-scanner-cli:latest
     name: sonar-scan
+  - name: check-quality-gate
+    image: curlimages/curl:latest
+    env:
+    - name: SONAR_TOKEN
+      valueFrom:
+        secretKeyRef:
+          key: token
+          name: $(params.SONAR_TOKEN_SECRET)
+    script: |
+      #!/bin/sh
+      set -e
+      status=$(curl -sf -u "${SONAR_TOKEN}:" \
+        "$(params.SONAR_HOST_URL)/api/qualitygates/project_status?projectKey=$(params.SONAR_PROJECT_KEY)" \
+        | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+      printf '%s' "${status}" > $(results.GATE_STATUS.path)
+      echo "Quality gate: ${status}"
+      [ "${status}" = "OK" ] || exit 1
