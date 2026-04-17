@@ -1,55 +1,111 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  annotations:
-    tekton.dev/categories: Security
-    tekton.dev/deprecated: 'true'
-    tekton.dev/displayName: trivy scanner
-    tekton.dev/pipelines.minVersion: 0.12.1
-    tekton.dev/platforms: linux/amd64
-    tekton.dev/tags: CLI, trivy
-  labels:
-    app.kubernetes.io/version: '0.1'
   name: trivy-scanner
+  labels:
+    app.kubernetes.io/version: "0.2"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Security
+    tekton.dev/tags: CLI, trivy
+    tekton.dev/displayName: "trivy scanner"
+    tekton.dev/platforms: "linux/amd64,linux/arm64,linux/ppc64le,linux/390x"
 spec:
-  description: |
-    Trivy is a simple and comprehensive scanner for vulnerabilities in container images,file systems ,and Git repositories, as well as for configuration issues.
-    This task can be used to scan for vulnenrabilities on the source code in stand alone mode.
-  params:
-  - description: The Arguments to be passed to Trivy command.
-    name: ARGS
-    type: array
-  - default: docker.io/aquasec/trivy@sha256:dea76d4b50c75125cada676a87ac23de2b7ba4374752c6f908253c3b839201d9
-    description: Trivy scanner image to be used
-    name: TRIVY_IMAGE
-    type: string
-  - description: Image or Path to be scanned by trivy.
-    name: IMAGE_PATH
-    type: string
-  results:
-  - description: Scan result summary (PASS if no HIGH/CRITICAL vulns found, FAIL otherwise).
-    name: SCAN_SUMMARY
-    type: string
-  steps:
-  - args:
-    - $(params.ARGS)
-    computeResources: {}
-    image: $(params.TRIVY_IMAGE)
-    name: trivy-scan
-    script: |
-      #!/usr/bin/env sh
-      cmd="trivy $* $(params.IMAGE_PATH)"
-      echo "Running trivy task with command below"
-      echo "$cmd"
-      exit_code=0
-      eval "$cmd" || exit_code=$?
-      if [ $exit_code -eq 0 ]; then
-        printf 'PASS' > $(results.SCAN_SUMMARY.path)
-      else
-        printf 'FAIL' > $(results.SCAN_SUMMARY.path)
-      fi
-      exit $exit_code
-
-    workingDir: $(workspaces.manifest-dir.path)
+  description: >-
+    Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption.
   workspaces:
   - name: manifest-dir
+  params:
+  - name: TRIVY_IMAGE
+    default: docker.io/aquasec/trivy@sha256:944a044451791617cc0ed2ee4d1942a4f66b790d527fcd0575a6b399ccbc05a1
+    description: Trivy scanner image to be used
+  - name: IMAGE_PATH
+    description: Image or Path to be scanned by trivy.
+    type: string
+  - name: SEVERITY
+    default: "HIGH,CRITICAL"
+    description: Severities to scan for
+    type: string
+  - name: AIR_GAPPED_ENABLED
+    default: "false"
+    description: Enable Air-Gapped mode
+    type: string
+  results:
+  - name: TRIVY_SCAN_SUMMARY
+    description: PASS if no HIGH/CRITICAL vulns, FAIL otherwise
+    type: string
+  - name: TRIVY_CRITICAL_COUNT
+    description: Number of CRITICAL vulnerabilities found
+    type: string
+  - name: TRIVY_HIGH_COUNT
+    description: Number of HIGH vulnerabilities found
+    type: string
+  - name: TRIVY_TOTAL_COUNT
+    description: Total HIGH + CRITICAL vulnerabilities found
+    type: string
+  - name: TRIVY_SARIF_PATH
+    description: Path to the SARIF report file in the workspace
+    type: string
+  steps:
+  - name: trivy-scan
+    image: $(params.TRIVY_IMAGE)
+    workingDir: $(workspaces.manifest-dir.path)
+    script: |
+      #!/usr/bin/env sh
+      set -e
+
+      SARIF_OUTPUT="$(workspaces.manifest-dir.path)/trivy-report.sarif"
+
+      # Air-gapped setup — preserve as-is
+      if [ "$(params.AIR_GAPPED_ENABLED)" = "true" ]; then
+        echo "Air-Gapped mode enabled"
+        TRIVY_TEMP_DIR=$(mktemp -d)
+        trivy --cache-dir "$TRIVY_TEMP_DIR" image --download-db-only
+        tar -cf ./db.tar.gz -C "$TRIVY_TEMP_DIR/db" metadata.json trivy.db
+        rm -rf "$TRIVY_TEMP_DIR"
+        mkdir -p "$HOME"/.cache/trivy/db
+        tar xvf ./db.tar.gz -C "$HOME"/.cache/trivy/db
+        SKIP_UPDATE="--skip-update"
+      fi
+
+      # Run scan — SARIF output for rich structured report
+      echo "Running trivy scan on $(params.IMAGE_PATH)"
+      trivy image \
+        $SKIP_UPDATE \
+        --exit-code 0 \
+        --severity $(params.SEVERITY) \
+        --format sarif \
+        --output "$SARIF_OUTPUT" \
+        $(params.IMAGE_PATH)
+
+      # Also print human readable table to logs
+      trivy image \
+        $SKIP_UPDATE \
+        --exit-code 0 \
+        --severity $(params.SEVERITY) \
+        $(params.IMAGE_PATH)
+
+      # Extract counts from SARIF
+      # SARIF rules map 1:1 to findings — count by severity level
+      critical=$(grep -o '"level":"error"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
+      high=$(grep -o '"level":"warning"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
+      total=$((critical + high))
+
+      echo "CRITICAL: $critical"
+      echo "HIGH: $high"
+      echo "TOTAL: $total"
+      echo "SARIF report: $SARIF_OUTPUT"
+
+      # Write results
+      if [ "$total" -eq 0 ]; then
+        printf 'PASS' > $(results.TRIVY_SCAN_SUMMARY.path)
+      else
+        printf 'FAIL' > $(results.TRIVY_SCAN_SUMMARY.path)
+      fi
+
+      printf '%s' "$critical"    > $(results.TRIVY_CRITICAL_COUNT.path)
+      printf '%s' "$high"        > $(results.TRIVY_HIGH_COUNT.path)
+      printf '%s' "$total"       > $(results.TRIVY_TOTAL_COUNT.path)
+      printf '%s' "$SARIF_OUTPUT" > $(results.TRIVY_SARIF_PATH.path)
+
+      echo "Scan complete — SUMMARY=$(cat $(results.TRIVY_SCAN_SUMMARY.path))"

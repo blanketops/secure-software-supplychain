@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: blanketops-environments-supply-chain
     app.kubernetes.io/managed-by: kustomize
-  name: imagebuild-sample
+  name: for-kaniko-app
 spec:
   supplyChainRef:
     name: for-kaniko-app

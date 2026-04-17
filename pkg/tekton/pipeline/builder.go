@@ -92,7 +92,7 @@ func BuildPipelineRun(
 				// Aggregates individual Task results into PipelineRun status
 				// for the ImageBuildResult controller to consume.
 				Results: []tektonv1.PipelineResult{
-					// // 1. Git Provenance
+					// 1. Git Provenance
 					// {
 					// 	Name:  "commit",
 					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"},
@@ -105,19 +105,19 @@ func BuildPipelineRun(
 					// 	Name:  "url",
 					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.url)"},
 					// },
-					// // 2. Build Result
-					// {
-					// 	Name:  "IMAGE_DIGEST",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"},
-					// },
-					// {
-					// 	Name:  "IMAGE_URL",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"},
-					// },
-					// // 3. Security & Quality Gates
+					// 2. Build Result
+					{
+						Name:  "IMAGE_DIGEST",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"},
+					},
+					{
+						Name:  "IMAGE_URL",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"},
+					},
+					// 3. Security & Quality Gates
 					// {
 					// 	Name:  "TRIVY_SCAN_SUMMARY",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.SCAN_SUMMARY)"},
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"},
 					// },
 					// {
 					// 	Name:  "SONAR_GATE_STATUS",
