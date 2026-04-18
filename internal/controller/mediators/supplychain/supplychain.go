@@ -1,3 +1,17 @@
+/*
+Copyright 2026.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package supplychain
 
 import (
@@ -6,11 +20,11 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
-	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,30 +33,35 @@ import (
 	git "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/git"
 	registry "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/registry"
 	sonarqube "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/sonarqube"
+	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/signing"
 )
 
 type Mediator struct {
-	Client                           client.Client
-	Scheme                           *runtime.Scheme
-	Log                              logr.Logger
-	Recorder                         record.EventRecorder
-	GitSSHExternalSecretReconciler   *git.GitSSHSecretReconciler
-	RegistryExternalSecretReconciler *registry.RegistrySecretReconciler
+	Client    client.Client
+	Clientset kubernetes.Interface
+	Scheme    *runtime.Scheme
+	Log       logr.Logger
+	Recorder  record.EventRecorder
 
+	GitSSHExternalSecretReconciler    *git.GitSSHSecretReconciler
+	RegistryExternalSecretReconciler  *registry.RegistrySecretReconciler
 	SonarQubeExternalSecretReconciler *sonarqube.SonarQubeSecretReconciler
 }
 
 func New(
 	c client.Client,
+	clientset kubernetes.Interface,
 	scheme *runtime.Scheme,
 	log logr.Logger,
 	recorder record.EventRecorder,
 ) *Mediator {
 	return &Mediator{
-		Client:                            c,
-		Scheme:                            scheme,
-		Log:                               log,
-		Recorder:                          recorder,
+		Client:    c,
+		Clientset: clientset,
+		Scheme:    scheme,
+		Log:       log,
+		Recorder:  recorder,
+
 		GitSSHExternalSecretReconciler:    git.NewGitSSHSecretReconciler(c, log),
 		RegistryExternalSecretReconciler:  registry.NewRegistrySecretReconciler(c, log),
 		SonarQubeExternalSecretReconciler: sonarqube.NewSonarQubeSecretReconciler(c, log),
@@ -54,7 +73,6 @@ func (m *Mediator) EnsurePrerequisites(
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
 ) (bool, error) {
-
 	log := m.Log.WithValues(
 		"supply-chain", sc.Name,
 		"image-build", ib.Name,
@@ -66,7 +84,6 @@ func (m *Mediator) EnsurePrerequisites(
 	// -------------------------------------------------
 	// 1. Intent: ExternalSecrets
 	// -------------------------------------------------
-
 	log.Info("reconciling git SSH ExternalSecret")
 	if err := m.GitSSHExternalSecretReconciler.Reconcile(ctx, sc, ib); err != nil {
 		log.Error(err, "git SSH secret reconcile failed")
@@ -91,20 +108,18 @@ func (m *Mediator) EnsurePrerequisites(
 	// -------------------------------------------------
 	// 2. Convergence: wait for secrets
 	// -------------------------------------------------
-
 	gitSecretName := sc.Spec.Image.CloneSecretRef
 	registrySecretName := sc.Spec.Image.RegistrySecretRef
 	sonarqubeSecretName := sc.Spec.Steps.SonarQube.TokenSecretRef
+
 	if !m.secretExists(ctx, gitSecretName, ib.Namespace) {
 		log.Info("git SSH secret not ready yet", "secret", gitSecretName)
 		return false, nil
 	}
-
 	if !m.secretExists(ctx, registrySecretName, ib.Namespace) {
 		log.Info("registry secret not ready yet", "secret", registrySecretName)
 		return false, nil
 	}
-
 	if !m.secretExists(ctx, sonarqubeSecretName, ib.Namespace) {
 		log.Info("SonarQube secret not ready yet", "secret", sonarqubeSecretName)
 		return false, nil
@@ -115,7 +130,6 @@ func (m *Mediator) EnsurePrerequisites(
 	// -------------------------------------------------
 	// 3. Identity: ensure ServiceAccount
 	// -------------------------------------------------
-
 	if err := m.ensureServiceAccount(ctx, sc, ib); err != nil {
 		log.Error(err, "failed to reconcile ServiceAccount")
 		m.recordWarning(ib, "ServiceAccountFailed", err)
@@ -123,63 +137,61 @@ func (m *Mediator) EnsurePrerequisites(
 	}
 
 	// -------------------------------------------------
-	// 4. Authorization: SubjectAccessReview
-	// -------------------------------------------------
-	if err := m.verifySigningPermission(ctx, sc, ib); err != nil {
-		log.Error(err, "signing permission denied")
-		m.recordWarning(ib, "SigningPermissionDenied", err)
-		return false, err
-	}
-
-	// -------------------------------------------------
 	// READY
 	// -------------------------------------------------
-
 	log.Info("mediator ready — prerequisites converged")
-
 	return true, nil
 }
 
-func (m *Mediator) verifySigningPermission(
+// EstablishSigningContext drives the authorization + signing flow.
+// Called by the controller AFTER EnsurePrerequisites returns true.
+//
+// Same pattern as the secret reconcilers — a separate block that the
+// controller calls in sequence. Prerequisites ensure cluster state,
+// signing establishes cryptographic identity for this run.
+func (m *Mediator) EstablishSigningContext(
 	ctx context.Context,
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
-) error {
+) (*signing.RunSigningContext, error) {
+	log := m.Log.WithValues(
+		"supply-chain", sc.Name,
+		"image-build", ib.Name,
+		"namespace", ib.Namespace,
+	)
+
 	saName := sc.Spec.ServiceAccountName
 	if saName == "" {
 		saName = "default"
 	}
 
-	sar := &authorizationv1.SubjectAccessReview{
-		Spec: authorizationv1.SubjectAccessReviewSpec{
-			User: fmt.Sprintf("system:serviceaccount:%s:%s", ib.Namespace, saName),
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: ib.Namespace,
-				Verb:      "create",
-				Group:     "supplychain.blanketops.dev",
-				Resource:  "imagesignatures",
-			},
-		},
+	fulcioURL := "https://fulcio.sigstore.dev"
+	if sc.Spec.Signing != nil && sc.Spec.Signing.FulcioURL != "" {
+		fulcioURL = sc.Spec.Signing.FulcioURL
 	}
 
-	if err := m.Client.Create(ctx, sar); err != nil {
-		return fmt.Errorf("SubjectAccessReview failed: %w", err)
-	}
-
-	if !sar.Status.Allowed {
-		return fmt.Errorf(
-			"SA %s is not permitted to sign images: %s",
-			saName,
-			sar.Status.Reason,
-		)
-	}
-
-	m.Log.Info("signing permission granted",
+	log.Info("establishing signing context",
 		"serviceAccount", saName,
-		"namespace", ib.Namespace,
+		"fulcioURL", fulcioURL,
 	)
 
-	return nil
+	sigCtx, err := signing.EstablishSigningContext(
+		ctx, m.Client, m.Clientset,
+		fulcioURL, saName, ib.Namespace,
+	)
+	if err != nil {
+		log.Error(err, "signing context failed")
+		m.recordWarning(ib, "SigningContextFailed", err)
+		return nil, err
+	}
+
+	log.Info("signing context established",
+		"principal", sigCtx.Proof.Principal,
+		"allowed", sigCtx.Proof.Allowed,
+		"certExpiry", sigCtx.Cert.ExpiresAt,
+	)
+
+	return sigCtx, nil
 }
 
 func (m *Mediator) ensureServiceAccount(
@@ -187,7 +199,6 @@ func (m *Mediator) ensureServiceAccount(
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
 ) error {
-
 	name := sc.Spec.ServiceAccountName
 	if name == "" {
 		name = "default"
@@ -215,12 +226,10 @@ func (m *Mediator) ensureServiceAccount(
 
 	var existing corev1.ServiceAccount
 	err := m.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-
 	if apierrors.IsNotFound(err) {
 		m.Log.Info("creating ServiceAccount", "name", name)
 		return m.Client.Create(ctx, desired)
 	}
-
 	if err != nil {
 		return err
 	}

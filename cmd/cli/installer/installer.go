@@ -69,6 +69,14 @@ var installOrder = []step{
 		Paths: []string{"dependencies/tekton/pipelines"},
 	},
 	{
+		Name:  "Fulcio",
+		Paths: []string{"dependencies/sigstore/fulcio"},
+	},
+	{
+		Name:  "Rekor",
+		Paths: []string{"dependencies/sigstore/rekor"},
+	},
+	{
 		Name:  "Tekton Chains",
 		Paths: []string{"dependencies/tekton/chains"},
 	},
@@ -100,9 +108,14 @@ var statusChecks = []struct {
 	Label      string
 }{
 	{Namespace: "tekton-pipelines", Deployment: "tekton-pipelines-controller", Label: "Tekton Pipelines"},
+	{Namespace: "tekton-pipelines", Deployment: "tekton-pipelines-webhook", Label: "Tekton Webhook"},
+	{Namespace: "fulcio-system", Deployment: "fulcio-server", Label: "Fulcio"},
+	{Namespace: "rekor-system", Deployment: "rekor-server", Label: "Rekor"},
 	{Namespace: "tekton-chains", Deployment: "tekton-chains-controller", Label: "Tekton Chains"},
+	{Namespace: "tekton-pipelines", Deployment: "tekton-dashboard", Label: "Tekton Dashboard"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},
+	{Namespace: "default", Deployment: "grafeas-server", Label: "Grafeas"},
 }
 
 // Installer applies embedded supply chain manifests to a Kubernetes cluster.
@@ -148,7 +161,9 @@ func New(kubeconfig string, dryRun bool) (*Installer, error) {
 }
 
 // Install applies all supply chain dependencies in order.
+// Install applies all supply chain dependencies in order.
 func (i *Installer) Install(ctx context.Context) error {
+	fmt.Println()
 	fmt.Println("🔧 Installing BlanketOps Supply Chain dependencies...")
 	fmt.Println()
 
@@ -162,25 +177,44 @@ func (i *Installer) Install(ctx context.Context) error {
 			}
 		}
 
+		sp := newSpinner(fmt.Sprintf("Applying %s...", s.Name))
+		if !i.dryRun {
+			sp.start()
+		}
+
+		var applyErr error
 		for _, dir := range s.Paths {
 			if err := i.applyDirectory(ctx, dir); err != nil {
-				return fmt.Errorf("  ✗ %s failed: %w", s.Name, err)
+				applyErr = fmt.Errorf("%s failed: %w", s.Name, err)
+				break
 			}
+		}
+
+		if applyErr != nil {
+			if !i.dryRun {
+				sp.fail(applyErr.Error())
+			}
+			return applyErr
+		}
+
+		if !i.dryRun {
+			sp.succeed(fmt.Sprintf("%s applied", s.Name))
+		} else {
+			fmt.Printf("  ✓ %s applied (dry-run)\n", s.Name)
 		}
 
 		// Wait briefly between major components to let CRDs register.
 		if s.Name == "Tekton Pipelines" && !i.dryRun {
-			fmt.Println("  ⏳ Waiting for Tekton CRDs to register...")
+			waitSp := newSpinner("Waiting for Tekton CRDs to register...")
+			waitSp.start()
 			time.Sleep(10 * time.Second)
 
-			// Refresh the REST mapper after Pipelines CRDs are installed
-			// so that subsequent steps (Chains, Tasks) can resolve Tekton types.
 			if err := i.refreshMapper(); err != nil {
-				return fmt.Errorf("  ✗ failed to refresh API discovery: %w", err)
+				waitSp.fail("failed to refresh API discovery")
+				return fmt.Errorf("failed to refresh API discovery: %w", err)
 			}
+			waitSp.succeed("Tekton CRDs registered")
 		}
-
-		fmt.Printf("  ✓ %s applied\n", s.Name)
 	}
 
 	fmt.Println()

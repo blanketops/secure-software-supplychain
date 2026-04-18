@@ -1,3 +1,17 @@
+/*
+Copyright 2026.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package controller
 
 import (
@@ -10,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -22,8 +37,9 @@ import (
 
 type ImageBuildReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Mediator *supplychain.Mediator
+	Scheme    *runtime.Scheme
+	Clientset kubernetes.Interface
+	Mediator  *supplychain.Mediator
 }
 
 func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -55,14 +71,12 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Name:      ib.Spec.SupplyChainRef.Name,
 		Namespace: ib.Namespace,
 	}, &sc); err != nil {
-
 		if apierrors.IsNotFound(err) {
 			logger.Info("SupplyChain not found yet, waiting",
 				"supplyChain", ib.Spec.SupplyChainRef.Name,
 			)
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-
 		logger.Error(err, "failed to fetch SupplyChain")
 		return ctrl.Result{}, err
 	}
@@ -75,7 +89,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// ---------------------------------------------------------------------
-	// 2. Reconcile PipelineRun (includes mediator gating)
+	// 2. Reconcile PipelineRun (includes mediator gating + signing)
 	// ---------------------------------------------------------------------
 	pr, result, err := r.reconcilePipelineRun(ctx, &ib, &sc)
 	if err != nil {
@@ -83,7 +97,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.setFailed(ctx, &ib, err)
 	}
 
-	// If we are waiting (secrets, etc.)
+	// If we are waiting (secrets, signing, etc.)
 	if result != nil {
 		return *result, nil
 	}
@@ -113,8 +127,8 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	ib *supplychainv1alpha1.ImageBuild,
 	sc *supplychainv1alpha1.SupplyChain,
 ) (*tektonv1.PipelineRun, *ctrl.Result, error) {
-
 	logger := log.FromContext(ctx)
+
 	prName := ib.Name + "-run"
 
 	// ---------------------------------------------------------------------
@@ -130,17 +144,29 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	}
 
 	// ---------------------------------------------------------------------
-	// Mediator gating (secrets readiness)
+	// Mediator gating — prerequisites (secrets, SA)
 	// ---------------------------------------------------------------------
 	ready, err := r.Mediator.EnsurePrerequisites(ctx, sc, ib)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	if !ready {
 		logger.Info("waiting for prerequisites (secrets)")
 		return nil, &ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+
+	// ---------------------------------------------------------------------
+	// Mediator gating — signing context (SAR → Token → Fulcio)
+	// ---------------------------------------------------------------------
+	sigCtx, err := r.Mediator.EstablishSigningContext(ctx, sc, ib)
+	if err != nil {
+		return nil, nil, fmt.Errorf("signing context: %w", err)
+	}
+
+	logger.Info("signing context ready",
+		"principal", sigCtx.Proof.Principal,
+		"certExpiry", sigCtx.Cert.ExpiresAt,
+	)
 
 	// ---------------------------------------------------------------------
 	// Build PipelineRun
@@ -156,7 +182,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 		imageTag,
 	)
 
-	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef)
+	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef, sigCtx)
 
 	if err := controllerutil.SetControllerReference(ib, pr, r.Scheme); err != nil {
 		return nil, nil, err
@@ -214,7 +240,6 @@ func (r *ImageBuildReconciler) syncStatus(
 			Phase: string(child.DisplayName),
 		})
 	}
-
 	if len(steps) > 0 {
 		ib.Status.Steps = steps
 	}
@@ -236,10 +261,18 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := ctrl.Log.WithName("controllers").WithName("ImageBuild")
 	recorder := mgr.GetEventRecorderFor("imagebuild-controller")
 
-	// Mediator owns all infrastructure prerequisites — secrets wired here,
-	// not on the controller struct directly.
+	// Build the kubernetes.Interface clientset from the manager's rest.Config.
+	// Needed by the mediator for TokenRequest API calls.
+	config := mgr.GetConfig()
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
+	}
+
+	r.Clientset = clientset
 	r.Mediator = supplychain.New(
 		mgr.GetClient(),
+		clientset,
 		mgr.GetScheme(),
 		log.WithName("mediator"),
 		recorder,

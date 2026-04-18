@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/signing"
 )
 
 const (
@@ -32,6 +33,8 @@ func BuildPipelineRun(
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
 	imageRef string,
+	sigCtx *signing.RunSigningContext,
+
 ) *tektonv1.PipelineRun {
 	sa := sc.Spec.ServiceAccountName
 	if sa == "" {
