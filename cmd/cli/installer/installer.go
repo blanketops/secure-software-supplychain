@@ -18,8 +18,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +47,18 @@ import (
 	manifests "github.com/ntlaletsi70/blanketops-environments-supply-chain"
 )
 
+const (
+	resultsTLSSecretName = "tekton-results-tls"
+	resultsTLSNamespace  = "tekton-pipelines"
+)
+
 // step represents a named installation phase with a set of manifest paths.
+// PreHook runs before applying manifests — used for steps that need
+// resources created programmatically (e.g. TLS certs).
 type step struct {
-	Name  string
-	Paths []string
+	Name    string
+	Paths   []string
+	PreHook func(ctx context.Context, i *Installer) error
 }
 
 // installOrder defines the sequence in which dependencies are applied.
@@ -66,6 +81,13 @@ var installOrder = []step{
 		Paths: []string{"dependencies/tekton/task"},
 	},
 	{
+		Name:  "Tekton Results",
+		Paths: []string{"dependencies/tekton/results"},
+		PreHook: func(ctx context.Context, i *Installer) error {
+			return i.ensureResultsTLS(ctx)
+		},
+	},
+	{
 		Name:  "Grafeas",
 		Paths: []string{"dependencies/grafeas"},
 	},
@@ -79,6 +101,8 @@ var statusChecks = []struct {
 }{
 	{Namespace: "tekton-pipelines", Deployment: "tekton-pipelines-controller", Label: "Tekton Pipelines"},
 	{Namespace: "tekton-chains", Deployment: "tekton-chains-controller", Label: "Tekton Chains"},
+	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
+	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},
 }
 
 // Installer applies embedded supply chain manifests to a Kubernetes cluster.
@@ -131,6 +155,13 @@ func (i *Installer) Install(ctx context.Context) error {
 	for idx, s := range installOrder {
 		fmt.Printf("[%d/%d] %s\n", idx+1, len(installOrder), s.Name)
 
+		// Run pre-hook if defined (e.g. TLS cert generation for Results).
+		if s.PreHook != nil && !i.dryRun {
+			if err := s.PreHook(ctx, i); err != nil {
+				return fmt.Errorf("  ✗ %s pre-hook failed: %w", s.Name, err)
+			}
+		}
+
 		for _, dir := range s.Paths {
 			if err := i.applyDirectory(ctx, dir); err != nil {
 				return fmt.Errorf("  ✗ %s failed: %w", s.Name, err)
@@ -182,6 +213,11 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 			}
 		}
 
+		// Clean up the TLS secret created by the pre-hook.
+		if s.Name == "Tekton Results" {
+			_ = i.deleteResultsTLS(ctx)
+		}
+
 		fmt.Printf("  ✓ %s removed\n", s.Name)
 	}
 
@@ -223,6 +259,168 @@ func (i *Installer) Status(ctx context.Context) error {
 
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Tekton Results TLS — self-signed cert generated in pure Go.
+// No openssl dependency, no shell scripts. Works anywhere the binary runs.
+// ---------------------------------------------------------------------------
+
+// ensureResultsTLS creates a self-signed TLS secret for Tekton Results
+// if one doesn't already exist. The cert is generated in pure Go —
+// no external tools required.
+func (i *Installer) ensureResultsTLS(ctx context.Context) error {
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+
+	// Check if the secret already exists — don't overwrite.
+	_, err := i.dynamic.Resource(secretGVR).
+		Namespace(resultsTLSNamespace).
+		Get(ctx, resultsTLSSecretName, metav1.GetOptions{})
+	if err == nil {
+		fmt.Println("  ✓ TLS secret already exists — skipping generation")
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to check for existing TLS secret: %w", err)
+	}
+
+	fmt.Println("  🔐 Generating self-signed TLS certificate for Results API...")
+
+	certPEM, keyPEM, err := generateSelfSignedCert()
+	if err != nil {
+		return fmt.Errorf("failed to generate TLS cert: %w", err)
+	}
+
+	// Ensure namespace exists first.
+	if err := i.ensureNamespace(ctx, resultsTLSNamespace); err != nil {
+		return err
+	}
+
+	// Create the TLS secret.
+	secret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      resultsTLSSecretName,
+				"namespace": resultsTLSNamespace,
+			},
+			"type": "kubernetes.io/tls",
+			"data": map[string]interface{}{
+				"tls.crt": certPEM,
+				"tls.key": keyPEM,
+			},
+		},
+	}
+
+	_, err = i.dynamic.Resource(secretGVR).
+		Namespace(resultsTLSNamespace).
+		Create(ctx, secret, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create TLS secret: %w", err)
+	}
+
+	fmt.Println("  ✓ TLS secret created")
+
+	return nil
+}
+
+// deleteResultsTLS removes the self-signed TLS secret during uninstall.
+func (i *Installer) deleteResultsTLS(ctx context.Context) error {
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+
+	err := i.dynamic.Resource(secretGVR).
+		Namespace(resultsTLSNamespace).
+		Delete(ctx, resultsTLSSecretName, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+// ensureNamespace creates a namespace if it doesn't exist.
+func (i *Installer) ensureNamespace(ctx context.Context, name string) error {
+	nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
+
+	_, err := i.dynamic.Resource(nsGVR).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+		},
+	}
+
+	_, err = i.dynamic.Resource(nsGVR).Create(ctx, ns, metav1.CreateOptions{})
+	return err
+}
+
+// generateSelfSignedCert creates a self-signed ECDSA P-256 cert valid for 1 year.
+// Returns base64-encoded PEM cert and key suitable for a kubernetes.io/tls secret.
+func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: fmt.Sprintf("tekton-results-api-service.%s.svc.cluster.local", resultsTLSNamespace),
+		},
+		DNSNames: []string{
+			fmt.Sprintf("tekton-results-api-service.%s.svc.cluster.local", resultsTLSNamespace),
+			fmt.Sprintf("tekton-results-api-service.%s.svc", resultsTLSNamespace),
+			"tekton-results-api-service",
+			"localhost",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	certBuf := &bytes.Buffer{}
+	if err := pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return nil, nil, fmt.Errorf("failed to encode cert PEM: %w", err)
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	keyBuf := &bytes.Buffer{}
+	if err := pem.Encode(keyBuf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		return nil, nil, fmt.Errorf("failed to encode key PEM: %w", err)
+	}
+
+	return certBuf.Bytes(), keyBuf.Bytes(), nil
+}
+
+// ---------------------------------------------------------------------------
+// Core manifest application logic
+// ---------------------------------------------------------------------------
 
 // applyDirectory reads all YAML files from an embedded directory and applies
 // each document to the cluster.

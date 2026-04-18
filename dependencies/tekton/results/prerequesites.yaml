@@ -21,48 +21,49 @@ stringData:
   POSTGRES_USER: "postgres"
   POSTGRES_PASSWORD: "blanketops-results-dev"
 ---
-# Lightweight Postgres deployment for local/dev use.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tekton-results-postgres
-  namespace: tekton-pipelines
-  labels:
-    app: tekton-results-postgres
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: tekton-results-postgres
-  template:
-    metadata:
-      labels:
-        app: tekton-results-postgres
-    spec:
-      containers:
-      - name: postgres
-        image: postgres:15-alpine
-        ports:
-        - containerPort: 5432
-        env:
-        - name: POSTGRES_DB
-          value: tekton_results
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: tekton-results-postgres
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: tekton-results-postgres
-              key: POSTGRES_PASSWORD
-        volumeMounts:
-        - name: postgres-data
-          mountPath: /var/lib/postgresql/data
-      volumes:
-      - name: postgres-data
-        emptyDir: {}
+
+# # Lightweight Postgres deployment for local/dev use.
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: tekton-results-postgres
+#   namespace: tekton-pipelines
+#   labels:
+#     app: tekton-results-postgres
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: tekton-results-postgres
+#   template:
+#     metadata:
+#       labels:
+#         app: tekton-results-postgres
+#     spec:
+#       containers:
+#       - name: postgres
+#         image: postgres:15-alpine
+#         ports:
+#         - containerPort: 5432
+#         env:
+#         - name: POSTGRES_DB
+#           value: tekton_results
+#         - name: POSTGRES_USER
+#           valueFrom:
+#             secretKeyRef:
+#               name: tekton-results-postgres
+#               key: POSTGRES_USER
+#         - name: POSTGRES_PASSWORD
+#           valueFrom:
+#             secretKeyRef:
+#               name: tekton-results-postgres
+#               key: POSTGRES_PASSWORD
+#         volumeMounts:
+#         - name: postgres-data
+#           mountPath: /var/lib/postgresql/data
+#       volumes:
+#       - name: postgres-data
+#         emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
