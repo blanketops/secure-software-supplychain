@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	installer "github.com/ntlaletsi70/blanketops-environments-supply-chain/cmd/cli/installer"
+	"github.com/ntlaletsi70/blanketops-environments-supply-chain/cmd/cli/ui"
 )
 
 func main() {
@@ -34,6 +35,7 @@ func main() {
 	root.AddCommand(installCmd())
 	root.AddCommand(uninstallCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(observeCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -48,7 +50,6 @@ func installCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Install supply chain dependencies onto the cluster",
 		Long: `Installs all supply chain platform dependencies in the correct order:
-
   1. Tekton Pipelines
   2. Tekton Chains
   3. Tekton Dashboard
@@ -69,7 +70,6 @@ beyond connectivity to the Kubernetes API server.`,
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")
-
 	return cmd
 }
 
@@ -90,7 +90,6 @@ func uninstallCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig")
-
 	return cmd
 }
 
@@ -111,6 +110,31 @@ func statusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig")
+	return cmd
+}
+
+func observeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "observe [rbac]",
+		Short: "Open the supply chain observer UI in your browser",
+		Long: `Starts kubectl proxy and opens the embedded supply chain observer UI.
+
+  supplychain observe        open the supply chain dashboard
+  supplychain observe rbac   open the RBAC audit dashboard`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
+			page := "supply_chain.html"
+			if len(args) > 0 && args[0] == "rbac" {
+				page = "rbac.html"
+			}
+
+			fmt.Println("  blanketops supply chain observer")
+			fmt.Println("  ────────────────────────────────")
+
+			return ui.Serve(ctx, page)
+		},
+	}
 
 	return cmd
 }
