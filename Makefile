@@ -46,7 +46,7 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-KIND_CLUSTER ?= blanketops-environments-supply-chain-test-e2e
+KIND_CLUSTER ?= secure-software-supply-chain-test-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -107,10 +107,10 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name blanketops-environments-supply-chain-builder
-	$(CONTAINER_TOOL) buildx use blanketops-environments-supply-chain-builder
+	- $(CONTAINER_TOOL) buildx create --name secure-software-supply-chain-builder
+	$(CONTAINER_TOOL) buildx use secure-software-supply-chain-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm blanketops-environments-supply-chain-builder
+	- $(CONTAINER_TOOL) buildx rm secure-software-supply-chain-builder
 	rm Dockerfile.cross
 
 .PHONY: build-installer

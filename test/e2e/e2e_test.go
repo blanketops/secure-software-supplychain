@@ -30,20 +30,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/test/utils"
+	"github.com/ntlaletsi70/secure-software-supply-chain/test/utils"
 )
 
 // namespace where the project is deployed in
-const namespace = "blanketops-environments-supply-chain-system"
+const namespace = "secure-software-supply-chain-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "blanketops-environments-supply-chain-controller-manager"
+const serviceAccountName = "secure-software-supply-chain-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "blanketops-environments-supply-chain-controller-manager-metrics-service"
+const metricsServiceName = "secure-software-supply-chain-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "blanketops-environments-supply-chain-metrics-binding"
+const metricsRoleBindingName = "secure-software-supply-chain-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -176,7 +176,7 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=blanketops-environments-supply-chain-metrics-reader",
+				"--clusterrole=secure-software-supply-chain-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)

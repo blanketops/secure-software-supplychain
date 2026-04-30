@@ -28,12 +28,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/test/utils"
+	"github.com/ntlaletsi70/secure-software-supply-chain/test/utils"
 )
 
 var (
 	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/blanketops-environments-supply-chain:v0.0.1"
+	managerImage = "example.com/secure-software-supply-chain:v0.0.1"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -44,7 +44,7 @@ var (
 // To skip CertManager installation, set: CERT_MANAGER_INSTALL_SKIP=true
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting blanketops-environments-supply-chain e2e test suite\n")
+	_, _ = fmt.Fprintf(GinkgoWriter, "Starting secure-software-supply-chain e2e test suite\n")
 	RunSpecs(t, "e2e suite")
 }
 

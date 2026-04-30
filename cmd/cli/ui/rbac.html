@@ -1,515 +1,633 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BlanketOps RBAC — supply-chain-runner</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500&display=swap');
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlanketOps RBAC — supply-chain-runner</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500&display=swap');
 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-  :root {
-    --bg: #0d0f12;
-    --bg2: #141720;
-    --bg3: #1a1f2e;
-    --border: rgba(255,255,255,0.07);
-    --border-bright: rgba(255,255,255,0.14);
-    --teal: #0fc99a;
-    --teal-dim: rgba(15,201,154,0.15);
-    --purple: #9b8cff;
-    --purple-dim: rgba(155,140,255,0.15);
-    --red: #ff5c5c;
-    --red-dim: rgba(255,92,92,0.12);
-    --green: #3dd68c;
-    --green-dim: rgba(61,214,140,0.12);
-    --amber: #f0a83a;
-    --amber-dim: rgba(240,168,58,0.12);
-    --text: #e2e4ec;
-    --text-dim: #6b7280;
-    --text-mid: #9aa0b0;
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'Inter', sans-serif;
-  }
+    :root {
+      --bg: #0d0f12;
+      --bg2: #141720;
+      --bg3: #1a1f2e;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-bright: rgba(255, 255, 255, 0.14);
+      --teal: #0fc99a;
+      --teal-dim: rgba(15, 201, 154, 0.15);
+      --purple: #9b8cff;
+      --purple-dim: rgba(155, 140, 255, 0.15);
+      --red: #ff5c5c;
+      --red-dim: rgba(255, 92, 92, 0.12);
+      --green: #3dd68c;
+      --green-dim: rgba(61, 214, 140, 0.12);
+      --amber: #f0a83a;
+      --amber-dim: rgba(240, 168, 58, 0.12);
+      --text: #e2e4ec;
+      --text-dim: #6b7280;
+      --text-mid: #9aa0b0;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Inter', sans-serif;
+    }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    min-height: 100vh;
-    padding: 40px 32px;
-  }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      padding: 40px 32px;
+    }
 
-  header {
-    margin-bottom: 48px;
-  }
+    header {
+      margin-bottom: 48px;
+    }
 
-  .eyebrow {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--teal);
-    margin-bottom: 10px;
-  }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 10px;
+    }
 
-  h1 {
-    font-family: var(--mono);
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text);
-    line-height: 1.3;
-  }
+    h1 {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+    }
 
-  h1 span { color: var(--purple); }
+    h1 span {
+      color: var(--purple);
+    }
 
-  .subtitle {
-    font-size: 13px;
-    color: var(--text-dim);
-    margin-top: 8px;
-    font-weight: 300;
-  }
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-top: 8px;
+      font-weight: 300;
+    }
 
-  /* ── layout ── */
-  .flow {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0;
-    max-width: 720px;
-    margin: 0 auto 56px;
-  }
+    /* ── layout ── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      max-width: 720px;
+      margin: 0 auto 56px;
+    }
 
-  .node {
-    width: 100%;
-    max-width: 440px;
-    border-radius: 10px;
-    padding: 16px 20px;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-    position: relative;
-    transition: border-color 0.2s, background 0.2s;
-  }
+    .node {
+      width: 100%;
+      max-width: 440px;
+      border-radius: 10px;
+      padding: 16px 20px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      position: relative;
+      transition: border-color 0.2s, background 0.2s;
+    }
 
-  .node:hover { border-color: var(--border-bright); }
+    .node:hover {
+      border-color: var(--border-bright);
+    }
 
-  .node-label {
-    font-family: var(--mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 6px;
-  }
+    .node-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
 
-  .node-name {
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.2;
-  }
+    .node-name {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
 
-  .node-meta {
-    font-size: 11px;
-    color: var(--text-dim);
-    margin-top: 4px;
-    font-weight: 300;
-  }
+    .node-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      font-weight: 300;
+    }
 
-  /* colors per type */
-  .node-sa   { border-left: 3px solid var(--teal);   }
-  .node-sa   .node-label { color: var(--teal); }
-  .node-sa   .node-name  { color: var(--teal); }
+    /* colors per type */
+    .node-sa {
+      border-left: 3px solid var(--teal);
+    }
 
-  .node-crb  { border-left: 3px solid var(--purple); }
-  .node-crb  .node-label { color: var(--purple); }
-  .node-crb  .node-name  { color: var(--purple); }
+    .node-sa .node-label {
+      color: var(--teal);
+    }
 
-  .node-cr   { border-left: 3px solid var(--purple); }
-  .node-cr   .node-label { color: var(--purple); }
-  .node-cr   .node-name  { color: var(--purple); }
+    .node-sa .node-name {
+      color: var(--teal);
+    }
 
-  /* connector */
-  .connector {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 0;
-  }
+    .node-crb {
+      border-left: 3px solid var(--purple);
+    }
 
-  .connector-line {
-    width: 1px;
-    height: 24px;
-    background: var(--border-bright);
-  }
+    .node-crb .node-label {
+      color: var(--purple);
+    }
 
-  .connector-label {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.08em;
-    padding: 2px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg3);
-  }
+    .node-crb .node-name {
+      color: var(--purple);
+    }
 
-  /* rules split */
-  .rules-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    width: 100%;
-    max-width: 600px;
-    margin-top: 8px;
-  }
+    .node-cr {
+      border-left: 3px solid var(--purple);
+    }
 
-  .rule-card {
-    border-radius: 10px;
-    padding: 16px 18px;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-  }
+    .node-cr .node-label {
+      color: var(--purple);
+    }
 
-  .rule-card.ok   { border-color: rgba(61,214,140,0.3); background: var(--green-dim); }
-  .rule-card.fail { border-color: rgba(255,92,92,0.35); background: var(--red-dim); }
+    .node-cr .node-name {
+      color: var(--purple);
+    }
 
-  .rule-status {
-    font-family: var(--mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
+    /* connector */
+    .connector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 6px 0;
+    }
 
-  .rule-card.ok   .rule-status { color: var(--green); }
-  .rule-card.fail .rule-status { color: var(--red); }
+    .connector-line {
+      width: 1px;
+      height: 24px;
+      background: var(--border-bright);
+    }
 
-  .dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+    .connector-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg3);
+    }
 
-  .rule-card.ok   .dot { background: var(--green); }
-  .rule-card.fail .dot { background: var(--red); animation: pulse 1.5s infinite; }
+    /* rules split */
+    .rules-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      width: 100%;
+      max-width: 600px;
+      margin-top: 8px;
+    }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%       { opacity: 0.5; transform: scale(1.4); }
-  }
+    .rule-card {
+      border-radius: 10px;
+      padding: 16px 18px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+    }
 
-  .rule-resource {
-    font-family: var(--mono);
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.3;
-  }
+    .rule-card.ok {
+      border-color: rgba(61, 214, 140, 0.3);
+      background: var(--green-dim);
+    }
 
-  .rule-card.ok   .rule-resource { color: var(--green); }
-  .rule-card.fail .rule-resource { color: var(--red); }
+    .rule-card.fail {
+      border-color: rgba(255, 92, 92, 0.35);
+      background: var(--red-dim);
+    }
 
-  .rule-group {
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-top: 4px;
-    font-family: var(--mono);
-  }
+    .rule-status {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
 
-  .rule-verb {
-    display: inline-block;
-    margin-top: 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.06);
-    color: var(--text-mid);
-  }
+    .rule-card.ok .rule-status {
+      color: var(--green);
+    }
 
-  /* SAR block */
-  .sar-block {
-    width: 100%;
-    max-width: 600px;
-    margin-top: 8px;
-    border: 1px dashed rgba(255,92,92,0.4);
-    border-radius: 10px;
-    padding: 16px 20px;
-    background: rgba(255,92,92,0.06);
-  }
+    .rule-card.fail .rule-status {
+      color: var(--red);
+    }
 
-  .sar-title {
-    font-family: var(--mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--red);
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
 
-  .sar-msg {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-mid);
-    line-height: 1.6;
-    word-break: break-all;
-  }
+    .rule-card.ok .dot {
+      background: var(--green);
+    }
 
-  .sar-msg strong { color: var(--red); font-weight: 500; }
+    .rule-card.fail .dot {
+      background: var(--red);
+      animation: pulse 1.5s infinite;
+    }
 
-  /* fix section */
-  .fix-section {
-    max-width: 720px;
-    margin: 0 auto 56px;
-  }
+    @keyframes pulse {
 
-  .section-title {
-    font-family: var(--mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--amber);
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
 
-  .section-title::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border);
-  }
+      50% {
+        opacity: 0.5;
+        transform: scale(1.4);
+      }
+    }
 
-  pre {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px 24px;
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.7;
-    overflow-x: auto;
-    position: relative;
-  }
+    .rule-resource {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
 
-  .kw   { color: #9b8cff; }
-  .key  { color: #5bc8ff; }
-  .val  { color: #f0a83a; }
-  .str  { color: #3dd68c; }
-  .cmt  { color: #4a5568; font-style: italic; }
-  .hi   { background: rgba(255,92,92,0.15); border-left: 2px solid var(--red); padding-left: 4px; margin-left: -6px; display: block; }
-  .hi-ok { background: rgba(61,214,140,0.12); border-left: 2px solid var(--green); padding-left: 4px; margin-left: -6px; display: block; }
+    .rule-card.ok .rule-resource {
+      color: var(--green);
+    }
 
-  .copy-btn {
-    position: absolute;
-    top: 12px; right: 12px;
-    font-family: var(--mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border-bright);
-    background: var(--bg3);
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: color 0.2s, border-color 0.2s;
-  }
+    .rule-card.fail .rule-resource {
+      color: var(--red);
+    }
 
-  .copy-btn:hover { color: var(--text); border-color: var(--purple); }
-  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+    .rule-group {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      font-family: var(--mono);
+    }
 
-  /* kubectl cmd */
-  .cmd-block {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 20px;
-    margin-top: 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+    .rule-verb {
+      display: inline-block;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-mid);
+    }
 
-  .cmd-block code {
-    font-family: var(--mono);
-    font-size: 13px;
-    color: var(--teal);
-    flex: 1;
-  }
+    /* SAR block */
+    .sar-block {
+      width: 100%;
+      max-width: 600px;
+      margin-top: 8px;
+      border: 1px dashed rgba(255, 92, 92, 0.4);
+      border-radius: 10px;
+      padding: 16px 20px;
+      background: rgba(255, 92, 92, 0.06);
+    }
 
-  .cmd-block .prompt {
-    color: var(--text-dim);
-    font-family: var(--mono);
-    font-size: 13px;
-    user-select: none;
-  }
+    .sar-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--red);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-  /* summary row */
-  .summary-row {
-    max-width: 720px;
-    margin: 0 auto 40px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-  }
+    .sar-msg {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-mid);
+      line-height: 1.6;
+      word-break: break-all;
+    }
 
-  .stat-card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px 18px;
-  }
+    .sar-msg strong {
+      color: var(--red);
+      font-weight: 500;
+    }
 
-  .stat-label {
-    font-family: var(--mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-  }
+    /* fix section */
+    .fix-section {
+      max-width: 720px;
+      margin: 0 auto 56px;
+    }
 
-  .stat-value {
-    font-family: var(--mono);
-    font-size: 18px;
-    font-weight: 700;
-  }
+    .section-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--amber);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-  .stat-card.ok   .stat-value { color: var(--green); }
-  .stat-card.fail .stat-value { color: var(--red); }
-  .stat-card.info .stat-value { color: var(--purple); }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
 
-  footer {
-    max-width: 720px;
-    margin: 0 auto;
-    padding-top: 24px;
-    border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--text-dim);
-    font-family: var(--mono);
-    display: flex;
-    justify-content: space-between;
-  }
-</style>
+    pre {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .kw {
+      color: #9b8cff;
+    }
+
+    .key {
+      color: #5bc8ff;
+    }
+
+    .val {
+      color: #f0a83a;
+    }
+
+    .str {
+      color: #3dd68c;
+    }
+
+    .cmt {
+      color: #4a5568;
+      font-style: italic;
+    }
+
+    .hi {
+      background: rgba(255, 92, 92, 0.15);
+      border-left: 2px solid var(--red);
+      padding-left: 4px;
+      margin-left: -6px;
+      display: block;
+    }
+
+    .hi-ok {
+      background: rgba(61, 214, 140, 0.12);
+      border-left: 2px solid var(--green);
+      padding-left: 4px;
+      margin-left: -6px;
+      display: block;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border-bright);
+      background: var(--bg3);
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .copy-btn:hover {
+      color: var(--text);
+      border-color: var(--purple);
+    }
+
+    .copy-btn.copied {
+      color: var(--green);
+      border-color: var(--green);
+    }
+
+    /* kubectl cmd */
+    .cmd-block {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .cmd-block code {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--teal);
+      flex: 1;
+    }
+
+    .cmd-block .prompt {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 13px;
+      user-select: none;
+    }
+
+    /* summary row */
+    .summary-row {
+      max-width: 720px;
+      margin: 0 auto 40px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    .stat-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .stat-card.ok .stat-value {
+      color: var(--green);
+    }
+
+    .stat-card.fail .stat-value {
+      color: var(--red);
+    }
+
+    .stat-card.info .stat-value {
+      color: var(--purple);
+    }
+
+    footer {
+      max-width: 720px;
+      margin: 0 auto;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
 </head>
+
 <body>
 
-<header>
-  <div class="eyebrow">BlanketOps · Supply Chain Security</div>
-  <h1>RBAC audit — <span>supply-chain-runner</span></h1>
-  <p class="subtitle">Cluster: kind (local) · Namespace: default · Dumped: 2026-04-28</p>
-</header>
+  <header>
+    <div class="eyebrow">BlanketOps · Supply Chain Security</div>
+    <h1>RBAC audit — <span>supply-chain-runner</span></h1>
+    <p class="subtitle">Cluster: kind (local) · Namespace: default · Dumped: 2026-04-28</p>
+  </header>
 
-<!-- summary -->
-<div class="summary-row">
-  <div class="stat-card ok">
-    <div class="stat-label">Rules granted</div>
-    <div class="stat-value">1</div>
-  </div>
-  <div class="stat-card fail">
-    <div class="stat-label">Rules missing</div>
-    <div class="stat-value">1</div>
-  </div>
-  <div class="stat-card fail">
-    <div class="stat-label">SAR result</div>
-    <div class="stat-value">DENIED</div>
-  </div>
-</div>
-
-<!-- RBAC flow -->
-<div class="flow">
-
-  <!-- ServiceAccount -->
-  <div class="node node-sa">
-    <div class="node-label">ServiceAccount</div>
-    <div class="node-name">supply-chain-runner</div>
-    <div class="node-meta">namespace: default · created by mediator on convergence</div>
-  </div>
-
-  <div class="connector">
-    <div class="connector-line"></div>
-    <div class="connector-label">subject of</div>
-    <div class="connector-line"></div>
-  </div>
-
-  <!-- ClusterRoleBinding -->
-  <div class="node node-crb">
-    <div class="node-label">ClusterRoleBinding</div>
-    <div class="node-name">blanketops-image-signer</div>
-    <div class="node-meta">uid: 227911d6-21bf-4f18-8112-5ddfb9fbc180 · created: 2026-04-28T17:51:28Z</div>
-  </div>
-
-  <div class="connector">
-    <div class="connector-line"></div>
-    <div class="connector-label">binds to</div>
-    <div class="connector-line"></div>
-  </div>
-
-  <!-- ClusterRole -->
-  <div class="node node-cr">
-    <div class="node-label">ClusterRole</div>
-    <div class="node-name">blanketops-image-signer</div>
-    <div class="node-meta">uid: b44cc369-7939-4198-a13f-9ae530f9efb3 · api: supplychain.blanketops.dev</div>
-  </div>
-
-  <div class="connector">
-    <div class="connector-line"></div>
-    <div class="connector-label">grants</div>
-    <div class="connector-line"></div>
-  </div>
-
-  <!-- Rules split -->
-  <div class="rules-row">
-    <div class="rule-card ok">
-      <div class="rule-status"><span class="dot"></span>Granted</div>
-      <div class="rule-resource">imagesignatures</div>
-      <div class="rule-group">supplychain.blanketops.dev</div>
-      <div class="rule-verb">create</div>
+  <!-- summary -->
+  <div class="summary-row">
+    <div class="stat-card ok">
+      <div class="stat-label">Rules granted</div>
+      <div class="stat-value">1</div>
     </div>
-    <div class="rule-card fail">
-      <div class="rule-status"><span class="dot"></span>Missing</div>
-      <div class="rule-resource">imagebuildruns</div>
-      <div class="rule-group">supplychain.blanketops.dev</div>
-      <div class="rule-verb">create</div>
+    <div class="stat-card fail">
+      <div class="stat-label">Rules missing</div>
+      <div class="stat-value">1</div>
+    </div>
+    <div class="stat-card fail">
+      <div class="stat-label">SAR result</div>
+      <div class="stat-value">DENIED</div>
     </div>
   </div>
 
-  <div class="connector">
-    <div class="connector-line"></div>
-    <div class="connector-label">SAR check in EstablishSigningContext</div>
-    <div class="connector-line"></div>
-  </div>
+  <!-- RBAC flow -->
+  <div class="flow">
 
-  <!-- SAR error block -->
-  <div class="sar-block">
-    <div class="sar-title"><span class="dot" style="background:var(--red);animation:pulse 1.5s infinite"></span>SubjectAccessReview — DENIED</div>
-    <div class="sar-msg">
-      authorization check failed: authorization denied for<br>
-      <strong>system:serviceaccount:default:supply-chain-runner</strong><br>
-      to <strong>create imagebuildruns</strong>:<br>
-      <br>
-      → mediator.go:183 EstablishSigningContext<br>
-      → imagebuild_controller.go:161 reconcilePipelineRun<br>
-      → imagebuild_controller.go:94 Reconcile
+    <!-- ServiceAccount -->
+    <div class="node node-sa">
+      <div class="node-label">ServiceAccount</div>
+      <div class="node-name">supply-chain-runner</div>
+      <div class="node-meta">namespace: default · created by mediator on convergence</div>
     </div>
+
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-label">subject of</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- ClusterRoleBinding -->
+    <div class="node node-crb">
+      <div class="node-label">ClusterRoleBinding</div>
+      <div class="node-name">blanketops-image-signer</div>
+      <div class="node-meta">uid: 227911d6-21bf-4f18-8112-5ddfb9fbc180 · created: 2026-04-28T17:51:28Z</div>
+    </div>
+
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-label">binds to</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- ClusterRole -->
+    <div class="node node-cr">
+      <div class="node-label">ClusterRole</div>
+      <div class="node-name">blanketops-image-signer</div>
+      <div class="node-meta">uid: b44cc369-7939-4198-a13f-9ae530f9efb3 · api: supplychain.blanketops.dev</div>
+    </div>
+
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-label">grants</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- Rules split -->
+    <div class="rules-row">
+      <div class="rule-card ok">
+        <div class="rule-status"><span class="dot"></span>Granted</div>
+        <div class="rule-resource">imagesignatures</div>
+        <div class="rule-group">supplychain.blanketops.dev</div>
+        <div class="rule-verb">create</div>
+      </div>
+      <div class="rule-card fail">
+        <div class="rule-status"><span class="dot"></span>Missing</div>
+        <div class="rule-resource">imagebuildruns</div>
+        <div class="rule-group">supplychain.blanketops.dev</div>
+        <div class="rule-verb">create</div>
+      </div>
+    </div>
+
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-label">SAR check in EstablishSigningContext</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- SAR error block -->
+    <div class="sar-block">
+      <div class="sar-title"><span class="dot"
+          style="background:var(--red);animation:pulse 1.5s infinite"></span>SubjectAccessReview — DENIED</div>
+      <div class="sar-msg">
+        authorization check failed: authorization denied for<br>
+        <strong>system:serviceaccount:default:supply-chain-runner</strong><br>
+        to <strong>create imagebuildruns</strong>:<br>
+        <br>
+        → mediator.go:183 EstablishSigningContext<br>
+        → imagebuild_controller.go:161 reconcilePipelineRun<br>
+        → imagebuild_controller.go:94 Reconcile
+      </div>
+    </div>
+
   </div>
 
-</div>
+  <!-- Fix -->
+  <div class="fix-section">
+    <div class="section-title">Fix — update config/rbac/signing_role.yaml</div>
 
-<!-- Fix -->
-<div class="fix-section">
-  <div class="section-title">Fix — update config/rbac/signing_role.yaml</div>
-
-  <pre><button class="copy-btn" onclick="copyYaml(this)">copy</button><code><span class="kw">apiVersion:</span> <span class="str">rbac.authorization.k8s.io/v1</span>
+    <pre><button class="copy-btn" onclick="copyYaml(this)">copy</button><code><span class="kw">apiVersion:</span> <span class="str">rbac.authorization.k8s.io/v1</span>
 <span class="kw">kind:</span> <span class="str">ClusterRole</span>
 <span class="kw">metadata:</span>
   <span class="key">name:</span> <span class="str">blanketops-image-signer</span>
@@ -535,40 +653,44 @@
   <span class="key">namespace:</span> <span class="str">default</span>
 </code></pre>
 
-  <div class="cmd-block">
-    <span class="prompt">$</span>
-    <code>kubectl apply -f config/rbac/signing_role.yaml</code>
+    <div class="cmd-block">
+      <span class="prompt">$</span>
+      <code>kubectl apply -f config/rbac/signing_role.yaml</code>
+    </div>
+
+    <div class="cmd-block" style="margin-top:8px">
+      <span class="prompt">$</span>
+      <code>kubectl auth can-i create imagebuildruns --as=system:serviceaccount:default:supply-chain-runner</code>
+    </div>
+
+    <div class="cmd-block" style="margin-top:8px; border-color: rgba(61,214,140,0.3)">
+      <span class="prompt" style="color:var(--green)">✓</span>
+      <code style="color:var(--green)">yes  ← expected after apply</code>
+    </div>
+
   </div>
 
-  <div class="cmd-block" style="margin-top:8px">
-    <span class="prompt">$</span>
-    <code>kubectl auth can-i create imagebuildruns --as=system:serviceaccount:default:supply-chain-runner</code>
-  </div>
+  <footer>
+    <span>secure-software-supply-chain · rbac audit</span>
+    <span>supply-chain-runner / default</span>
+  </footer>
 
-  <div class="cmd-block" style="margin-top:8px; border-color: rgba(61,214,140,0.3)">
-    <span class="prompt" style="color:var(--green)">✓</span>
-    <code style="color:var(--green)">yes  ← expected after apply</code>
-  </div>
-
-</div>
-
-<footer>
-  <span>blanketops-environments-supply-chain · rbac audit</span>
-  <span>supply-chain-runner / default</span>
-</footer>
-
-<script>
-  const yaml = `apiVersion: rbac.authorization.k8s.io/v1
+  <script>
+    const yaml = `# config/rbac/signing_role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: blanketops-image-signer
 rules:
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["imagesignatures"]
-  verbs:    ["create"]
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["imagebuildruns"]
-  verbs:    ["create"]
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "supplychains" ]
+  verbs: [ "get" ]
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "imagesignatures" ]
+  verbs: [ "create" ]
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "imagebuilds" ]
+  verbs: [ "create" ]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -576,21 +698,23 @@ metadata:
   name: blanketops-image-signer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind:     ClusterRole
-  name:     blanketops-image-signer
+  kind: ClusterRole
+  name: blanketops-image-signer
 subjects:
-- kind:      ServiceAccount
-  name:      supply-chain-runner
-  namespace: default`;
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: default
+`;
 
-  function copyYaml(btn) {
-    navigator.clipboard.writeText(yaml).then(() => {
-      btn.textContent = 'copied!';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
-    });
-  }
-</script>
+    function copyYaml(btn) {
+      navigator.clipboard.writeText(yaml).then(() => {
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+      });
+    }
+  </script>
 
 </body>
+
 </html>

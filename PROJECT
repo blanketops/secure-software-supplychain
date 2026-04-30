@@ -6,8 +6,8 @@ cliVersion: 4.13.0
 domain: blanketops.dev
 layout:
 - go.kubebuilder.io/v4
-projectName: blanketops-environments-supply-chain
-repo: github.com/blanketops/blanketops-environments-supply-chain
+projectName: secure-software-supply-chain
+repo: github.com/blanketops/secure-software-supply-chain
 resources:
 - api:
     crdVersion: v1
@@ -16,7 +16,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: SupplyChain
-  path: ithub.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1
+  path: ithub.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -25,7 +25,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageBuild
-  path: ithub.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1
+  path: ithub.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -34,7 +34,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: RepositorySource
-  path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -43,7 +43,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageSignature
-  path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -51,6 +51,6 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageBuildResult
-  path: github.com/blanketops/blanketops-environments-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 version: "3"

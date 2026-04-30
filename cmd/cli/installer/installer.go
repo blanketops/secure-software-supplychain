@@ -44,7 +44,7 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 
-	manifests "github.com/ntlaletsi70/blanketops-environments-supply-chain"
+	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
 )
 
 const (

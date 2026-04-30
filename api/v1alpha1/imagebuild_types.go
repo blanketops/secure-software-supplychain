@@ -83,7 +83,7 @@ type ImageBuildStatus struct {
 	PipelineRunRef string `json:"pipelineRunRef,omitempty"`
 
 	// ImageRef is the fully qualified image reference produced by this build
-	// e.g. ttl.sh/blanketops-environments:abc1234
+	// e.g. ttl.sh/secure-software-:abc1234
 	// +optional
 	ImageRef string `json:"imageRef,omitempty"`
 

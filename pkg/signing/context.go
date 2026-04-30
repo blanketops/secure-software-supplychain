@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/authz"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
 )
 
 const (
@@ -30,15 +30,24 @@ const (
 	tokenExpirySeconds = 600
 )
 
-// RunSigningContext is everything downstream needs — the authorization proof,
-// the ephemeral signing cert, and the private key.
+// RunSigningContext is everything downstream needs — the three authorization
+// proofs, the ephemeral signing cert, and the private key.
 //
-// The proof goes into the attestation predicate.
+// All three proofs go into the attestation predicate that Fulcio signs over.
 // The cert + key are used by cosign to sign the image.
 // After the pipeline completes, the private key is discarded.
 type RunSigningContext struct {
-	// Proof is the SAR verdict — proves authorization at execution time.
-	Proof *authz.AuthzProof
+	// ScopeProof — get supplychains
+	// "I can see the chain I am claiming to execute against."
+	ScopeProof *authz.AuthzProof
+
+	// IntentProof — create imagebuilds
+	// "I am authorized to initiate a build execution against this chain."
+	IntentProof *authz.AuthzProof
+
+	// OutputProof — create imagesignatures
+	// "I am authorized to produce signing records for what I am about to sign."
+	OutputProof *authz.AuthzProof
 
 	// Cert is the Fulcio-issued ephemeral signing certificate.
 	Cert *SigningCert
@@ -49,11 +58,17 @@ type RunSigningContext struct {
 }
 
 // EstablishSigningContext drives the full signing identity flow.
-// Three gates, each one feeds the next. If any fails, nothing proceeds.
+// Five gates, each one feeds the next. If any fails, nothing proceeds.
 //
-//	SAR check      → proves the SA is authorized to run this build right now
-//	TokenRequest   → mints a short-lived OIDC credential for Fulcio
-//	Fulcio auth    → exchanges the token for an ephemeral signing cert
+//	SAR scope    → get supplychains       — proves SA can access the chain definition
+//	SAR intent   → create imagebuilds    — proves SA is authorized to initiate a build
+//	SAR output   → create imagesignatures — proves SA can produce signing records
+//	TokenRequest → mints a short-lived OIDC credential for Fulcio
+//	Fulcio auth  → exchanges the token for an ephemeral signing cert
+//
+// All three SARs must pass before the token is minted and Fulcio is called.
+// This is what makes the Fulcio cert meaningful — it signs over a complete,
+// API-server-verified authorization story at the chain level, not just an identity.
 //
 // Called by the mediator after prerequisites are ready.
 func EstablishSigningContext(
@@ -64,19 +79,39 @@ func EstablishSigningContext(
 	serviceAccount string,
 	namespace string,
 ) (*RunSigningContext, error) {
-
 	// -------------------------------------------------------------------------
-	// 1. SAR — prove authorization.
+	// 1. SAR scope — can this SA see the chain definition?
 	// -------------------------------------------------------------------------
-	proof, err := authz.VerifyAuthorization(
-		ctx, c, serviceAccount, namespace, "imagebuildruns", "create",
+	scopeProof, err := authz.VerifyAuthorization(
+		ctx, c, serviceAccount, namespace, "supplychains", "get",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("authorization check failed: %w", err)
+		return nil, fmt.Errorf("scope authorization failed: %w", err)
 	}
 
 	// -------------------------------------------------------------------------
-	// 2. Scoped token — mint a short-lived OIDC credential.
+	// 2. SAR intent — can this SA initiate a build execution?
+	// -------------------------------------------------------------------------
+	intentProof, err := authz.VerifyAuthorization(
+		ctx, c, serviceAccount, namespace, "imagebuilds", "create",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("intent authorization failed: %w", err)
+	}
+
+	// -------------------------------------------------------------------------
+	// 3. SAR output — can this SA produce signing records?
+	// -------------------------------------------------------------------------
+	outputProof, err := authz.VerifyAuthorization(
+		ctx, c, serviceAccount, namespace, "imagesignatures", "create",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("output authorization failed: %w", err)
+	}
+
+	// -------------------------------------------------------------------------
+	// 4. Scoped token — mint a short-lived OIDC credential.
+	//    Only reached if all three SARs passed.
 	// -------------------------------------------------------------------------
 	token, err := authz.RequestScopedToken(
 		ctx, clientset, serviceAccount, namespace,
@@ -87,7 +122,7 @@ func EstablishSigningContext(
 	}
 
 	// -------------------------------------------------------------------------
-	// 3. Fulcio — exchange the OIDC token for an ephemeral signing cert.
+	// 5. Fulcio — exchange the OIDC token for an ephemeral signing cert.
 	// -------------------------------------------------------------------------
 	fa := &FulcioAuth{FulcioURL: fulcioURL}
 	cert, privKey, err := fa.RequestSigningCert(ctx, token)
@@ -96,8 +131,10 @@ func EstablishSigningContext(
 	}
 
 	return &RunSigningContext{
-		Proof:      proof,
-		Cert:       cert,
-		PrivateKey: privKey,
+		ScopeProof:  scopeProof,
+		IntentProof: intentProof,
+		OutputProof: outputProof,
+		Cert:        cert,
+		PrivateKey:  privKey,
 	}, nil
 }

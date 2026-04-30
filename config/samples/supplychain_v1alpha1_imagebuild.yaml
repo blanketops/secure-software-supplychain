@@ -4,7 +4,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: ImageBuild
 metadata:
   labels:
-    app.kubernetes.io/name: blanketops-environments-supply-chain
+    app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
   name: for-kaniko-app
 spec:

@@ -8,8 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/signing"
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
 const (

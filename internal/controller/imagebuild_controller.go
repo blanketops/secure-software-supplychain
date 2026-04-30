@@ -30,9 +30,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
-	supplychain "github.com/ntlaletsi70/blanketops-environments-supply-chain/internal/controller/mediators/supplychain"
-	pipeline "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/tekton/pipeline"
+	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	supplychain "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/supplychain"
+	pipeline "github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
 )
 
 type ImageBuildReconciler struct {
@@ -164,7 +164,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	}
 
 	logger.Info("signing context ready",
-		"principal", sigCtx.Proof.Principal,
+		"principal", sigCtx.ScopeProof.Principal,
 		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
 

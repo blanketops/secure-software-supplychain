@@ -1,7 +1,7 @@
 apiVersion: operator.tekton.dev/v1alpha1
 kind: TektonChain
 metadata:
-  name: blanketops-environments-supply-chain
+  name: secure-software-supply-chain
 spec:
   artifacts.oci.format: simplesigning
   artifacts.oci.signer: x509

@@ -29,11 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/blanketops-environments-supply-chain/api/v1alpha1"
-	git "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/git"
-	registry "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/registry"
-	sonarqube "github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/secrets/sonarqube"
-	"github.com/ntlaletsi70/blanketops-environments-supply-chain/pkg/signing"
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	git "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/git"
+	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
+	sonarqube "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/sonarqube"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
 type Mediator struct {
@@ -186,11 +186,12 @@ func (m *Mediator) EstablishSigningContext(
 	}
 
 	log.Info("signing context established",
-		"principal", sigCtx.Proof.Principal,
-		"allowed", sigCtx.Proof.Allowed,
+		"principal", sigCtx.ScopeProof.Principal,
+		"scopeAllowed", sigCtx.ScopeProof.Allowed,
+		"intentAllowed", sigCtx.IntentProof.Allowed,
+		"outputAllowed", sigCtx.OutputProof.Allowed,
 		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
-
 	return sigCtx, nil
 }
 

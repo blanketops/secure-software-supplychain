@@ -104,8 +104,8 @@ kubectl get pods -n tekton-chains
 Clone the repository:
 
 ```bash
-git clone https://github.com/blanketops/blanketops-environments-supply-chain.git
-cd blanketops-environments-supply-chain
+git clone https://github.com/blanketops/secure-software-supply-chain.git
+cd secure-software-supply-chain
 ```
 
 Install CRDs:
@@ -131,13 +131,13 @@ Apply a SupplyChain CR for your repository:
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChain
 metadata:
-  name: blanketops-environments
+  name: secure-software-
   namespace: blanketops-supply-chain
 spec:
-  repository: blanketops/blanketops-environments
+  repository: blanketops/secure-software-
   image:
     registry: ttl.sh
-    name: blanketops-environments
+    name: secure-software-
     tagStrategy: git-sha
   steps:
     buildpacks: true
@@ -175,13 +175,13 @@ Create an ImageBuild CR to start the pipeline:
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: ImageBuild
 metadata:
-  name: blanketops-environments-abc1234
+  name: secure-software--abc1234
   namespace: blanketops-supply-chain
 spec:
   supplyChainRef:
-    name: blanketops-environments
+    name: secure-software-
   gitRef:
-    url: https://github.com/blanketops/blanketops-environments
+    url: https://github.com/blanketops/secure-software-
     revision: main
 ```
 
@@ -194,7 +194,7 @@ kubectl get imagebuild -n blanketops-supply-chain -w
 You will see the phase move from `Pending` → `Running` → `Succeeded`. Per-step status is visible in:
 
 ```bash
-kubectl describe imagebuild blanketops-environments-abc1234 -n blanketops-supply-chain
+kubectl describe imagebuild secure-software--abc1234 -n blanketops-supply-chain
 ```
 
 ---
@@ -207,7 +207,7 @@ Once the build succeeds, verify the image signature using Cosign:
 cosign verify \
   --certificate-identity-regexp=".*" \
   --certificate-oidc-issuer="https://oauth2.sigstore.dev/auth" \
-  ttl.sh/blanketops-environments:<your-tag>
+  ttl.sh/secure-software-:<your-tag>
 ```
 
 ---

@@ -1,4 +1,4 @@
-# blanketops-environments-supply-chain - AI Agent Guide
+# secure-software-supply-chain - AI Agent Guide
 
 ## Project Structure
 
