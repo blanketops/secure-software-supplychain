@@ -1,5 +1,6 @@
 /*
-Copyright 2026.
+Copyright 2026 The BlanketOps Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -27,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -36,10 +39,8 @@ import (
 type SigningCert struct {
 	// CertPEM is the signing certificate in PEM format.
 	CertPEM []byte
-
 	// ChainPEM is the certificate chain (intermediates + root) in PEM format.
 	ChainPEM []byte
-
 	// ExpiresAt is when the cert becomes invalid.
 	ExpiresAt time.Time
 }
@@ -61,7 +62,8 @@ type fulcioRequest struct {
 }
 
 type publicKeyRequest struct {
-	PublicKey publicKey `json:"publicKey"`
+	PublicKey         publicKey `json:"publicKey"`
+	ProofOfPossession string    `json:"proofOfPossession"`
 }
 
 type publicKey struct {
@@ -82,16 +84,52 @@ type chainInfo struct {
 	Certificates []string `json:"certificates"`
 }
 
+// extractSubClaim parses the JWT payload and returns the sub claim.
+// No verification — we trust the token was issued by the cluster.
+func extractSubClaim(token string) (string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("invalid JWT format")
+	}
+	// JWT uses base64url encoding without padding
+	payload := parts[1]
+	// add padding if needed
+	switch len(payload) % 4 {
+	case 2:
+		payload += "=="
+	case 3:
+		payload += "="
+	}
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		// try raw (no padding)
+		decoded, err = base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return "", fmt.Errorf("failed to decode JWT payload: %w", err)
+		}
+	}
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return "", fmt.Errorf("failed to parse JWT claims: %w", err)
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", fmt.Errorf("sub claim missing or empty in JWT")
+	}
+	return sub, nil
+}
+
 // RequestSigningCert exchanges a scoped OIDC token for a short-lived Fulcio cert.
 // The ephemeral ECDSA P-256 keypair is generated per-call — nothing is stored.
 //
 // Flow:
-//  1. Generate ephemeral ECDSA keypair — lives only for this ImageBuildRun
-//  2. Marshal the public key as DER, base64-encode it
-//  3. POST to Fulcio /api/v2/signingCert with the OIDC token as Bearer auth
-//  4. Fulcio validates the token against the cluster's OIDC issuer
-//  5. Fulcio binds the SA identity to a short-lived cert
-//  6. Return the cert, chain, and the ephemeral private key
+//  1. Generate ephemeral ECDSA keypair — lives only for this run
+//  2. Marshal the public key as PEM
+//  3. Extract sub claim from OIDC token
+//  4. Sign the sub claim with the private key — proof of possession
+//  5. POST to Fulcio /api/v2/signingCert with the OIDC token as Bearer auth
+//  6. Fulcio validates token, verifies proof of possession, issues cert
+//  7. Return the cert, chain, and the ephemeral private key
 func (f *FulcioAuth) RequestSigningCert(ctx context.Context, oidcToken string) (*SigningCert, *ecdsa.PrivateKey, error) {
 	// 1. Generate ephemeral ECDSA keypair.
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -99,21 +137,41 @@ func (f *FulcioAuth) RequestSigningCert(ctx context.Context, oidcToken string) (
 		return nil, nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
 	}
 
-	// 2. Marshal public key to DER, then base64-encode.
+	// 2. Marshal public key to DER then wrap in PEM.
 	pubDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
+	pubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubDER,
+	})
 
-	pubB64 := base64.StdEncoding.EncodeToString(pubDER)
+	// 3. Extract sub claim from the OIDC token.
+	//    Fulcio's proof of possession is a signature over the sub claim.
+	sub, err := extractSubClaim(oidcToken)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to extract sub claim: %w", err)
+	}
 
-	// 3. Build the request body.
+	// 4. Proof of possession — sign the sub claim with the private key.
+	//    This proves we hold the private key corresponding to the public key submitted.
+	//    Fulcio verifies this signature using the provided public key.
+	digest := sha256.Sum256([]byte(sub))
+	sig, err := ecdsa.SignASN1(rand.Reader, privateKey, digest[:])
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to sign sub claim for proof of possession: %w", err)
+	}
+	popB64 := base64.StdEncoding.EncodeToString(sig)
+
+	// 5. Build the request body.
 	reqBody := fulcioRequest{
 		PublicKeyRequest: publicKeyRequest{
 			PublicKey: publicKey{
 				Algorithm: "ECDSA",
-				Content:   pubB64,
+				Content:   string(pubPEM),
 			},
+			ProofOfPossession: popB64,
 		},
 	}
 
@@ -122,13 +180,12 @@ func (f *FulcioAuth) RequestSigningCert(ctx context.Context, oidcToken string) (
 		return nil, nil, fmt.Errorf("failed to marshal fulcio request: %w", err)
 	}
 
-	// 4. POST to Fulcio.
+	// 6. POST to Fulcio.
 	url := fmt.Sprintf("%s/api/v2/signingCert", f.FulcioURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create fulcio request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", oidcToken))
 	req.Header.Set("Accept", "application/json")
@@ -153,7 +210,7 @@ func (f *FulcioAuth) RequestSigningCert(ctx context.Context, oidcToken string) (
 		return nil, nil, fmt.Errorf("fulcio returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// 5. Parse the response.
+	// 7. Parse the response.
 	var fulcioResp fulcioResponse
 	if err := json.Unmarshal(respBody, &fulcioResp); err != nil {
 		return nil, nil, fmt.Errorf("failed to parse fulcio response: %w", err)
@@ -176,7 +233,6 @@ func (f *FulcioAuth) RequestSigningCert(ctx context.Context, oidcToken string) (
 	if block == nil {
 		return nil, nil, fmt.Errorf("failed to decode signing cert PEM")
 	}
-
 	leafCert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse signing cert: %w", err)
