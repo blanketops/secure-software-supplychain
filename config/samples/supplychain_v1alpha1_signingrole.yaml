@@ -5,7 +5,13 @@ metadata:
   name: blanketops-image-signer
 rules:
 - apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "supplychains" ]
+  verbs: [ "get" ]
+- apiGroups: [ "supplychain.blanketops.dev" ]
   resources: [ "imagesignatures" ]
+  verbs: [ "create" ]
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "imagebuilds" ]
   verbs: [ "create" ]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
