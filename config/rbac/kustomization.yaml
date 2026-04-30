@@ -28,12 +28,10 @@ resources:
 - imagesignature_admin_role.yaml
 - imagesignature_editor_role.yaml
 - imagesignature_viewer_role.yaml
-- repositorysource_admin_role.yaml
-- repositorysource_editor_role.yaml
-- repositorysource_viewer_role.yaml
 - imagebuild_admin_role.yaml
 - imagebuild_editor_role.yaml
 - imagebuild_viewer_role.yaml
 - supplychain_admin_role.yaml
 - supplychain_editor_role.yaml
 - supplychain_viewer_role.yaml
+- signing_role.yaml
