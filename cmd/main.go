@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+
 	// +kubebuilder:scaffold:imports
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -184,13 +185,6 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SupplyChain")
-		os.Exit(1)
-	}
-	if err := (&controller.ImageBuildReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "ImageBuild")
 		os.Exit(1)
 	}
 

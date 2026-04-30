@@ -30,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/events"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/triggers"
 )
 
 const (
@@ -45,18 +47,17 @@ type SupplyChainReconciler struct {
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=supplychains,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=supplychains/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=supplychains/finalizers,verbs=update
-// +kubebuilder:rbac:groups=tekton.dev,resources=tasks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds/finalizers,verbs=update
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns;pipelines;taskruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=tekton.dev,resources=tasks;pipelineruns;pipelines;taskruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=triggers.tekton.dev,resources=eventlisteners;triggerbindings;triggertemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=external-secrets.io,resources=externalsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
-
 func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues(
 		"controller", "supplychain",
@@ -100,7 +101,38 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 
-	// Mark Ready — all Tasks exist, ImageBuilds can now proceed
+	// ── Trigger layer ──────────────────────────────────────────────────────
+	// Wire up GitHub → ImageBuild automation.
+	// TriggerBinding and TriggerTemplate are per-SupplyChain.
+	// EventListener is shared across all SupplyChains in the namespace.
+	saName := sc.Spec.ServiceAccountName
+	if saName == "" {
+		saName = "supply-chain-runner"
+	}
+
+	if err := triggers.EnsureTriggerBinding(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
+		logger.Error(err, "failed to reconcile TriggerBinding")
+		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+
+	if err := triggers.EnsureTriggerTemplate(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
+		logger.Error(err, "failed to reconcile TriggerTemplate")
+		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+
+	if err := events.EnsureEventListener(ctx, r.Client, sc.Namespace, sc.Name, saName); err != nil {
+		logger.Error(err, "failed to reconcile EventListener")
+		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+
+	logger.Info("trigger layer reconciled",
+		"triggerBinding", fmt.Sprintf("blanketops-github-binding-%s", sc.Name),
+		"triggerTemplate", fmt.Sprintf("blanketops-imagebuild-template-%s", sc.Name),
+		"eventListener", "blanketops-supply-chain-listener",
+	)
+	// ── End trigger layer ──────────────────────────────────────────────────
+
+	// Mark Ready — all Tasks and Triggers exist, ImageBuilds can now proceed
 	sc.Status.Phase = "Ready"
 	if err := r.Status().Update(ctx, &sc); err != nil {
 		return ctrl.Result{}, err
@@ -110,11 +142,9 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-// reconcileTasks ensures all custom Tekton Tasks exist and are up-to-date in the namespace.
-// Hub Tasks (buildpacks, git-clone, trivy-scanner) are cluster prerequisites.
+// reconcileTasks ensures all custom Tekton Tasks exist and are up-to-date.
 func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {
 	logger := log.FromContext(ctx)
-
 	for _, desired := range customTasks(sc.Namespace) {
 		task := desired
 		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, &task, func() error {
@@ -126,12 +156,9 @@ func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1
 		}
 		logger.Info("task reconciled", "task", task.Name, "result", result)
 	}
-
 	return nil
 }
 
-// customTasks returns the embedded Task definitions managed by the SupplyChain controller.
-// These are distinct from Hub Tasks which are cluster-level prerequisites.
 func customTasks(namespace string) []tektonv1.Task {
 	return []tektonv1.Task{
 		sonarQubeTask(namespace),
@@ -236,9 +263,7 @@ func tektonChainsAttestTask(namespace string) tektonv1.Task {
 set -e
 digest=$(crane digest $(params.IMAGE))
 echo -n "$(params.IMAGE)" | tee $(results.IMAGE_URL.path)
-echo -n "${digest}" | tee $(results.IMAGE_DIGEST.path)
-echo "IMAGE_URL=$(params.IMAGE)"
-echo "IMAGE_DIGEST=${digest}"`,
+echo -n "${digest}" | tee $(results.IMAGE_DIGEST.path)`,
 				},
 			},
 		},
@@ -263,60 +288,22 @@ func grafeasPublishTask(namespace string) tektonv1.Task {
 					Image: "alpine:latest",
 					Script: `#!/bin/sh
 set -e
-
-echo "Installing tools..."
 apk add --no-cache git 2>/dev/null
 wget -qO /tmp/grpcurl.tar.gz \
   https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz
 tar -xzf /tmp/grpcurl.tar.gz -C /usr/local/bin grpcurl
-
-echo "Fetching grafeas protos..."
-git clone --quiet --depth=1 --filter=blob:none \
-  https://github.com/grafeas/grafeas.git /tmp/grafeas
-git clone --quiet --depth=1 --filter=blob:none \
-  https://github.com/googleapis/googleapis.git /tmp/googleapis
-
+git clone --quiet --depth=1 --filter=blob:none https://github.com/grafeas/grafeas.git /tmp/grafeas
+git clone --quiet --depth=1 --filter=blob:none https://github.com/googleapis/googleapis.git /tmp/googleapis
 HOST="$(params.GRAFEAS_HOST)"
 PROJECT="$(params.PROJECT_ID)"
 IMAGE="$(params.IMAGE)"
 GRPC="-plaintext -import-path /tmp/grafeas -import-path /tmp/googleapis -proto proto/v1beta1/grafeas.proto"
-
-echo "Creating note (idempotent)..."
 grpcurl $GRPC \
-  -d "{
-    \"parent\": \"projects/${PROJECT}\",
-    \"noteId\": \"build\",
-    \"note\": {
-      \"shortDescription\": \"BlanketOps build note\",
-      \"kind\": \"BUILD\",
-      \"build\": {\"builderVersion\": \"blanketops-v1\"}
-    }
-  }" \
-  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote \
-  || echo "Note may already exist, continuing..."
-
-echo "Publishing occurrence..."
+  -d "{\"parent\":\"projects/${PROJECT}\",\"noteId\":\"build\",\"note\":{\"shortDescription\":\"BlanketOps build note\",\"kind\":\"BUILD\",\"build\":{\"builderVersion\":\"blanketops-v1\"}}}" \
+  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote || echo "Note may already exist"
 grpcurl $GRPC \
-  -d "{
-    \"parent\": \"projects/${PROJECT}\",
-    \"occurrence\": {
-      \"resource\": {\"uri\": \"${IMAGE}\"},
-      \"noteName\": \"projects/${PROJECT}/notes/build\",
-      \"kind\": \"BUILD\",
-      \"build\": {
-        \"provenance\": {
-          \"id\": \"$(context.taskRun.name)\",
-          \"projectId\": \"${PROJECT}\",
-          \"builtArtifacts\": [{
-            \"id\": \"${IMAGE}\",
-            \"names\": [\"${IMAGE}\"]
-          }]
-        }
-      }
-    }
-  }" \
+  -d "{\"parent\":\"projects/${PROJECT}\",\"occurrence\":{\"resource\":{\"uri\":\"${IMAGE}\"},\"noteName\":\"projects/${PROJECT}/notes/build\",\"kind\":\"BUILD\",\"build\":{\"provenance\":{\"id\":\"$(context.taskRun.name)\",\"projectId\":\"${PROJECT}\",\"builtArtifacts\":[{\"id\":\"${IMAGE}\",\"names\":[\"${IMAGE}\"]}]}}}}" \
   ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence
-
 echo "Metadata published successfully"`,
 				},
 			},
