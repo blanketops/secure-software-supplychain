@@ -5,8 +5,49 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - events
+  - secrets
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - supplychain.blanketops.dev
   resources:
+  - imagebuildresults
+  - imagebuilds
   - imagesignatures
   - supplychains
   verbs:
@@ -20,13 +61,8 @@ rules:
 - apiGroups:
   - supplychain.blanketops.dev
   resources:
-  - imagesignatures/finalizers
-  - supplychains/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - supplychain.blanketops.dev
-  resources:
+  - imagebuildresults/status
+  - imagebuilds/status
   - imagesignatures/status
   - supplychains/status
   verbs:
@@ -34,8 +70,19 @@ rules:
   - patch
   - update
 - apiGroups:
+  - supplychain.blanketops.dev
+  resources:
+  - imagebuilds/finalizers
+  - imagesignatures/finalizers
+  - supplychains/finalizers
+  verbs:
+  - update
+- apiGroups:
   - tekton.dev
   resources:
+  - pipelineruns
+  - pipelines
+  - taskruns
   - tasks
   verbs:
   - create
