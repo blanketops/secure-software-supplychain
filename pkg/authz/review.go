@@ -78,7 +78,7 @@ func VerifyAuthorization(
 	}
 
 	if err := c.Create(ctx, sar); err != nil {
-		return nil, fmt.Errorf("SAR request failed: %w", err)
+		return nil, fmt.Errorf("SubjectAccessReview request failed: %w", err)
 	}
 
 	proof := &AuthzProof{
