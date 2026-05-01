@@ -1,0 +1,86 @@
+# config/rbac/eventlistener_role.yaml
+#
+# RBAC for the EventListener pod — runs as supply-chain-runner SA.
+# The EventListener deployment needs to watch Tekton Triggers resources
+# to process incoming GitHub webhook events and create ImageBuild CRs.
+#
+# Applied automatically via config/rbac/kustomization.yaml.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: blanketops-eventlistener
+  namespace: default
+  labels:
+    blanketops.dev/managed: "true"
+    blanketops.dev/component: supply-chain-triggers
+rules:
+# Tekton Triggers — namespaced resources the EventListener watches
+- apiGroups: [ "triggers.tekton.dev" ]
+  resources:
+  - eventlisteners
+  - triggerbindings
+  - triggertemplates
+  - triggers
+  - interceptors
+  verbs: [ "get", "list", "watch" ]
+# Core — secrets for webhook validation, configmaps for config
+- apiGroups: [ "" ]
+  resources:
+  - configmaps
+  - secrets
+  verbs: [ "get", "list", "watch" ]
+# Core — needed to create ImageBuild CRs from TriggerTemplate
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources:
+  - imagebuilds
+  verbs: [ "create", "get", "list", "watch" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: blanketops-eventlistener
+  namespace: default
+  labels:
+    blanketops.dev/managed: "true"
+    blanketops.dev/component: supply-chain-triggers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: blanketops-eventlistener
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: default
+---
+# ClusterRole — cluster-scoped Triggers resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: blanketops-eventlistener-cluster
+  labels:
+    blanketops.dev/managed: "true"
+    blanketops.dev/component: supply-chain-triggers
+rules:
+- apiGroups: [ "triggers.tekton.dev" ]
+  resources:
+  - clustertriggerbindings
+  - clusterinterceptors
+  - interceptors
+  verbs: [ "get", "list", "watch" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: blanketops-eventlistener-cluster
+  labels:
+    blanketops.dev/managed: "true"
+    blanketops.dev/component: supply-chain-triggers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: blanketops-eventlistener-cluster
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: default
