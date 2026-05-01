@@ -46,7 +46,7 @@ spec:
           \"note\": {
             \"shortDescription\": \"BlanketOps build note\",
             \"kind\": \"BUILD\",
-            \"build\": {\"builderVersion\": \"blanketops-v1\"}
+            \"build\": {\"builderVersion\": \"secure-software-supplychainv1\"}
           }
         }" \
         ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote \

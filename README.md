@@ -88,7 +88,7 @@ The `supply-chain-runner` ServiceAccount requires the following ClusterRole:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supplychainimage-signer
 rules:
 - apiGroups: ["supplychain.blanketops.dev"]
   resources: ["supplychains"]
@@ -286,9 +286,9 @@ make uninstall
 
 This operator is one component of the BlanketOps platform:
 
-- [blanketops-environments](https://github.com/ntlaletsi70) — environment orchestration
+- [secure-software-supplychainenvironments](https://github.com/ntlaletsi70) — environment orchestration
 - [secure-software-supply-chain](https://github.com/ntlaletsi70/secure-software-supply-chain) — supply chain pipeline (this repo)
-- [blanketops-runners](https://github.com/ntlaletsi70) — GitHub Actions self-hosted runners
+- [secure-software-supplychainrunners](https://github.com/ntlaletsi70) — GitHub Actions self-hosted runners
 
 ---
 

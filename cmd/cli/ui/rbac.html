@@ -561,7 +561,7 @@
     <!-- ClusterRoleBinding -->
     <div class="node node-crb">
       <div class="node-label">ClusterRoleBinding</div>
-      <div class="node-name">blanketops-image-signer</div>
+      <div class="node-name">secure-software-supplychainimage-signer</div>
       <div class="node-meta">uid: 227911d6-21bf-4f18-8112-5ddfb9fbc180 · created: 2026-04-28T17:51:28Z</div>
     </div>
 
@@ -574,7 +574,7 @@
     <!-- ClusterRole -->
     <div class="node node-cr">
       <div class="node-label">ClusterRole</div>
-      <div class="node-name">blanketops-image-signer</div>
+      <div class="node-name">secure-software-supplychainimage-signer</div>
       <div class="node-meta">uid: b44cc369-7939-4198-a13f-9ae530f9efb3 · api: supplychain.blanketops.dev</div>
     </div>
 
@@ -630,7 +630,7 @@
     <pre><button class="copy-btn" onclick="copyYaml(this)">copy</button><code><span class="kw">apiVersion:</span> <span class="str">rbac.authorization.k8s.io/v1</span>
 <span class="kw">kind:</span> <span class="str">ClusterRole</span>
 <span class="kw">metadata:</span>
-  <span class="key">name:</span> <span class="str">blanketops-image-signer</span>
+  <span class="key">name:</span> <span class="str">secure-software-supplychainimage-signer</span>
 <span class="kw">rules:</span>
 <span class="hi-ok">- <span class="key">apiGroups:</span> [<span class="str">"supplychain.blanketops.dev"</span>]
   <span class="key">resources:</span> [<span class="str">"imagesignatures"</span>]
@@ -642,11 +642,11 @@
 <span class="kw">apiVersion:</span> <span class="str">rbac.authorization.k8s.io/v1</span>
 <span class="kw">kind:</span> <span class="str">ClusterRoleBinding</span>
 <span class="kw">metadata:</span>
-  <span class="key">name:</span> <span class="str">blanketops-image-signer</span>
+  <span class="key">name:</span> <span class="str">secure-software-supplychainimage-signer</span>
 <span class="kw">roleRef:</span>
   <span class="key">apiGroup:</span> <span class="str">rbac.authorization.k8s.io</span>
   <span class="key">kind:</span>     <span class="str">ClusterRole</span>
-  <span class="key">name:</span>     <span class="str">blanketops-image-signer</span>
+  <span class="key">name:</span>     <span class="str">secure-software-supplychainimage-signer</span>
 <span class="kw">subjects:</span>
 - <span class="key">kind:</span>      <span class="str">ServiceAccount</span>
   <span class="key">name:</span>      <span class="str">supply-chain-runner</span>
@@ -680,7 +680,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supplychainimage-signer
 rules:
 - apiGroups: [ "supplychain.blanketops.dev" ]
   resources: [ "supplychains" ]
@@ -695,11 +695,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supplychainimage-signer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: blanketops-image-signer
+  name: secure-software-supplychainimage-signer
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner

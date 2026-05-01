@@ -36,7 +36,7 @@ func EnsureEventListener(
 	supplyChainName string,
 	serviceAccountName string,
 ) error {
-	name := "blanketops-supply-chain-listener"
+	name := "secure-software-supplychain-listener"
 
 	var existing triggersv1beta1.EventListener
 	err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &existing)
@@ -87,8 +87,8 @@ func ptrString(s string) *string {
 }
 
 func buildTrigger(triggerName, supplyChainName string) triggersv1beta1.EventListenerTrigger {
-	tbRef := fmt.Sprintf("blanketops-github-binding-%s", supplyChainName)
-	ttRef := fmt.Sprintf("blanketops-imagebuild-template-%s", supplyChainName)
+	tbRef := fmt.Sprintf("secure-software-supplychain-github-binding-%s", supplyChainName)
+	ttRef := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 
 	return triggersv1beta1.EventListenerTrigger{
 		Name: triggerName,

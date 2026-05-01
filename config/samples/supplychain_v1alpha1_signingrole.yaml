@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supply-chain-image-signer
 rules:
 - apiGroups: [ "supplychain.blanketops.dev" ]
   resources: [ "supplychains" ]
@@ -17,11 +17,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supply-chain-image-signer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: blanketops-image-signer
+  name: secure-software-supply-chain-image-signer
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner

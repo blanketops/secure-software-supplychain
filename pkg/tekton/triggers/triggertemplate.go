@@ -43,7 +43,7 @@ func EnsureTriggerTemplate(
 	namespace string,
 	supplyChainName string,
 ) error {
-	name := fmt.Sprintf("blanketops-imagebuild-template-%s", supplyChainName)
+	name := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 
 	// The ImageBuild resource template — populated at trigger time.
 	imageBuildTemplate := map[string]interface{}{

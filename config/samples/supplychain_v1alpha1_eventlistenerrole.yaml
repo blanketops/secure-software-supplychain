@@ -9,7 +9,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: blanketops-eventlistener
+  name: secure-software-supply-chain-eventlistener
   namespace: default
   labels:
     blanketops.dev/managed: "true"
@@ -39,7 +39,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: blanketops-eventlistener
+  name: secure-software-supply-chain-eventlistener
   namespace: default
   labels:
     blanketops.dev/managed: "true"
@@ -47,7 +47,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: blanketops-eventlistener
+  name: secure-software-supply-chain-eventlistener
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner
@@ -57,7 +57,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: blanketops-eventlistener-cluster
+  name: secure-software-supply-chain-eventlistener-cluster
   labels:
     blanketops.dev/managed: "true"
     blanketops.dev/component: supply-chain-triggers
@@ -72,14 +72,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: blanketops-eventlistener-cluster
+  name: secure-software-supply-chain-eventlistener-cluster
   labels:
     blanketops.dev/managed: "true"
     blanketops.dev/component: supply-chain-triggers
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: blanketops-eventlistener-cluster
+  name: secure-software-supply-chain-eventlistener-cluster
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner

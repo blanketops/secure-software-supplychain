@@ -194,7 +194,7 @@ func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
 			"spec": map[string]any{
 				"refreshInterval": "0s",
 				"secretStoreRef": map[string]any{
-					"name": "blanketops-supply-chain-store",
+					"name": "secure-software-supplychainsupply-chain-store",
 					"kind": "ClusterSecretStore",
 				},
 				"target": map[string]any{

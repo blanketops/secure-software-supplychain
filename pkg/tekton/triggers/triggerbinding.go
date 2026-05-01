@@ -34,7 +34,7 @@ func EnsureTriggerBinding(
 	namespace string,
 	supplyChainName string,
 ) error {
-	name := fmt.Sprintf("blanketops-github-binding-%s", supplyChainName)
+	name := fmt.Sprintf("secure-software-supplychain-github-binding-%s", supplyChainName)
 
 	desired := &triggersv1beta1.TriggerBinding{
 		ObjectMeta: metav1.ObjectMeta{

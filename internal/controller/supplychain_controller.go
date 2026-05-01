@@ -127,9 +127,9 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	logger.Info("trigger layer reconciled",
-		"triggerBinding", fmt.Sprintf("blanketops-github-binding-%s", sc.Name),
-		"triggerTemplate", fmt.Sprintf("blanketops-imagebuild-template-%s", sc.Name),
-		"eventListener", "blanketops-supply-chain-listener",
+		"triggerBinding", fmt.Sprintf("secure-software-supplychaingithub-binding-%s", sc.Name),
+		"triggerTemplate", fmt.Sprintf("secure-software-supplychainimagebuild-template-%s", sc.Name),
+		"eventListener", "secure-software-supplychainsupply-chain-listener",
 	)
 
 	sc.Status.Phase = "Ready"
@@ -296,7 +296,7 @@ PROJECT="$(params.PROJECT_ID)"
 IMAGE="$(params.IMAGE)"
 GRPC="-plaintext -import-path /tmp/grafeas -import-path /tmp/googleapis -proto proto/v1beta1/grafeas.proto"
 grpcurl $GRPC \
-  -d "{\"parent\":\"projects/${PROJECT}\",\"noteId\":\"build\",\"note\":{\"shortDescription\":\"BlanketOps build note\",\"kind\":\"BUILD\",\"build\":{\"builderVersion\":\"blanketops-v1\"}}}" \
+  -d "{\"parent\":\"projects/${PROJECT}\",\"noteId\":\"build\",\"note\":{\"shortDescription\":\"BlanketOps build note\",\"kind\":\"BUILD\",\"build\":{\"builderVersion\":\"secure-software-supplychainv1\"}}}" \
   ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote || echo "Note may already exist"
 grpcurl $GRPC \
   -d "{\"parent\":\"projects/${PROJECT}\",\"occurrence\":{\"resource\":{\"uri\":\"${IMAGE}\"},\"noteName\":\"projects/${PROJECT}/notes/build\",\"kind\":\"BUILD\",\"build\":{\"provenance\":{\"id\":\"$(context.taskRun.name)\",\"projectId\":\"${PROJECT}\",\"builtArtifacts\":[{\"id\":\"${IMAGE}\",\"names\":[\"${IMAGE}\"]}]}}}}" \

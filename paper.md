@@ -132,7 +132,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChain
 metadata:
   name: secure-software-
-  namespace: blanketops-supply-chain
+  namespace: secure-software-supplychainsupply-chain
 spec:
   repository: blanketops/secure-software-
   image:
@@ -146,13 +146,13 @@ spec:
     attest: true
     sonarQube:
       enabled: true
-      serverURL: http://sonarqube.blanketops-supply-chain.svc.cluster.local:9000
+      serverURL: http://sonarqube.secure-software-supplychainsupply-chain.svc.cluster.local:9000
       tokenSecretRef:
         name: sonarqube-token
         key: token
     grafeas:
       enabled: true
-      serverURL: http://grafeas.blanketops-supply-chain.svc.cluster.local:8080
+      serverURL: http://grafeas.secure-software-supplychainsupply-chain.svc.cluster.local:8080
   signing:
     fulcioURL: https://fulcio.sigstore.dev
     rekorURL: https://rekor.sigstore.dev
@@ -162,7 +162,7 @@ spec:
 Verify:
 
 ```bash
-kubectl get supplychain -n blanketops-supply-chain
+kubectl get supplychain -n secure-software-supplychainsupply-chain
 ```
 
 ---
@@ -176,7 +176,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: ImageBuild
 metadata:
   name: secure-software--abc1234
-  namespace: blanketops-supply-chain
+  namespace: secure-software-supplychainsupply-chain
 spec:
   supplyChainRef:
     name: secure-software-
@@ -188,13 +188,13 @@ spec:
 Watch the build:
 
 ```bash
-kubectl get imagebuild -n blanketops-supply-chain -w
+kubectl get imagebuild -n secure-software-supplychainsupply-chain -w
 ```
 
 You will see the phase move from `Pending` → `Running` → `Succeeded`. Per-step status is visible in:
 
 ```bash
-kubectl describe imagebuild secure-software--abc1234 -n blanketops-supply-chain
+kubectl describe imagebuild secure-software--abc1234 -n secure-software-supplychainsupply-chain
 ```
 
 ---

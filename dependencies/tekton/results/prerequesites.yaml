@@ -19,8 +19,9 @@ metadata:
 type: Opaque
 stringData:
   POSTGRES_USER: "postgres"
-  POSTGRES_PASSWORD: "blanketops-results-dev"
+  POSTGRES_PASSWORD: "secure-software-supplychainresults-dev"
 ---
+
 
 # # Lightweight Postgres deployment for local/dev use.
 # apiVersion: apps/v1

@@ -685,7 +685,7 @@ async function checkRBAC() {
   }
   // CRB check
   try {
-    await kget('/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/blanketops-image-signer');
+    await kget('/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/secure-software-supplychainimage-signer');
     setRBAC('crb-status', true, 'bound');
   } catch {
     setRBAC('crb-status', false, 'missing');
