@@ -35,3 +35,4 @@ resources:
 - supplychain_editor_role.yaml
 - supplychain_viewer_role.yaml
 - signing_role.yaml
+- eventlistener_role.yaml

@@ -18,17 +18,13 @@ package supplychain
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	git "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/git"
@@ -126,17 +122,6 @@ func (m *Mediator) EnsurePrerequisites(
 		return false, nil
 	}
 
-	log.Info("secrets ready — reconciling ServiceAccount")
-
-	// -------------------------------------------------
-	// 3. Identity: ensure ServiceAccount
-	// -------------------------------------------------
-	if err := m.ensureServiceAccount(ctx, sc, ib); err != nil {
-		log.Error(err, "failed to reconcile ServiceAccount")
-		m.recordWarning(ib, "ServiceAccountFailed", err)
-		return false, err
-	}
-
 	// -------------------------------------------------
 	// READY
 	// -------------------------------------------------
@@ -194,55 +179,6 @@ func (m *Mediator) EstablishSigningContext(
 		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
 	return sigCtx, nil
-}
-
-func (m *Mediator) ensureServiceAccount(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-) error {
-	name := sc.Spec.ServiceAccountName
-	if name == "" {
-		name = "default"
-	}
-
-	desired := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ib.Namespace,
-			Labels: map[string]string{
-				"blanketops.dev/managed":      "true",
-				"blanketops.dev/supply-chain": sc.Name,
-			},
-		},
-		Secrets: []corev1.ObjectReference{
-			{Name: sc.Spec.Image.CloneSecretRef},
-			{Name: sc.Spec.Image.RegistrySecretRef},
-			{Name: sc.Spec.Steps.SonarQube.TokenSecretRef},
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(ib, desired, m.Scheme); err != nil {
-		return err
-	}
-
-	var existing corev1.ServiceAccount
-	err := m.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-	if apierrors.IsNotFound(err) {
-		m.Log.Info("creating ServiceAccount", "name", name)
-		return m.Client.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	if !reflect.DeepEqual(existing.Secrets, desired.Secrets) {
-		existing.Secrets = desired.Secrets
-		m.Log.Info("updating ServiceAccount secrets", "name", name)
-		return m.Client.Update(ctx, &existing)
-	}
-
-	return nil
 }
 
 func (m *Mediator) secretExists(

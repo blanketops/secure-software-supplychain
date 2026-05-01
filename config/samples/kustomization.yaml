@@ -4,6 +4,7 @@ resources:
 - supplychain_v1alpha1_supplychain.yaml
 #- supplychain_v1alpha1_imagebuild.yaml
 - supplychain_v1alpha1_signingrole.yaml
+- supplychain_v1alpha1_eventlistener_role.yaml
 
 #- supplychain_v1alpha1_imagesignature.yaml
 #- supplychain_v1alpha1_imagebuildresult.yaml

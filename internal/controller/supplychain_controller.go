@@ -58,7 +58,6 @@ type SupplyChainReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
-
 func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues(
 		"controller", "supplychain",
@@ -74,13 +73,11 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion
 	if !sc.DeletionTimestamp.IsZero() {
 		logger.Info("handling deletion")
 		return r.handleDeletion(ctx, &sc)
 	}
 
-	// Ensure finalizer
 	if !controllerutil.ContainsFinalizer(&sc, supplyChainFinalizer) {
 		logger.Info("adding finalizer")
 		controllerutil.AddFinalizer(&sc, supplyChainFinalizer)
@@ -90,27 +87,30 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Enforce 1:1 repo constraint
 	if err := r.enforceRepoUniqueness(ctx, &sc); err != nil {
 		logger.Error(err, "repo uniqueness violation", "repository", sc.Spec.Repository)
 		return r.setPhase(ctx, &sc, "Error", err)
 	}
 
-	// Reconcile custom Tasks
 	if err := r.reconcileTasks(ctx, &sc); err != nil {
 		logger.Error(err, "failed to reconcile tasks")
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 
-	// ── Trigger layer ──────────────────────────────────────────────────────
-	// Wire up GitHub → ImageBuild automation.
-	// TriggerBinding and TriggerTemplate are per-SupplyChain.
-	// EventListener is shared across all SupplyChains in the namespace.
+	// ── ServiceAccount ────────────────────────────────────────────────────
+	// Must exist before the EventListener deployment uses it.
+	// Owned by the SupplyChain — not by individual ImageBuilds.
 	saName := sc.Spec.ServiceAccountName
 	if saName == "" {
 		saName = "supply-chain-runner"
 	}
+	if err := r.ensureServiceAccount(ctx, &sc, saName); err != nil {
+		logger.Error(err, "failed to ensure ServiceAccount", "name", saName)
+		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+	logger.Info("ServiceAccount ready", "name", saName)
 
+	// ── Trigger layer ─────────────────────────────────────────────────────
 	if err := triggers.EnsureTriggerBinding(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
 		logger.Error(err, "failed to reconcile TriggerBinding")
 		return r.setPhase(ctx, &sc, "Degraded", err)
@@ -131,9 +131,7 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		"triggerTemplate", fmt.Sprintf("blanketops-imagebuild-template-%s", sc.Name),
 		"eventListener", "blanketops-supply-chain-listener",
 	)
-	// ── End trigger layer ──────────────────────────────────────────────────
 
-	// Mark Ready — all Tasks and Triggers exist, ImageBuilds can now proceed
 	sc.Status.Phase = "Ready"
 	if err := r.Status().Update(ctx, &sc); err != nil {
 		return ctrl.Result{}, err
@@ -143,7 +141,33 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-// reconcileTasks ensures all custom Tekton Tasks exist and are up-to-date.
+// ensureServiceAccount ensures the pipeline runner SA exists before the
+// EventListener deployment tries to use it.
+func (r *SupplyChainReconciler) ensureServiceAccount(
+	ctx context.Context,
+	sc *supplyv1alpha1.SupplyChain,
+	name string,
+) error {
+	logger := log.FromContext(ctx)
+	desired := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: sc.Namespace,
+			Labels: map[string]string{
+				"blanketops.dev/managed":      "true",
+				"blanketops.dev/supply-chain": sc.Name,
+			},
+		},
+	}
+	var existing corev1.ServiceAccount
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
+	if apierrors.IsNotFound(err) {
+		logger.Info("creating ServiceAccount", "name", name)
+		return r.Client.Create(ctx, desired)
+	}
+	return err
+}
+
 func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {
 	logger := log.FromContext(ctx)
 	for _, desired := range customTasks(sc.Namespace) {
@@ -171,10 +195,7 @@ func customTasks(namespace string) []tektonv1.Task {
 
 func sonarQubeTask(namespace string) tektonv1.Task {
 	return tektonv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sonarqube-scanner",
-			Namespace: namespace,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "sonarqube-scanner", Namespace: namespace},
 		Spec: tektonv1.TaskSpec{
 			Params: []tektonv1.ParamSpec{
 				{Name: "SONAR_HOST_URL", Type: tektonv1.ParamTypeString, Description: "SonarQube server URL"},
@@ -182,38 +203,31 @@ func sonarQubeTask(namespace string) tektonv1.Task {
 				{Name: "SONAR_TOKEN_SECRET", Type: tektonv1.ParamTypeString, Description: "Secret name containing the SonarQube token",
 					Default: &tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "sonarqube-token"}},
 			},
-			Steps: []tektonv1.Step{
-				{
-					Name:  "sonar-scan",
-					Image: "sonarsource/sonar-scanner-cli:latest",
-					Env: []corev1.EnvVar{
-						{
-							Name: "SONAR_TOKEN",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "$(params.SONAR_TOKEN_SECRET)"},
-									Key:                  "token",
-								},
-							},
+			Steps: []tektonv1.Step{{
+				Name:  "sonar-scan",
+				Image: "sonarsource/sonar-scanner-cli:latest",
+				Env: []corev1.EnvVar{{
+					Name: "SONAR_TOKEN",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "$(params.SONAR_TOKEN_SECRET)"},
+							Key:                  "token",
 						},
 					},
-					Args: []string{
-						"-Dsonar.host.url=$(params.SONAR_HOST_URL)",
-						"-Dsonar.projectKey=$(params.SONAR_PROJECT_KEY)",
-						"-Dsonar.login=$(SONAR_TOKEN)",
-					},
+				}},
+				Args: []string{
+					"-Dsonar.host.url=$(params.SONAR_HOST_URL)",
+					"-Dsonar.projectKey=$(params.SONAR_PROJECT_KEY)",
+					"-Dsonar.login=$(SONAR_TOKEN)",
 				},
-			},
+			}},
 		},
 	}
 }
 
 func cosignSignTask(namespace string) tektonv1.Task {
 	return tektonv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "cosign-sign",
-			Namespace: namespace,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "cosign-sign", Namespace: namespace},
 		Spec: tektonv1.TaskSpec{
 			Params: []tektonv1.ParamSpec{
 				{Name: "IMAGE", Type: tektonv1.ParamTypeString, Description: "Image reference to sign"},
@@ -222,72 +236,54 @@ func cosignSignTask(namespace string) tektonv1.Task {
 				{Name: "REKOR_URL", Type: tektonv1.ParamTypeString, Description: "Rekor transparency log URL",
 					Default: &tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "https://rekor.sigstore.dev"}},
 			},
-			Steps: []tektonv1.Step{
-				{
-					Name:  "sign",
-					Image: "gcr.io/projectsigstore/cosign:v2.2.3",
-					Env: []corev1.EnvVar{
-						{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
-					},
-					Args: []string{
-						"sign",
-						"--fulcio-url=$(params.FULCIO_URL)",
-						"--rekor-url=$(params.REKOR_URL)",
-						"--yes",
-						"$(params.IMAGE)",
-					},
+			Steps: []tektonv1.Step{{
+				Name:  "sign",
+				Image: "gcr.io/projectsigstore/cosign:v2.2.3",
+				Env:   []corev1.EnvVar{{Name: "COSIGN_EXPERIMENTAL", Value: "1"}},
+				Args: []string{
+					"sign",
+					"--fulcio-url=$(params.FULCIO_URL)",
+					"--rekor-url=$(params.REKOR_URL)",
+					"--yes",
+					"$(params.IMAGE)",
 				},
-			},
+			}},
 		},
 	}
 }
 
 func tektonChainsAttestTask(namespace string) tektonv1.Task {
 	return tektonv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "tekton-chains-attest",
-			Namespace: namespace,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "tekton-chains-attest", Namespace: namespace},
 		Spec: tektonv1.TaskSpec{
-			Params: []tektonv1.ParamSpec{
-				{Name: "IMAGE", Type: tektonv1.ParamTypeString, Description: "Image reference to attest"},
-			},
-			Results: []tektonv1.TaskResult{
-				{Name: "IMAGE_URL", Type: tektonv1.ResultsTypeString, Description: "Image URL for Tekton Chains"},
-				{Name: "IMAGE_DIGEST", Type: tektonv1.ResultsTypeString, Description: "Image digest for Tekton Chains attestation"},
-			},
-			Steps: []tektonv1.Step{
-				{
-					Name:  "attest",
-					Image: "gcr.io/go-containerregistry/crane:latest",
-					Script: `#!/bin/sh
+			Params:  []tektonv1.ParamSpec{{Name: "IMAGE", Type: tektonv1.ParamTypeString, Description: "Image reference to attest"}},
+			Results: []tektonv1.TaskResult{{Name: "IMAGE_URL", Type: tektonv1.ResultsTypeString}, {Name: "IMAGE_DIGEST", Type: tektonv1.ResultsTypeString}},
+			Steps: []tektonv1.Step{{
+				Name:  "attest",
+				Image: "gcr.io/go-containerregistry/crane:latest",
+				Script: `#!/bin/sh
 set -e
 digest=$(crane digest $(params.IMAGE))
 echo -n "$(params.IMAGE)" | tee $(results.IMAGE_URL.path)
 echo -n "${digest}" | tee $(results.IMAGE_DIGEST.path)`,
-				},
-			},
+			}},
 		},
 	}
 }
 
 func grafeasPublishTask(namespace string) tektonv1.Task {
 	return tektonv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "grafeas-publish",
-			Namespace: namespace,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "grafeas-publish", Namespace: namespace},
 		Spec: tektonv1.TaskSpec{
 			Params: []tektonv1.ParamSpec{
-				{Name: "IMAGE", Type: tektonv1.ParamTypeString, Description: "Fully qualified image reference"},
-				{Name: "GRAFEAS_HOST", Type: tektonv1.ParamTypeString, Description: "Grafeas gRPC host:port"},
-				{Name: "PROJECT_ID", Type: tektonv1.ParamTypeString, Description: "Grafeas project ID"},
+				{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+				{Name: "GRAFEAS_HOST", Type: tektonv1.ParamTypeString},
+				{Name: "PROJECT_ID", Type: tektonv1.ParamTypeString},
 			},
-			Steps: []tektonv1.Step{
-				{
-					Name:  "publish",
-					Image: "alpine:latest",
-					Script: `#!/bin/sh
+			Steps: []tektonv1.Step{{
+				Name:  "publish",
+				Image: "alpine:latest",
+				Script: `#!/bin/sh
 set -e
 apk add --no-cache git 2>/dev/null
 wget -qO /tmp/grpcurl.tar.gz \
@@ -306,8 +302,7 @@ grpcurl $GRPC \
   -d "{\"parent\":\"projects/${PROJECT}\",\"occurrence\":{\"resource\":{\"uri\":\"${IMAGE}\"},\"noteName\":\"projects/${PROJECT}/notes/build\",\"kind\":\"BUILD\",\"build\":{\"provenance\":{\"id\":\"$(context.taskRun.name)\",\"projectId\":\"${PROJECT}\",\"builtArtifacts\":[{\"id\":\"${IMAGE}\",\"names\":[\"${IMAGE}\"]}]}}}}" \
   ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence
 echo "Metadata published successfully"`,
-				},
-			},
+			}},
 		},
 	}
 }
