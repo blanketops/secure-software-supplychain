@@ -37,6 +37,7 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	"github.com/ntlaletsi70/secure-software-supply-chain/internal/controller"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
 var (
@@ -50,6 +51,7 @@ func init() {
 	utilruntime.Must(supplychainv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(pipelinev1beta1.AddToScheme(scheme))
 	utilruntime.Must(tektonv1.AddToScheme(scheme))
+	utilruntime.Must(triggersv1beta1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
