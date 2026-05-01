@@ -19,11 +19,11 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-
 	// +kubebuilder:scaffold:imports
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	pipelinev1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -37,7 +37,6 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	"github.com/ntlaletsi70/secure-software-supply-chain/internal/controller"
-	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
 var (
@@ -187,6 +186,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SupplyChain")
+		os.Exit(1)
+	}
+	if err := (&controller.ImageBuildReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "ImageBuild")
 		os.Exit(1)
 	}
 

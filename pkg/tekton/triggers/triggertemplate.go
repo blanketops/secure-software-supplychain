@@ -28,15 +28,13 @@ import (
 )
 
 // EnsureTriggerTemplate ensures the TriggerTemplate exists for the given
-// SupplyChain. The template creates an ImageBuild CR when triggered by
-// a GitHub push event — wiring the event payload directly into the
-// operator's reconciliation loop.
+// SupplyChain. Creates an ImageBuild CR when triggered by a GitHub push.
 //
-// The ImageBuild name is deterministic:
+// ImageBuild name: <supplychain>-<branch>-<full-sha>
+// Deterministic — idempotent on replay, one build per commit.
 //
-//	<supplychain-name>-$(tt.params.git-revision)-$(tt.params.git-commit-sha[0:7])
-//
-// This ensures one ImageBuild per commit per branch — idempotent on replay.
+// Note: Kubernetes label values cannot contain '/' so repo-full-name
+// (e.g. "ntlaletsi70/for-kaniko-app") lives in annotations only.
 func EnsureTriggerTemplate(
 	ctx context.Context,
 	c client.Client,
@@ -45,22 +43,24 @@ func EnsureTriggerTemplate(
 ) error {
 	name := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 
-	// The ImageBuild resource template — populated at trigger time.
 	imageBuildTemplate := map[string]interface{}{
 		"apiVersion": "supplychain.blanketops.dev/v1alpha1",
 		"kind":       "ImageBuild",
 		"metadata": map[string]interface{}{
 			"name":      fmt.Sprintf("%s-$(tt.params.git-revision)-$(tt.params.git-commit-sha)", supplyChainName),
 			"namespace": namespace,
-			"labels": map[string]string{
+			"labels": map[string]interface{}{
+				// Label values: alphanumeric + '-' + '_' + '.' only.
+				// repo-full-name contains '/' → annotation instead.
 				"blanketops.dev/supply-chain": supplyChainName,
 				"blanketops.dev/triggered-by": "github-push",
 				"blanketops.dev/git-revision": "$(tt.params.git-revision)",
-				"blanketops.dev/repo":         "$(tt.params.repo-full-name)",
 			},
-			"annotations": map[string]string{
+			"annotations": map[string]interface{}{
+				// Annotations have no character restrictions.
 				"blanketops.dev/git-commit-sha": "$(tt.params.git-commit-sha)",
 				"blanketops.dev/git-repo-url":   "$(tt.params.git-repo-url)",
+				"blanketops.dev/repo-full-name": "$(tt.params.repo-full-name)",
 			},
 		},
 		"spec": map[string]interface{}{
@@ -68,13 +68,10 @@ func EnsureTriggerTemplate(
 				"name": supplyChainName,
 			},
 			"gitRef": map[string]interface{}{
-				// SSH URL from GitHub push payload — e.g. git@github.com:org/repo.git
-				"url": "$(tt.params.git-repo-url)",
-				// Branch name — e.g. "main", "master"
+				"url":      "$(tt.params.git-repo-url)",
 				"revision": "$(tt.params.git-revision)",
 			},
-			// Full commit SHA used as the image tag — enables traceability
-			// from image back to exact commit that produced it.
+			// Full commit SHA as image tag — every image traceable to exact commit.
 			"imageTag": "$(tt.params.git-commit-sha)",
 		},
 	}
@@ -95,28 +92,15 @@ func EnsureTriggerTemplate(
 		},
 		Spec: triggersv1beta1.TriggerTemplateSpec{
 			Params: []triggersv1beta1.ParamSpec{
-				{
-					Name:        "git-repo-url",
-					Description: "SSH clone URL of the repository",
-				},
-				{
-					Name:        "git-revision",
-					Description: "Branch name that was pushed to",
-				},
-				{
-					Name:        "git-commit-sha",
-					Description: "Full SHA of the commit that triggered the push",
-				},
-				{
-					Name:        "repo-full-name",
-					Description: "GitHub repository full name e.g. org/repo",
-				},
+				{Name: "git-repo-url", Description: "SSH clone URL of the repository"},
+				{Name: "git-revision", Description: "Branch name that was pushed to"},
+				{Name: "git-commit-sha", Description: "Full SHA of the commit"},
+				{Name: "short-sha", Description: "First 7 chars of commit SHA"},
+				{Name: "repo-full-name", Description: "GitHub repo full name e.g. org/repo"},
 			},
 			ResourceTemplates: []triggersv1beta1.TriggerResourceTemplate{
 				{
-					RawExtension: runtime.RawExtension{
-						Raw: raw,
-					},
+					RawExtension: runtime.RawExtension{Raw: raw},
 				},
 			},
 		},
