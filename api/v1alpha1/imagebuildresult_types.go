@@ -19,10 +19,68 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// PipelineStepResults holds the structured output of all 9 pipeline steps.
+// Populated from PipelineRun results after a terminal state is reached.
+type PipelineStepResults struct {
+	// ── Git Provenance ────────────────────────────────────────────────────
+
+	// Commit is the full git commit SHA cloned.
+	// +optional
+	Commit string `json:"commit,omitempty"`
+
+	// CommitterDate is the date of the commit.
+	// +optional
+	CommitterDate string `json:"committerDate,omitempty"`
+
+	// RepoURL is the git repository URL.
+	// +optional
+	RepoURL string `json:"repoURL,omitempty"`
+
+	// ── Build ─────────────────────────────────────────────────────────────
+
+	// ImageURL is the fully-qualified image reference that was built and pushed.
+	// +optional
+	ImageURL string `json:"imageURL,omitempty"`
+
+	// ImageDigest is the content-addressable digest of the built image.
+	// +optional
+	ImageDigest string `json:"imageDigest,omitempty"`
+
+	// ── Security Gates ────────────────────────────────────────────────────
+
+	// TrivyScanSummary is PASS or FAIL from the Trivy vulnerability scan.
+	// +optional
+	TrivyScanSummary string `json:"trivyScanSummary,omitempty"`
+
+	// TrivyCriticalCount is the number of CRITICAL vulnerabilities found.
+	// +optional
+	TrivyCriticalCount string `json:"trivyCriticalCount,omitempty"`
+
+	// TrivyHighCount is the number of HIGH vulnerabilities found.
+	// +optional
+	TrivyHighCount string `json:"trivyHighCount,omitempty"`
+
+	// TrivyTotalCount is the total HIGH+CRITICAL count.
+	// +optional
+	TrivyTotalCount string `json:"trivyTotalCount,omitempty"`
+
+	// TrivySarifPath is the path to the SARIF report in the workspace.
+	// +optional
+	TrivySarifPath string `json:"trivySarifPath,omitempty"`
+
+	// SonarGateStatus is the SonarQube quality gate result.
+	// +optional
+	SonarGateStatus string `json:"sonarGateStatus,omitempty"`
+
+	// ── Attestation ───────────────────────────────────────────────────────
+
+	// GrafeasOccurrence is the Grafeas occurrence name for this build event.
+	// e.g. projects/blanketops/occurrences/abc123
+	// +optional
+	GrafeasOccurrence string `json:"grafeasOccurrence,omitempty"`
+}
+
 // ImageBuildResultSpec defines the desired state of ImageBuildResult.
-// The spec is intentionally minimal — ImageBuildResult is a write-once
-// record created by the controller. The references are stored here so
-// the CR is self-describing even if the referenced resources are pruned.
 type ImageBuildResultSpec struct {
 	// ImageBuildRef references the ImageBuild that produced this result.
 	// +kubebuilder:validation:Required
@@ -46,19 +104,17 @@ type ImageBuildResultStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// Reason is the machine-readable reason for the terminal phase,
-	// sourced directly from the PipelineRun condition reason.
+	// Reason is the machine-readable reason for the terminal phase.
 	// +optional
 	Reason string `json:"reason,omitempty"`
 
-	// ImageURL is the fully-qualified image reference that was built and pushed.
-	// e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+	// ImageURL is the fully-qualified image reference that was built.
+	// Kept at the top level for quick access — also in BuildResults.
 	// +optional
 	ImageURL string `json:"imageURL,omitempty"`
 
 	// ImageDigest is the content-addressable digest of the built image.
-	// e.g. sha256:abc123...
-	// Populated from the buildah task IMAGE_DIGEST result.
+	// Kept at the top level for quick access — also in BuildResults.
 	// +optional
 	ImageDigest string `json:"imageDigest,omitempty"`
 
@@ -71,31 +127,10 @@ type ImageBuildResultStatus struct {
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 
-	// BuildResults contains the structured output of all pipeline steps.
+	// BuildResults contains the full structured output of all pipeline steps.
+	// Populated from PipelineRun results — covers git, build, security, attestation.
 	// +optional
 	BuildResults *PipelineStepResults `json:"buildResults,omitempty"`
-}
-
-type PipelineStepResults struct {
-	// Git
-	Commit        string `json:"commit,omitempty"`
-	CommitterDate string `json:"committerDate,omitempty"`
-	RepoURL       string `json:"repoURL,omitempty"`
-
-	// Build
-	ImageURL    string `json:"imageURL,omitempty"`
-	ImageDigest string `json:"imageDigest,omitempty"`
-
-	// Security
-	TrivyScanSummary   string `json:"trivyScanSummary,omitempty"`
-	TrivyCriticalCount string `json:"trivyCriticalCount,omitempty"`
-	TrivyHighCount     string `json:"trivyHighCount,omitempty"`
-	TrivyTotalCount    string `json:"trivyTotalCount,omitempty"`
-	TrivySarifPath     string `json:"trivySarifPath,omitempty"`
-	SonarGateStatus    string `json:"sonarGateStatus,omitempty"`
-
-	// Attestation
-	GrafeasOccurrence string `json:"grafeasOccurrence,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -108,8 +143,7 @@ type PipelineStepResults struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ImageBuildResult is the durable record of a completed ImageBuild execution.
-// It is created by the controller when a PipelineRun reaches a terminal state
-// and survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
+// Survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
 type ImageBuildResult struct {
 	metav1.TypeMeta `json:",inline"`
 

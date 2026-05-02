@@ -110,21 +110,24 @@ func BuildPipelineRun(
 				// --- RESULTS MAPPING SECTION ---
 				// Aggregates individual Task results into PipelineRun status
 				// for the ImageBuildResult controller to consume.
+				// Drop this Results block into BuildPipelineRun() in pkg/tekton/pipeline/builder.go
+				// replacing the existing Results: []tektonv1.PipelineResult{...} section.
+
 				Results: []tektonv1.PipelineResult{
-					// 1. Git Provenance
-					// {
-					// 	Name:  "commit",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"},
-					// },
-					// {
-					// 	Name:  "committer-date",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"},
-					// },
-					// {
-					// 	Name:  "url",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.url)"},
-					// },
-					// 2. Build Result
+					// ── Git Provenance ────────────────────────────────────────────────
+					{
+						Name:  "commit",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"},
+					},
+					{
+						Name:  "committer-date",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"},
+					},
+					{
+						Name:  "url",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"},
+					},
+					// ── Build ─────────────────────────────────────────────────────────
 					{
 						Name:  "IMAGE_DIGEST",
 						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"},
@@ -133,20 +136,36 @@ func BuildPipelineRun(
 						Name:  "IMAGE_URL",
 						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"},
 					},
-					// 3. Security & Quality Gates
-					// {
-					// 	Name:  "TRIVY_SCAN_SUMMARY",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"},
-					// },
-					// {
-					// 	Name:  "SONAR_GATE_STATUS",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"},
-					// },
-					// // 4. Identity & Metadata
-					// {
-					// 	Name:  "SIGNATURE_DIGEST",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSign + ".results.IMAGE_DIGEST)"},
-					// },
+					// ── Security & Quality Gates ──────────────────────────────────────
+					{
+						Name:  "TRIVY_SCAN_SUMMARY",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"},
+					},
+					{
+						Name:  "TRIVY_CRITICAL_COUNT",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_CRITICAL_COUNT)"},
+					},
+					{
+						Name:  "TRIVY_HIGH_COUNT",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_HIGH_COUNT)"},
+					},
+					{
+						Name:  "TRIVY_TOTAL_COUNT",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_TOTAL_COUNT)"},
+					},
+					{
+						Name:  "TRIVY_SARIF_PATH",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"},
+					},
+					{
+						Name:  "SONAR_GATE_STATUS",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"},
+					},
+					// ── Attestation ───────────────────────────────────────────────────
+					{
+						Name:  "GRAFEAS_OCCURRENCE",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGrafeas + ".results.OCCURRENCE_NAME)"},
+					},
 				},
 			},
 			Params: tektonv1.Params{

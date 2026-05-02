@@ -28,25 +28,17 @@ import (
 )
 
 // Recorder extracts PipelineRun results and writes them to an ImageBuildResult CR.
-// Called by the ImageBuildReconciler when a PipelineRun reaches a terminal state.
-//
-// The ImageBuildResult CR is the durable record of a build execution — it survives
-// PipelineRun pruning and provides a clean API surface for downstream consumers
-// (Grafeas, dashboards, policy engines).
 type Recorder struct {
 	Client client.Client
 	Log    logr.Logger
 }
 
 func New(c client.Client, log logr.Logger) *Recorder {
-	return &Recorder{
-		Client: c,
-		Log:    log,
-	}
+	return &Recorder{Client: c, Log: log}
 }
 
-// Record extracts results from a completed PipelineRun and creates or updates
-// an ImageBuildResult CR owned by the ImageBuild.
+// Record extracts all results from a completed PipelineRun and creates or
+// updates an ImageBuildResult CR owned by the ImageBuild.
 func (r *Recorder) Record(
 	ctx context.Context,
 	ib *supplyv1alpha1.ImageBuild,
@@ -63,12 +55,14 @@ func (r *Recorder) Record(
 	}
 
 	phase, reason := extractPhase(run)
-	imageURL, imageDigest := ExtractImageResults(run)
+	buildResults := ExtractAllResults(run)
 
 	log.Info("recording build result",
 		"phase", phase,
-		"imageURL", imageURL,
-		"imageDigest", imageDigest,
+		"imageURL", buildResults.ImageURL,
+		"imageDigest", buildResults.ImageDigest,
+		"trivySummary", buildResults.TrivyScanSummary,
+		"sonarGate", buildResults.SonarGateStatus,
 	)
 
 	desired := &supplyv1alpha1.ImageBuildResult{
@@ -92,24 +86,15 @@ func (r *Recorder) Record(
 			},
 		},
 		Spec: supplyv1alpha1.ImageBuildResultSpec{
-			ImageBuildRef: supplyv1alpha1.LocalObjectRef{
-				Name: ib.Name,
-			},
-			PipelineRunRef: supplyv1alpha1.LocalObjectRef{
-				Name: run.Name,
-			},
+			ImageBuildRef:  supplyv1alpha1.LocalObjectRef{Name: ib.Name},
+			PipelineRunRef: supplyv1alpha1.LocalObjectRef{Name: run.Name},
 		},
 	}
 
 	var existing supplyv1alpha1.ImageBuildResult
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if err == nil {
-		existing.Status.Phase = phase
-		existing.Status.Reason = reason
-		existing.Status.ImageURL = imageURL
-		existing.Status.ImageDigest = imageDigest
-		existing.Status.CompletedAt = run.Status.CompletionTime
-		existing.Status.PipelineRunName = run.Name
+		applyStatus(&existing.Status, phase, reason, run.Name, run.Status.CompletionTime, buildResults)
 		if updateErr := r.Client.Status().Update(ctx, &existing); updateErr != nil {
 			return fmt.Errorf("updating ImageBuildResult status: %w", updateErr)
 		}
@@ -121,13 +106,7 @@ func (r *Recorder) Record(
 		return fmt.Errorf("creating ImageBuildResult: %w", createErr)
 	}
 
-	desired.Status.Phase = phase
-	desired.Status.Reason = reason
-	desired.Status.ImageURL = imageURL
-	desired.Status.ImageDigest = imageDigest
-	desired.Status.CompletedAt = run.Status.CompletionTime
-	desired.Status.PipelineRunName = run.Name
-
+	applyStatus(&desired.Status, phase, reason, run.Name, run.Status.CompletionTime, buildResults)
 	if updateErr := r.Client.Status().Update(ctx, desired); updateErr != nil {
 		return fmt.Errorf("setting ImageBuildResult status: %w", updateErr)
 	}
@@ -136,22 +115,77 @@ func (r *Recorder) Record(
 	return nil
 }
 
-// ExtractImageResults pulls IMAGE_URL and IMAGE_DIGEST from PipelineRun results.
+// ExtractAllResults pulls the full set of results from all 9 pipeline steps.
 // Exported so the ImageBuildReconciler terminal block can call it directly.
-// These are emitted by the buildah task and mapped to PipelineRun results in builder.go.
-func ExtractImageResults(run *tektonv1.PipelineRun) (imageURL, imageDigest string) {
+//
+// Result name mapping (matches PipelineRun results in builder.go):
+//
+//	git-clone:              commit, committer-date, url
+//	build-image-buildah:    IMAGE_URL, IMAGE_DIGEST
+//	vulnerability-scan-trivy: TRIVY_SCAN_SUMMARY, TRIVY_CRITICAL_COUNT,
+//	                           TRIVY_HIGH_COUNT, TRIVY_TOTAL_COUNT, TRIVY_SARIF_PATH
+//	code-scan-sonarqube:    SONAR_GATE_STATUS
+//	publish-metadata-grafeas: GRAFEAS_OCCURRENCE
+func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepResults {
+	r := &supplyv1alpha1.PipelineStepResults{}
 	for _, result := range run.Status.Results {
 		switch result.Name {
+		// Git
+		case "commit":
+			r.Commit = result.Value.StringVal
+		case "committer-date":
+			r.CommitterDate = result.Value.StringVal
+		case "url":
+			r.RepoURL = result.Value.StringVal
+		// Build
 		case "IMAGE_URL":
-			imageURL = result.Value.StringVal
+			r.ImageURL = result.Value.StringVal
 		case "IMAGE_DIGEST":
-			imageDigest = result.Value.StringVal
+			r.ImageDigest = result.Value.StringVal
+		// Trivy
+		case "TRIVY_SCAN_SUMMARY":
+			r.TrivyScanSummary = result.Value.StringVal
+		case "TRIVY_CRITICAL_COUNT":
+			r.TrivyCriticalCount = result.Value.StringVal
+		case "TRIVY_HIGH_COUNT":
+			r.TrivyHighCount = result.Value.StringVal
+		case "TRIVY_TOTAL_COUNT":
+			r.TrivyTotalCount = result.Value.StringVal
+		case "TRIVY_SARIF_PATH":
+			r.TrivySarifPath = result.Value.StringVal
+		// SonarQube
+		case "SONAR_GATE_STATUS":
+			r.SonarGateStatus = result.Value.StringVal
+		// Grafeas
+		case "GRAFEAS_OCCURRENCE":
+			r.GrafeasOccurrence = result.Value.StringVal
 		}
 	}
-	return imageURL, imageDigest
+	return r
 }
 
-// extractPhase maps PipelineRun condition to ImageBuildResult phase.
+// ExtractImageResults returns just IMAGE_URL and IMAGE_DIGEST.
+// Kept for backwards compatibility with callers that only need the image ref.
+func ExtractImageResults(run *tektonv1.PipelineRun) (imageURL, imageDigest string) {
+	r := ExtractAllResults(run)
+	return r.ImageURL, r.ImageDigest
+}
+
+func applyStatus(
+	s *supplyv1alpha1.ImageBuildResultStatus,
+	phase, reason, pipelineRunName string,
+	completedAt *metav1.Time,
+	br *supplyv1alpha1.PipelineStepResults,
+) {
+	s.Phase = phase
+	s.Reason = reason
+	s.PipelineRunName = pipelineRunName
+	s.CompletedAt = completedAt
+	s.ImageURL = br.ImageURL
+	s.ImageDigest = br.ImageDigest
+	s.BuildResults = br
+}
+
 func extractPhase(run *tektonv1.PipelineRun) (phase, reason string) {
 	for _, cond := range run.Status.Conditions {
 		if cond.Type != "Succeeded" {
