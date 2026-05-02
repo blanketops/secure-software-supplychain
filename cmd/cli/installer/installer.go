@@ -70,6 +70,10 @@ type step struct {
 // --oidc-trusted-ca-file flag — no PostHook patching required.
 var installOrder = []step{
 	{
+		Name:  "MetalLB Install",
+		Paths: []string{"dependencies/metallb/release"},
+	},
+	{
 		Name:  "Tekton Pipelines",
 		Paths: []string{"dependencies/tekton/pipelines"},
 	},
@@ -111,10 +115,6 @@ var installOrder = []step{
 	{
 		Name:  "Grafeas",
 		Paths: []string{"dependencies/grafeas"},
-	},
-	{
-		Name:  "MetalLB Install",
-		Paths: []string{"dependencies/metallb/release"},
 	},
 	{
 		Name:  "MetalLB Dependencies",

@@ -7,6 +7,7 @@ metadata:
   name: for-kaniko-app
 spec:
   repository: ntlaletsi70/for-kaniko-app
+  webhookHost: pop-os.tailf8145.ts.net
   image:
     registry: docker.io
     name: nkanyezisolutions/for-kaniko-app

@@ -183,6 +183,11 @@ spec:
                     description: Trivy enables vulnerability scanning
                     type: boolean
                 type: object
+              webhookHost:
+                description: |-
+                  WebhookHost is the public hostname for the EventListener ingress.
+                  e.g. pop-os.tailf8145.ts.net
+                type: string
             required:
             - image
             - repository

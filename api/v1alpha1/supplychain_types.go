@@ -41,6 +41,11 @@ type SupplyChainSpec struct {
 	// ServiceAccountName is the k8s SA used by Tekton TaskRuns
 	// +kubebuilder:default="default"
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// WebhookHost is the public hostname for the EventListener ingress.
+	// e.g. pop-os.tailf8145.ts.net
+	// +optional
+	WebhookHost string `json:"webhookHost,omitempty"`
 }
 
 // ImageSpec defines image build and push configuration
