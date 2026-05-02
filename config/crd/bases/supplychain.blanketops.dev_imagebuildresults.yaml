@@ -11,13 +11,34 @@ spec:
     kind: ImageBuildResult
     listKind: ImageBuildResultList
     plural: imagebuildresults
+    shortNames:
+    - ibr
     singular: imagebuildresult
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.imageURL
+      name: ImageURL
+      type: string
+    - jsonPath: .status.imageDigest
+      name: Digest
+      type: string
+    - jsonPath: .status.completedAt
+      name: CompletedAt
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ImageBuildResult is the Schema for the imagebuildresults API
+        description: |-
+          ImageBuildResult is the durable record of a completed ImageBuild execution.
+          It is created by the controller when a PipelineRun reaches a terminal state
+          and survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
         properties:
           apiVersion:
             description: |-
@@ -37,27 +58,47 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of ImageBuildResult
+            description: |-
+              ImageBuildResultSpec defines the desired state of ImageBuildResult.
+              The spec is intentionally minimal — ImageBuildResult is a write-once
+              record created by the controller. The references are stored here so
+              the CR is self-describing even if the referenced resources are pruned.
             properties:
-              foo:
-                description: foo is an example field of ImageBuildResult. Edit imagebuildresult_types.go
-                  to remove/update
-                type: string
+              imageBuildRef:
+                description: ImageBuildRef references the ImageBuild that produced
+                  this result.
+                properties:
+                  name:
+                    description: Name of the object.
+                    type: string
+                required:
+                - name
+                type: object
+              pipelineRunRef:
+                description: PipelineRunRef references the Tekton PipelineRun that
+                  was executed.
+                properties:
+                  name:
+                    description: Name of the object.
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - imageBuildRef
+            - pipelineRunRef
             type: object
           status:
-            description: status defines the observed state of ImageBuildResult
+            description: ImageBuildResultStatus defines the observed state of ImageBuildResult.
             properties:
+              completedAt:
+                description: CompletedAt is the timestamp when the PipelineRun reached
+                  a terminal state.
+                format: date-time
+                type: string
               conditions:
-                description: |-
-                  conditions represent the current state of the ImageBuildResult resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Conditions represent the current state of the ImageBuildResult
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +157,34 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              imageDigest:
+                description: |-
+                  ImageDigest is the content-addressable digest of the built image.
+                  e.g. sha256:abc123...
+                  Populated from the buildah task IMAGE_DIGEST result.
+                type: string
+              imageURL:
+                description: |-
+                  ImageURL is the fully-qualified image reference that was built and pushed.
+                  e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+                type: string
+              phase:
+                description: Phase is the terminal phase of the build execution.
+                enum:
+                - Succeeded
+                - Failed
+                - Unknown
+                type: string
+              pipelineRunName:
+                description: |-
+                  PipelineRunName is the name of the Tekton PipelineRun that was executed.
+                  Stored here so the result remains useful after PipelineRun pruning.
+                type: string
+              reason:
+                description: |-
+                  Reason is the machine-readable reason for the terminal phase,
+                  sourced directly from the PipelineRun condition reason.
+                type: string
             type: object
         required:
         - spec

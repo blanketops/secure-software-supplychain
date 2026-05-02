@@ -13,77 +13,96 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
 package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ImageBuildResultSpec defines the desired state of ImageBuildResult
+// ImageBuildResultSpec defines the desired state of ImageBuildResult.
+// The spec is intentionally minimal — ImageBuildResult is a write-once
+// record created by the controller. The references are stored here so
+// the CR is self-describing even if the referenced resources are pruned.
 type ImageBuildResultSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// ImageBuildRef references the ImageBuild that produced this result.
+	// +kubebuilder:validation:Required
+	ImageBuildRef LocalObjectRef `json:"imageBuildRef"`
 
-	// foo is an example field of ImageBuildResult. Edit imagebuildresult_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// PipelineRunRef references the Tekton PipelineRun that was executed.
+	// +kubebuilder:validation:Required
+	PipelineRunRef LocalObjectRef `json:"pipelineRunRef"`
 }
 
 // ImageBuildResultStatus defines the observed state of ImageBuildResult.
 type ImageBuildResultStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the ImageBuildResult resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// Conditions represent the current state of the ImageBuildResult resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Phase is the terminal phase of the build execution.
+	// +kubebuilder:validation:Enum=Succeeded;Failed;Unknown
+	// +optional
+	Phase string `json:"phase,omitempty"`
+
+	// Reason is the machine-readable reason for the terminal phase,
+	// sourced directly from the PipelineRun condition reason.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
+	// ImageURL is the fully-qualified image reference that was built and pushed.
+	// e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+	// +optional
+	ImageURL string `json:"imageURL,omitempty"`
+
+	// ImageDigest is the content-addressable digest of the built image.
+	// e.g. sha256:abc123...
+	// Populated from the buildah task IMAGE_DIGEST result.
+	// +optional
+	ImageDigest string `json:"imageDigest,omitempty"`
+
+	// PipelineRunName is the name of the Tekton PipelineRun that was executed.
+	// Stored here so the result remains useful after PipelineRun pruning.
+	// +optional
+	PipelineRunName string `json:"pipelineRunName,omitempty"`
+
+	// CompletedAt is the timestamp when the PipelineRun reached a terminal state.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced,shortName=ibr
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="ImageURL",type=string,JSONPath=`.status.imageURL`
+// +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.status.imageDigest`
+// +kubebuilder:printcolumn:name="CompletedAt",type=date,JSONPath=`.status.completedAt`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// ImageBuildResult is the Schema for the imagebuildresults API
+// ImageBuildResult is the durable record of a completed ImageBuild execution.
+// It is created by the controller when a PipelineRun reaches a terminal state
+// and survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
 type ImageBuildResult struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the desired state of ImageBuildResult
 	// +required
 	Spec ImageBuildResultSpec `json:"spec"`
 
-	// status defines the observed state of ImageBuildResult
 	// +optional
-	Status ImageBuildResultStatus `json:"status,omitzero"`
+	Status ImageBuildResultStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ImageBuildResultList contains a list of ImageBuildResult
+// ImageBuildResultList contains a list of ImageBuildResult.
 type ImageBuildResultList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ImageBuildResult `json:"items"`
 }
 
