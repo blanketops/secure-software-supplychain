@@ -95,6 +95,10 @@ data:
     ###################################################################
 ---
 # Source: fulcio/templates/fulcio-configmap.yaml
+# BlanketOps: patched to use in-cluster Kubernetes OIDC issuer.
+# Default Helm config uses https://kubernetes.default.svc which does not
+# match the issuer URL returned by the kube API server. The full DNS name
+# must be used or Fulcio will reject all TokenRequest tokens.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -106,11 +110,8 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
+    blanketops.dev/managed: "true"
 data:
-  # We now expect a new field "format" for checking the format of the
-  # config's content.
-  # If the field format is empty, the default case is consider that is a
-  # json or is empty and should use the defaults as defined on the file _helpers.tpl
   config.json: |-
     {
       "OIDCIssuers": {
@@ -136,7 +137,7 @@ metadata:
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
 rules:
-- apiGroups: [ "" ] # "" indicates the core API group
+- apiGroups: [ "" ]
   resources: [ "configmaps" ]
   resourceNames: [ "ctlog-config" ]
   verbs: [ "get", "update" ]
@@ -154,11 +155,11 @@ metadata:
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
 rules:
-- apiGroups: [ "" ] # "" indicates the core API group
+- apiGroups: [ "" ]
   resources: [ "configmaps" ]
   resourceNames: [ "ctlog-config" ]
   verbs: [ "get", "update" ]
-- apiGroups: [ "" ] # "" indicates the core API group
+- apiGroups: [ "" ]
   resources: [ "secrets" ]
   verbs: [ "create", "get", "update" ]
 ---
@@ -175,7 +176,7 @@ metadata:
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
 rules:
-- apiGroups: [ "" ] # "" indicates the core API group
+- apiGroups: [ "" ]
   resources: [ "secrets" ]
   verbs: [ "create", "get", "update" ]
 ---
@@ -246,7 +247,6 @@ subjects:
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
   labels:
     helm.sh/chart: ctlog-0.2.66
     app.kubernetes.io/name: ctlog
@@ -268,13 +268,12 @@ spec:
   selector:
     app.kubernetes.io/name: ctlog
     app.kubernetes.io/instance: fulcio
-  type: "ClusterIP"
+  type: ClusterIP
 ---
 # Source: fulcio/templates/fulcio-service.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  annotations:
   labels:
     helm.sh/chart: fulcio-2.7.5
     app.kubernetes.io/name: fulcio
@@ -300,7 +299,7 @@ spec:
   selector:
     app.kubernetes.io/name: fulcio
     app.kubernetes.io/instance: fulcio
-  type: "ClusterIP"
+  type: ClusterIP
 ---
 # Source: fulcio/charts/ctlog/templates/ctlog-deployment.yaml
 apiVersion: apps/v1
@@ -338,7 +337,7 @@ spec:
       containers:
       - name: ctlog
         image: "ghcr.io/sigstore/scaffolding/ct_server:v0.7.31@sha256:66664ba563e7c2564ba32fb5d0e8fdeb42d7f0d5ce45f0df5d80074daea5126c"
-        imagePullPolicy: "IfNotPresent"
+        imagePullPolicy: IfNotPresent
         args:
         - "--http_endpoint=0.0.0.0:6962"
         - "--metrics_endpoint=0.0.0.0:6963"
@@ -372,6 +371,11 @@ spec:
           secretName: ctlog-secret
 ---
 # Source: fulcio/templates/fulcio-deployment.yaml
+# BlanketOps patches applied:
+#   1. SSL_CERT_FILE env var — tells Go TLS to trust the kube root CA when
+#      Fulcio fetches https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
+#   2. oidc-info volume — mounts kube-root-ca.crt at /var/run/fulcio/ca.crt
+#   3. mode: 438 — octal 0666, required by Kubernetes projected volume validation
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -383,6 +387,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
+    blanketops.dev/managed: "true"
 spec:
   replicas: 1
   selector:
@@ -398,12 +403,11 @@ spec:
         app.kubernetes.io/instance: fulcio
     spec:
       serviceAccountName: fulcio-server
-      # This doesn't actually use Kubernetes credentials, so don't mount them in.
       automountServiceAccountToken: true
       containers:
       - name: fulcio-server
         image: "ghcr.io/sigstore/fulcio:v1.8.5@sha256:b51ed0cb6761070d632bf81d28894ef1827b2c18da2535689ca8e98d91d3a015"
-        imagePullPolicy: "IfNotPresent"
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5555
           protocol: TCP
@@ -423,14 +427,16 @@ spec:
         - "--fileca-key-passwd"
         - "$(PASSWORD)"
         - "--ct-log-url=http://ctlog.ctlog-system.svc/fulcio"
-        - '--config-path=/etc/fulcio-config/config.json'
-        - '--oidc-trusted-ca-file=/var/run/fulcio/ca.crt'
+        - "--config-path=/etc/fulcio-config/config.json"
         env:
         - name: PASSWORD
           valueFrom:
             secretKeyRef:
               name: fulcio-server-secret
               key: password
+        # SSL_CERT_FILE tells Go's TLS stack to trust the kube root CA.
+        # Required so Fulcio can verify the OIDC discovery endpoint at
+        # https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
         - name: SSL_CERT_FILE
           value: /var/run/fulcio/ca.crt
         livenessProbe:
@@ -474,7 +480,7 @@ spec:
               items:
               - key: ca.crt
                 path: ca.crt
-                mode: 666
+                mode: 438
       - name: fulcio-cert
         secret:
           secretName: fulcio-server-secret
@@ -505,10 +511,22 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: true
       initContainers:
-      - name: "wait-for-createtree-configmap"
+      - name: wait-for-createtree-configmap
         image: "docker.io/curlimages/curl:8.17.0@sha256:935d9100e9ba842cdb060de42472c7ca90cfe9a7c96e4dacb55e79e560b3ff40"
         imagePullPolicy: IfNotPresent
-        command: [ "sh", "-c", "until curl --fail --header \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt --max-time 10 https://kubernetes.default.svc/api/v1/namespaces/$(NAMESPACE)/configmaps/ctlog-config | grep '\"treeID\":'; do echo waiting for Configmap ctlog-config; sleep 5; done;" ]
+        command:
+        - sh
+        - -c
+        - |
+          until curl --fail \
+            --header "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+            --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+            --max-time 10 \
+            https://kubernetes.default.svc/api/v1/namespaces/$(NAMESPACE)/configmaps/ctlog-config \
+            | grep '"treeID":'; do
+            echo waiting for Configmap ctlog-config
+            sleep 5
+          done
         env:
         - name: NAMESPACE
           valueFrom:
@@ -517,8 +535,14 @@ spec:
       containers:
       - name: fulcio-ctlog-createctconfig
         image: "ghcr.io/sigstore/scaffolding/createctconfig:v0.7.31@sha256:3a061734c5be610d69830ea1e223bd6a8b86bc262b67ff7409147d7db698df51"
-        imagePullPolicy: "IfNotPresent"
-        args: [ "--configmap=ctlog-config", "--secret=ctlog-secret", "--pubkeysecret=ctlog-public-key", "--fulcio-url=http://fulcio-server.fulcio-system.svc", "--trillian-server=trillian-logserver.trillian-system:8091", "--log-prefix=fulcio" ]
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--configmap=ctlog-config"
+        - "--secret=ctlog-secret"
+        - "--pubkeysecret=ctlog-public-key"
+        - "--fulcio-url=http://fulcio-server.fulcio-system.svc"
+        - "--trillian-server=trillian-logserver.trillian-system:8091"
+        - "--log-prefix=fulcio"
         env:
         - name: NAMESPACE
           valueFrom:
@@ -550,13 +574,17 @@ spec:
       containers:
       - name: ctlog-createtree
         image: "ghcr.io/sigstore/scaffolding/createtree:v0.7.31@sha256:e5232e8c9122fcf87260b48f4b05bcb95c35c8aaa57581b42f0fde7460bd3e91"
-        imagePullPolicy: "IfNotPresent"
+        imagePullPolicy: IfNotPresent
         env:
         - name: NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        args: [ "--namespace=$(NAMESPACE)", "--configmap=ctlog-config", "--display_name=ctlog-tree", "--admin_server=trillian-logserver.trillian-system:8091" ]
+        args:
+        - "--namespace=$(NAMESPACE)"
+        - "--configmap=ctlog-config"
+        - "--display_name=ctlog-tree"
+        - "--admin_server=trillian-logserver.trillian-system:8091"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -583,8 +611,9 @@ spec:
       containers:
       - name: fulcio-createcerts
         image: "ghcr.io/sigstore/scaffolding/createcerts@sha256:7f59f7c08d1a82ac5fbd6d0f1f9082152dadc8d59022c52780eb3648f4b88112"
-        imagePullPolicy: "IfNotPresent"
-        args: [ "--secret=fulcio-server-secret" ]
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--secret=fulcio-server-secret"
         env:
         - name: NAMESPACE
           valueFrom:
@@ -595,7 +624,7 @@ spec:
         runAsUser: 65533
 ---
 # Source: fulcio/templates/fulcio-http-ingress.yaml
-apiVersion: "networking.k8s.io/v1"
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   labels:
@@ -606,7 +635,6 @@ metadata:
     app.kubernetes.io/managed-by: Helm
   name: fulcio-server-http
   namespace: fulcio-system
-  annotations: {}
 spec:
   ingressClassName: nginx
   rules:
