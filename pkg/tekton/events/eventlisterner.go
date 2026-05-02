@@ -24,7 +24,11 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 )
 
 const (
@@ -38,6 +42,9 @@ const (
 // for the given SupplyChain. One EventListener per namespace, shared across
 // all SupplyChains. Each SupplyChain gets its own named trigger entry.
 //
+// Both the EventListener and the Ingress are owned by the SupplyChain —
+// they are garbage collected when the SupplyChain is deleted.
+//
 // The Ingress exposes the EventListener on port 80 of the node, eliminating
 // the need for kubectl port-forward or smee.io for production setups.
 // For kind clusters, install ingress-nginx with hostPort binding:
@@ -46,15 +53,21 @@ const (
 func EnsureEventListener(
 	ctx context.Context,
 	c client.Client,
-	namespace string,
-	supplyChainName string,
+	scheme *runtime.Scheme,
+	sc *supplyv1alpha1.SupplyChain,
 	serviceAccountName string,
 ) error {
+	namespace := sc.Namespace
+	supplyChainName := sc.Name
+
 	// ── EventListener ─────────────────────────────────────────────────────
 	var existing triggersv1beta1.EventListener
 	err := c.Get(ctx, client.ObjectKey{Name: eventListenerName, Namespace: namespace}, &existing)
 	if apierrors.IsNotFound(err) {
 		el := buildEventListener(eventListenerName, namespace, supplyChainName, serviceAccountName)
+		if err := controllerutil.SetControllerReference(sc, el, scheme); err != nil {
+			return fmt.Errorf("setting EventListener owner: %w", err)
+		}
 		if err := c.Create(ctx, el); err != nil {
 			return fmt.Errorf("creating EventListener: %w", err)
 		}
@@ -81,9 +94,8 @@ func EnsureEventListener(
 	}
 
 	// ── Ingress ───────────────────────────────────────────────────────────
-	// Exposes the EventListener service via nginx so GitHub can reach it
-	// directly — no port-forward, no smee.io required for production.
-	if err := ensureIngress(ctx, c, namespace); err != nil {
+	// Owned by the SupplyChain — cleaned up on SupplyChain deletion.
+	if err := ensureIngress(ctx, c, scheme, sc); err != nil {
 		return fmt.Errorf("ensuring EventListener ingress: %w", err)
 	}
 
@@ -91,11 +103,20 @@ func EnsureEventListener(
 }
 
 // ensureIngress creates the nginx Ingress for the EventListener if it doesn't exist.
-func ensureIngress(ctx context.Context, c client.Client, namespace string) error {
+func ensureIngress(
+	ctx context.Context,
+	c client.Client,
+	scheme *runtime.Scheme,
+	sc *supplyv1alpha1.SupplyChain,
+) error {
 	var existing networkingv1.Ingress
-	err := c.Get(ctx, client.ObjectKey{Name: ingressName, Namespace: namespace}, &existing)
+	err := c.Get(ctx, client.ObjectKey{Name: ingressName, Namespace: sc.Namespace}, &existing)
 	if apierrors.IsNotFound(err) {
-		return c.Create(ctx, buildIngress(namespace))
+		ingress := buildIngress(sc.Namespace)
+		if err := controllerutil.SetControllerReference(sc, ingress, scheme); err != nil {
+			return fmt.Errorf("setting Ingress owner: %w", err)
+		}
+		return c.Create(ctx, ingress)
 	}
 	if err != nil {
 		return fmt.Errorf("fetching Ingress: %w", err)
