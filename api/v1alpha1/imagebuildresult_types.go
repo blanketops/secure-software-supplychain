@@ -70,6 +70,32 @@ type ImageBuildResultStatus struct {
 	// CompletedAt is the timestamp when the PipelineRun reached a terminal state.
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// BuildResults contains the structured output of all pipeline steps.
+	// +optional
+	BuildResults *PipelineStepResults `json:"buildResults,omitempty"`
+}
+
+type PipelineStepResults struct {
+	// Git
+	Commit        string `json:"commit,omitempty"`
+	CommitterDate string `json:"committerDate,omitempty"`
+	RepoURL       string `json:"repoURL,omitempty"`
+
+	// Build
+	ImageURL    string `json:"imageURL,omitempty"`
+	ImageDigest string `json:"imageDigest,omitempty"`
+
+	// Security
+	TrivyScanSummary   string `json:"trivyScanSummary,omitempty"`
+	TrivyCriticalCount string `json:"trivyCriticalCount,omitempty"`
+	TrivyHighCount     string `json:"trivyHighCount,omitempty"`
+	TrivyTotalCount    string `json:"trivyTotalCount,omitempty"`
+	TrivySarifPath     string `json:"trivySarifPath,omitempty"`
+	SonarGateStatus    string `json:"sonarGateStatus,omitempty"`
+
+	// Attestation
+	GrafeasOccurrence string `json:"grafeasOccurrence,omitempty"`
 }
 
 // +kubebuilder:object:root=true

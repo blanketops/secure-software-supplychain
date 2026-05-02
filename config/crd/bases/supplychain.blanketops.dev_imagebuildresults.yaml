@@ -91,6 +91,39 @@ spec:
           status:
             description: ImageBuildResultStatus defines the observed state of ImageBuildResult.
             properties:
+              buildResults:
+                description: BuildResults contains the structured output of all pipeline
+                  steps.
+                properties:
+                  commit:
+                    description: Git
+                    type: string
+                  committerDate:
+                    type: string
+                  grafeasOccurrence:
+                    description: Attestation
+                    type: string
+                  imageDigest:
+                    type: string
+                  imageURL:
+                    description: Build
+                    type: string
+                  repoURL:
+                    type: string
+                  sonarGateStatus:
+                    type: string
+                  trivyCriticalCount:
+                    type: string
+                  trivyHighCount:
+                    type: string
+                  trivySarifPath:
+                    type: string
+                  trivyScanSummary:
+                    description: Security
+                    type: string
+                  trivyTotalCount:
+                    type: string
+                type: object
               completedAt:
                 description: CompletedAt is the timestamp when the PipelineRun reached
                   a terminal state.
