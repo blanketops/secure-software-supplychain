@@ -17,8 +17,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
-  annotations:
-    {}
+  annotations: {}
 ---
 # Source: fulcio/charts/ctlog/templates/createtree-serviceaccount.yaml
 apiVersion: v1
@@ -32,8 +31,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
-  annotations:
-    {}
+  annotations: {}
 ---
 # Source: fulcio/charts/ctlog/templates/ctlog-serviceaccount.yaml
 apiVersion: v1
@@ -47,8 +45,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
-  annotations:
-    {}
+  annotations: {}
 ---
 # Source: fulcio/templates/createcerts-serviceacount.yaml
 apiVersion: v1
@@ -62,8 +59,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
-  annotations:
-    {}
+  annotations: {}
 ---
 # Source: fulcio/templates/fulcio-serviceaccount.yaml
 apiVersion: v1
@@ -77,8 +73,7 @@ metadata:
     app.kubernetes.io/instance: fulcio
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
-  annotations:
-    {}
+  annotations: {}
 ---
 # Source: fulcio/charts/ctlog/templates/ctlog-configmap.yaml
 apiVersion: v1
@@ -112,10 +107,10 @@ metadata:
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
 data:
-# We now expect a new field "format" for checking the format of the
-# config's content.
-# If the field format is empty, the default case is consider that is a
-# json or is empty and should use the defaults as defined on the file _helpers.tpl
+  # We now expect a new field "format" for checking the format of the
+  # config's content.
+  # If the field format is empty, the default case is consider that is a
+  # json or is empty and should use the defaults as defined on the file _helpers.tpl
   config.json: |-
     {
       "OIDCIssuers": {
@@ -141,10 +136,10 @@ metadata:
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
 rules:
-  - apiGroups: [""] # "" indicates the core API group
-    resources: ["configmaps"]
-    resourceNames: ["ctlog-config"]
-    verbs: ["get", "update"]
+- apiGroups: [ "" ] # "" indicates the core API group
+  resources: [ "configmaps" ]
+  resourceNames: [ "ctlog-config" ]
+  verbs: [ "get", "update" ]
 ---
 # Source: fulcio/charts/ctlog/templates/secret-operator-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -159,13 +154,13 @@ metadata:
     app.kubernetes.io/version: "0.7.31"
     app.kubernetes.io/managed-by: Helm
 rules:
-  - apiGroups: [""] # "" indicates the core API group
-    resources: ["configmaps"]
-    resourceNames: ["ctlog-config"]
-    verbs: ["get", "update"]
-  - apiGroups: [""] # "" indicates the core API group
-    resources: ["secrets"]
-    verbs: ["create", "get", "update"]
+- apiGroups: [ "" ] # "" indicates the core API group
+  resources: [ "configmaps" ]
+  resourceNames: [ "ctlog-config" ]
+  verbs: [ "get", "update" ]
+- apiGroups: [ "" ] # "" indicates the core API group
+  resources: [ "secrets" ]
+  verbs: [ "create", "get", "update" ]
 ---
 # Source: fulcio/templates/secret-operator-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -180,9 +175,9 @@ metadata:
     app.kubernetes.io/version: "1.8.5"
     app.kubernetes.io/managed-by: Helm
 rules:
-  - apiGroups: [""] # "" indicates the core API group
-    resources: ["secrets"]
-    verbs: ["create", "get", "update"]
+- apiGroups: [ "" ] # "" indicates the core API group
+  resources: [ "secrets" ]
+  verbs: [ "create", "get", "update" ]
 ---
 # Source: fulcio/charts/ctlog/templates/cm-operator-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -201,9 +196,9 @@ roleRef:
   kind: Role
   name: ctlog-cm-operator
 subjects:
-  - kind: ServiceAccount
-    name: ctlog-createtree
-    namespace: ctlog-system
+- kind: ServiceAccount
+  name: ctlog-createtree
+  namespace: ctlog-system
 ---
 # Source: fulcio/charts/ctlog/templates/secret-operator-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -222,9 +217,9 @@ roleRef:
   kind: Role
   name: ctlog-secret-operator
 subjects:
-  - kind: ServiceAccount
-    name: fulcio-ctlog-createctconfig
-    namespace: ctlog-system
+- kind: ServiceAccount
+  name: fulcio-ctlog-createctconfig
+  namespace: ctlog-system
 ---
 # Source: fulcio/templates/secret-operator-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -243,9 +238,9 @@ roleRef:
   kind: Role
   name: fulcio-server-secret-operator
 subjects:
-  - kind: ServiceAccount
-    name: fulcio-createcerts
-    namespace: fulcio-system
+- kind: ServiceAccount
+  name: fulcio-createcerts
+  namespace: fulcio-system
 ---
 # Source: fulcio/charts/ctlog/templates/ctlog-service.yaml
 apiVersion: v1
@@ -262,14 +257,14 @@ metadata:
   namespace: ctlog-system
 spec:
   ports:
-    - name: 6962-tcp
-      port: 80
-      protocol: TCP
-      targetPort: 6962
-    - name: 6963-tcp
-      port: 6963
-      protocol: TCP
-      targetPort: 6963
+  - name: 6962-tcp
+    port: 80
+    protocol: TCP
+    targetPort: 6962
+  - name: 6963-tcp
+    port: 6963
+    protocol: TCP
+    targetPort: 6963
   selector:
     app.kubernetes.io/name: ctlog
     app.kubernetes.io/instance: fulcio
@@ -290,18 +285,18 @@ metadata:
   namespace: fulcio-system
 spec:
   ports:
-    - name: http
-      port: 80
-      protocol: TCP
-      targetPort: 5555
-    - name: grpc
-      port: 5554
-      protocol: TCP
-      targetPort: 5554
-    - name: 2112-tcp
-      port: 2112
-      protocol: TCP
-      targetPort: 2112
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 5555
+  - name: grpc
+    port: 5554
+    protocol: TCP
+    targetPort: 5554
+  - name: 2112-tcp
+    port: 2112
+    protocol: TCP
+    targetPort: 2112
   selector:
     app.kubernetes.io/name: fulcio
     app.kubernetes.io/instance: fulcio
@@ -341,40 +336,40 @@ spec:
     spec:
       serviceAccountName: ctlog
       containers:
-        - name: ctlog
-          image: "ghcr.io/sigstore/scaffolding/ct_server:v0.7.31@sha256:66664ba563e7c2564ba32fb5d0e8fdeb42d7f0d5ce45f0df5d80074daea5126c"
-          imagePullPolicy: "IfNotPresent"
-          args:
-            - "--http_endpoint=0.0.0.0:6962"
-            - "--metrics_endpoint=0.0.0.0:6963"
-            - "--log_config=/ctfe-keys/config"
-            - "--alsologtostderr"
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 6962
-            initialDelaySeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 6962
-            initialDelaySeconds: 10
-          volumeMounts:
-            - name: keys
-              mountPath: "/ctfe-keys"
-              readOnly: true
-          ports:            
-            - containerPort: 6962
-              protocol: TCP
-            - containerPort: 6963
-              protocol: TCP
+      - name: ctlog
+        image: "ghcr.io/sigstore/scaffolding/ct_server:v0.7.31@sha256:66664ba563e7c2564ba32fb5d0e8fdeb42d7f0d5ce45f0df5d80074daea5126c"
+        imagePullPolicy: "IfNotPresent"
+        args:
+        - "--http_endpoint=0.0.0.0:6962"
+        - "--metrics_endpoint=0.0.0.0:6963"
+        - "--log_config=/ctfe-keys/config"
+        - "--alsologtostderr"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6962
+          initialDelaySeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 6962
+          initialDelaySeconds: 10
+        volumeMounts:
+        - name: keys
+          mountPath: "/ctfe-keys"
+          readOnly: true
+        ports:
+        - containerPort: 6962
+          protocol: TCP
+        - containerPort: 6963
+          protocol: TCP
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
       volumes:
-        - name: keys
-          secret:
-            secretName: ctlog-secret
+      - name: keys
+        secret:
+          secretName: ctlog-secret
 ---
 # Source: fulcio/templates/fulcio-deployment.yaml
 apiVersion: apps/v1
@@ -406,86 +401,88 @@ spec:
       # This doesn't actually use Kubernetes credentials, so don't mount them in.
       automountServiceAccountToken: true
       containers:
-        - name: fulcio-server
-          image: "ghcr.io/sigstore/fulcio:v1.8.5@sha256:b51ed0cb6761070d632bf81d28894ef1827b2c18da2535689ca8e98d91d3a015"
-          imagePullPolicy: "IfNotPresent"
-          ports:            
-            - containerPort: 5555
-              protocol: TCP
-            - containerPort: 5554
-              protocol: TCP
-            - containerPort: 2112
-              protocol: TCP
-          args:
-            - "serve"
-            - "--port=5555"
-            - "--grpc-port=5554"
-            - "--ca=fileca"
-            - "--fileca-key"
-            - "/var/run/fulcio-secrets/key.pem"
-            - "--fileca-cert"
-            - "/var/run/fulcio-secrets/cert.pem"
-            - "--fileca-key-passwd"
-            - "$(PASSWORD)"
-            - "--ct-log-url=http://ctlog.ctlog-system.svc/fulcio"
-            - '--config-path=/etc/fulcio-config/config.json'
-            - '--oidc-trusted-ca-file=/var/run/fulcio/ca.crt'
-          env:
-            - name: PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: fulcio-server-secret
-                  key: password
-          livenessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /healthz
-              port: 5555
-              scheme: HTTP
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          readinessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /healthz
-              port: 5555
-              scheme: HTTP
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          volumeMounts:
-            - name: fulcio-config
-              mountPath: /etc/fulcio-config
-            - name: oidc-info
-              mountPath: /var/run/fulcio
-            - name: fulcio-cert
-              mountPath: "/var/run/fulcio-secrets"
-              readOnly: true
+      - name: fulcio-server
+        image: "ghcr.io/sigstore/fulcio:v1.8.5@sha256:b51ed0cb6761070d632bf81d28894ef1827b2c18da2535689ca8e98d91d3a015"
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - containerPort: 5555
+          protocol: TCP
+        - containerPort: 5554
+          protocol: TCP
+        - containerPort: 2112
+          protocol: TCP
+        args:
+        - "serve"
+        - "--port=5555"
+        - "--grpc-port=5554"
+        - "--ca=fileca"
+        - "--fileca-key"
+        - "/var/run/fulcio-secrets/key.pem"
+        - "--fileca-cert"
+        - "/var/run/fulcio-secrets/cert.pem"
+        - "--fileca-key-passwd"
+        - "$(PASSWORD)"
+        - "--ct-log-url=http://ctlog.ctlog-system.svc/fulcio"
+        - '--config-path=/etc/fulcio-config/config.json'
+        - '--oidc-trusted-ca-file=/var/run/fulcio/ca.crt'
+        env:
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fulcio-server-secret
+              key: password
+        - name: SSL_CERT_FILE
+          value: /var/run/fulcio/ca.crt
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 5555
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 5555
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        volumeMounts:
+        - name: fulcio-config
+          mountPath: /etc/fulcio-config
+        - name: oidc-info
+          mountPath: /var/run/fulcio
+        - name: fulcio-cert
+          mountPath: "/var/run/fulcio-secrets"
+          readOnly: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
       volumes:
-        - name: fulcio-config
-          configMap:
-            name: fulcio-server-config
-        - name: oidc-info
-          projected:
-            sources:
-              - configMap:
-                  name: kube-root-ca.crt
-                  items:
-                    - key: ca.crt
-                      path: ca.crt
-                      mode: 0666
-        - name: fulcio-cert
-          secret:
-            secretName: fulcio-server-secret
-            items:
-              - key: private
-                path: key.pem
-              - key: cert
-                path: cert.pem
+      - name: fulcio-config
+        configMap:
+          name: fulcio-server-config
+      - name: oidc-info
+        projected:
+          sources:
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+              - key: ca.crt
+                path: ca.crt
+                mode: 666
+      - name: fulcio-cert
+        secret:
+          secretName: fulcio-server-secret
+          items:
+          - key: private
+            path: key.pem
+          - key: cert
+            path: cert.pem
 ---
 # Source: fulcio/charts/ctlog/templates/createctconfig-job.yaml
 apiVersion: batch/v1
@@ -508,32 +505,25 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: true
       initContainers:
-        - name: "wait-for-createtree-configmap"
-          image: "docker.io/curlimages/curl:8.17.0@sha256:935d9100e9ba842cdb060de42472c7ca90cfe9a7c96e4dacb55e79e560b3ff40"
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c", "until curl --fail --header \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt --max-time 10 https://kubernetes.default.svc/api/v1/namespaces/$(NAMESPACE)/configmaps/ctlog-config | grep '\"treeID\":'; do echo waiting for Configmap ctlog-config; sleep 5; done;"]
-          env:
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+      - name: "wait-for-createtree-configmap"
+        image: "docker.io/curlimages/curl:8.17.0@sha256:935d9100e9ba842cdb060de42472c7ca90cfe9a7c96e4dacb55e79e560b3ff40"
+        imagePullPolicy: IfNotPresent
+        command: [ "sh", "-c", "until curl --fail --header \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt --max-time 10 https://kubernetes.default.svc/api/v1/namespaces/$(NAMESPACE)/configmaps/ctlog-config | grep '\"treeID\":'; do echo waiting for Configmap ctlog-config; sleep 5; done;" ]
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
       containers:
-        - name: fulcio-ctlog-createctconfig
-          image: "ghcr.io/sigstore/scaffolding/createctconfig:v0.7.31@sha256:3a061734c5be610d69830ea1e223bd6a8b86bc262b67ff7409147d7db698df51"
-          imagePullPolicy: "IfNotPresent"
-          args: [
-            "--configmap=ctlog-config",
-            "--secret=ctlog-secret",
-            "--pubkeysecret=ctlog-public-key",
-            "--fulcio-url=http://fulcio-server.fulcio-system.svc",
-            "--trillian-server=trillian-logserver.trillian-system:8091",
-            "--log-prefix=fulcio"
-          ]
-          env:
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+      - name: fulcio-ctlog-createctconfig
+        image: "ghcr.io/sigstore/scaffolding/createctconfig:v0.7.31@sha256:3a061734c5be610d69830ea1e223bd6a8b86bc262b67ff7409147d7db698df51"
+        imagePullPolicy: "IfNotPresent"
+        args: [ "--configmap=ctlog-config", "--secret=ctlog-secret", "--pubkeysecret=ctlog-public-key", "--fulcio-url=http://fulcio-server.fulcio-system.svc", "--trillian-server=trillian-logserver.trillian-system:8091", "--log-prefix=fulcio" ]
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -558,20 +548,15 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: true
       containers:
-        - name: ctlog-createtree
-          image: "ghcr.io/sigstore/scaffolding/createtree:v0.7.31@sha256:e5232e8c9122fcf87260b48f4b05bcb95c35c8aaa57581b42f0fde7460bd3e91"
-          imagePullPolicy: "IfNotPresent"
-          env:
-          - name: NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          args: [
-            "--namespace=$(NAMESPACE)",
-            "--configmap=ctlog-config",
-            "--display_name=ctlog-tree",
-            "--admin_server=trillian-logserver.trillian-system:8091"
-          ]
+      - name: ctlog-createtree
+        image: "ghcr.io/sigstore/scaffolding/createtree:v0.7.31@sha256:e5232e8c9122fcf87260b48f4b05bcb95c35c8aaa57581b42f0fde7460bd3e91"
+        imagePullPolicy: "IfNotPresent"
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        args: [ "--namespace=$(NAMESPACE)", "--configmap=ctlog-config", "--display_name=ctlog-tree", "--admin_server=trillian-logserver.trillian-system:8091" ]
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -596,15 +581,15 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: true
       containers:
-        - name: fulcio-createcerts
-          image: "ghcr.io/sigstore/scaffolding/createcerts@sha256:7f59f7c08d1a82ac5fbd6d0f1f9082152dadc8d59022c52780eb3648f4b88112"
-          imagePullPolicy: "IfNotPresent"
-          args: ["--secret=fulcio-server-secret"]
-          env:
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+      - name: fulcio-createcerts
+        image: "ghcr.io/sigstore/scaffolding/createcerts@sha256:7f59f7c08d1a82ac5fbd6d0f1f9082152dadc8d59022c52780eb3648f4b88112"
+        imagePullPolicy: "IfNotPresent"
+        args: [ "--secret=fulcio-server-secret" ]
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -621,18 +606,17 @@ metadata:
     app.kubernetes.io/managed-by: Helm
   name: fulcio-server-http
   namespace: fulcio-system
-  annotations:
-    {}
+  annotations: {}
 spec:
   ingressClassName: nginx
   rules:
-    - host: "fulcio.localhost"
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: fulcio-server
-                port:
-                  number: 80
+  - host: "fulcio.localhost"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: fulcio-server
+            port:
+              number: 80
