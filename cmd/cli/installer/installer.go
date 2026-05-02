@@ -352,7 +352,7 @@ func (i *Installer) patchFulcioConfig(ctx context.Context) error {
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 
 	const namespace = "fulcio-system"
-	const configMapName = "fulcio-config"
+	const configMapName = "fulcio-server-config"
 	const deploymentName = "fulcio-server"
 
 	desired := &unstructured.Unstructured{

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fulcio-config
+  name: fulcio-server-config
   namespace: fulcio-system
   labels:
     blanketops.dev/managed: "true"
