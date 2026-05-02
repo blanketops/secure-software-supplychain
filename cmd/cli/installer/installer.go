@@ -71,10 +71,13 @@ var installOrder = []step{
 		Paths: []string{"dependencies/tekton/pipelines"},
 	},
 	{
-		// Triggers must come after Pipelines — it depends on Tekton CRDs.
-		// Must come before Tasks — EventListeners reference ClusterInterceptors.
 		Name:  "Tekton Triggers",
-		Paths: []string{"dependencies/tekton/triggers"},
+		Paths: []string{"dependencies/tekton/triggers/core"},
+	},
+	{
+		// ClusterInterceptors need Triggers CRDs registered first.
+		Name:  "Tekton Interceptors",
+		Paths: []string{"dependencies/tekton/triggers/interceptors"},
 	},
 	{
 		Name:  "Fulcio",
