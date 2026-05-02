@@ -113,6 +113,14 @@ var installOrder = []step{
 		Paths: []string{"dependencies/grafeas"},
 	},
 	{
+		Name:  "MetalLB Install",
+		Paths: []string{"dependencies/metallb/release"},
+	},
+	{
+		Name:  "MetalLB Dependencies",
+		Paths: []string{"dependencies/metallb/setup"},
+	},
+	{
 		Name:  "NGINX Ingress Controller",
 		Paths: []string{"dependencies/ingress"},
 	},
