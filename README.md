@@ -109,7 +109,7 @@ The `supply-chain-runner` ServiceAccount requires:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: blanketops-image-signer
+  name: secure-software-supplychain-image-signer
 rules:
 - apiGroups: ["supplychain.blanketops.dev"]
   resources: ["supplychains"]
@@ -207,11 +207,11 @@ metadata:
   name: for-kaniko-app
   namespace: default
 spec:
-  repository: ntlaletsi70/for-kaniko-app
+  repository: <owner>/<repo>
   serviceAccountName: supply-chain-runner
   image:
-    registry: docker.io
-    name: nkanyezisolutions/for-kaniko-app
+    registry: <registry>
+    name: <registryOwner>/repository
     tagStrategy: git-sha
     cloneSecretRef: github-ssh-credentials
     registrySecretRef: registry-credentials
