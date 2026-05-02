@@ -72,7 +72,7 @@ func (r *GitSSHSecretReconciler) Reconcile(
 			"spec": map[string]any{
 				"refreshInterval": "0s",
 				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-supply-chain-store",
+					"name": "secure-software-supply-chain-store",
 					"kind": "ClusterSecretStore",
 				},
 				"target": map[string]any{

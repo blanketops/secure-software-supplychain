@@ -118,7 +118,7 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				// refreshInterval 0s — token is stable, no need to poll.
 				"refreshInterval": "0s",
 				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-supply-chain-store",
+					"name": "secure-software-supply-chain-store",
 					"kind": "ClusterSecretStore",
 				},
 				"target": map[string]any{
