@@ -42,14 +42,13 @@ const (
 // for the given SupplyChain. One EventListener per namespace, shared across
 // all SupplyChains. Each SupplyChain gets its own named trigger entry.
 //
-// Both the EventListener and the Ingress are owned by the SupplyChain —
-// they are garbage collected when the SupplyChain is deleted.
+// The Ingress host is sourced from sc.Spec.WebhookHost — set this to your
+// public hostname (e.g. a Tailscale Funnel URL) so GitHub can reach the
+// EventListener without port-forwarding or smee.io.
 //
-// The Ingress exposes the EventListener on port 80 of the node, eliminating
-// the need for kubectl port-forward or smee.io for production setups.
-// For kind clusters, install ingress-nginx with hostPort binding:
+// Traffic flow:
 //
-//	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+//	GitHub → sc.Spec.WebhookHost → ingress-nginx → el-<name>:8080 → EventListener
 func EnsureEventListener(
 	ctx context.Context,
 	c client.Client,
@@ -94,7 +93,6 @@ func EnsureEventListener(
 	}
 
 	// ── Ingress ───────────────────────────────────────────────────────────
-	// Owned by the SupplyChain — cleaned up on SupplyChain deletion.
 	if err := ensureIngress(ctx, c, scheme, sc); err != nil {
 		return fmt.Errorf("ensuring EventListener ingress: %w", err)
 	}
@@ -102,17 +100,21 @@ func EnsureEventListener(
 	return nil
 }
 
-// ensureIngress creates the nginx Ingress for the EventListener if it doesn't exist.
+// ensureIngress creates or updates the nginx Ingress for the EventListener.
+// The host is sourced from sc.Spec.WebhookHost. If the host changes the
+// ingress is updated so GitHub always routes to the correct endpoint.
 func ensureIngress(
 	ctx context.Context,
 	c client.Client,
 	scheme *runtime.Scheme,
 	sc *supplyv1alpha1.SupplyChain,
 ) error {
+	host := sc.Spec.WebhookHost
+
 	var existing networkingv1.Ingress
 	err := c.Get(ctx, client.ObjectKey{Name: ingressName, Namespace: sc.Namespace}, &existing)
 	if apierrors.IsNotFound(err) {
-		ingress := buildIngress(sc.Namespace)
+		ingress := buildIngress(sc.Namespace, host)
 		if err := controllerutil.SetControllerReference(sc, ingress, scheme); err != nil {
 			return fmt.Errorf("setting Ingress owner: %w", err)
 		}
@@ -121,21 +123,25 @@ func ensureIngress(
 	if err != nil {
 		return fmt.Errorf("fetching Ingress: %w", err)
 	}
-	// Already exists — path and backend are stable, nothing to update.
+
+	// Update host if it has changed.
+	currentHost := ""
+	if len(existing.Spec.Rules) > 0 {
+		currentHost = existing.Spec.Rules[0].Host
+	}
+	if currentHost != host {
+		existing.Spec.Rules = buildIngressRules(host)
+		if err := c.Update(ctx, &existing); err != nil {
+			return fmt.Errorf("updating Ingress host: %w", err)
+		}
+	}
+
 	return nil
 }
 
 // buildIngress constructs the nginx Ingress for the EventListener service.
-// The EventListener service name follows Tekton's convention: el-<name>.
-//
-// Traffic flow:
-//
-//	GitHub → <node-ip>:80 → ingress-nginx → el-<name>:8080 → EventListener
-func buildIngress(namespace string) *networkingv1.Ingress {
+func buildIngress(namespace, host string) *networkingv1.Ingress {
 	ingressClassName := ingressClass
-	pathType := networkingv1.PathTypePrefix
-	svcName := fmt.Sprintf("el-%s", eventListenerName)
-	svcPort := int32(eventListenerPort)
 
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -154,24 +160,31 @@ func buildIngress(namespace string) *networkingv1.Ingress {
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &ingressClassName,
-			Rules: []networkingv1.IngressRule{
-				{
-					// No host — matches all requests on port 80.
-					// Set to a real hostname in production.
-					IngressRuleValue: networkingv1.IngressRuleValue{
-						HTTP: &networkingv1.HTTPIngressRuleValue{
-							Paths: []networkingv1.HTTPIngressPath{
-								{
-									Path:     "/",
-									PathType: &pathType,
-									Backend: networkingv1.IngressBackend{
-										Service: &networkingv1.IngressServiceBackend{
-											Name: svcName,
-											Port: networkingv1.ServiceBackendPort{
-												Number: svcPort,
-											},
-										},
-									},
+			Rules:            buildIngressRules(host),
+		},
+	}
+}
+
+// buildIngressRules returns the ingress rules for the given host.
+// If host is empty, matches all requests (wildcard) — useful for local dev.
+// In production, set sc.Spec.WebhookHost to the public Tailscale/DNS hostname.
+func buildIngressRules(host string) []networkingv1.IngressRule {
+	pathType := networkingv1.PathTypePrefix
+	svcName := fmt.Sprintf("el-%s", eventListenerName)
+	svcPort := int32(eventListenerPort)
+
+	rule := networkingv1.IngressRule{
+		IngressRuleValue: networkingv1.IngressRuleValue{
+			HTTP: &networkingv1.HTTPIngressRuleValue{
+				Paths: []networkingv1.HTTPIngressPath{
+					{
+						Path:     "/",
+						PathType: &pathType,
+						Backend: networkingv1.IngressBackend{
+							Service: &networkingv1.IngressServiceBackend{
+								Name: svcName,
+								Port: networkingv1.ServiceBackendPort{
+									Number: svcPort,
 								},
 							},
 						},
@@ -180,6 +193,13 @@ func buildIngress(namespace string) *networkingv1.Ingress {
 			},
 		},
 	}
+
+	// Only set the host if one is provided — empty host matches everything.
+	if host != "" {
+		rule.Host = host
+	}
+
+	return []networkingv1.IngressRule{rule}
 }
 
 func buildEventListener(

@@ -16,7 +16,7 @@ spec:
   # URL where GitHub delivers webhook payloads.
   # Local kind dev: use a smee.io channel URL.
   # Production: use the EventListener ingress URL.
-  hookURL: https://smee.io/XuueXgpAIZDpcz3f
+  hookURL: https://pop-os.tailf8145.ts.net
 
   # GitHub event types to subscribe to.
   events:
