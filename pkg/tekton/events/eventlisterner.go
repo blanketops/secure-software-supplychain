@@ -20,15 +20,29 @@ import (
 	"fmt"
 
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// EnsureEventListener ensures the Tekton EventListener exists for the given
-// SupplyChain. One EventListener per namespace, shared across all SupplyChains.
-// Each SupplyChain gets its own named trigger entry.
+const (
+	eventListenerName = "secure-software-supplychain-listener"
+	eventListenerPort = 8080
+	ingressName       = "secure-software-supplychain-eventlistener-ingress"
+	ingressClass      = "nginx"
+)
+
+// EnsureEventListener ensures the Tekton EventListener and its Ingress exist
+// for the given SupplyChain. One EventListener per namespace, shared across
+// all SupplyChains. Each SupplyChain gets its own named trigger entry.
+//
+// The Ingress exposes the EventListener on port 80 of the node, eliminating
+// the need for kubectl port-forward or smee.io for production setups.
+// For kind clusters, install ingress-nginx with hostPort binding:
+//
+//	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 func EnsureEventListener(
 	ctx context.Context,
 	c client.Client,
@@ -36,29 +50,115 @@ func EnsureEventListener(
 	supplyChainName string,
 	serviceAccountName string,
 ) error {
-	name := "secure-software-supplychain-listener"
-
+	// ── EventListener ─────────────────────────────────────────────────────
 	var existing triggersv1beta1.EventListener
-	err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &existing)
+	err := c.Get(ctx, client.ObjectKey{Name: eventListenerName, Namespace: namespace}, &existing)
 	if apierrors.IsNotFound(err) {
-		el := buildEventListener(name, namespace, supplyChainName, serviceAccountName)
-		return c.Create(ctx, el)
-	}
-	if err != nil {
+		el := buildEventListener(eventListenerName, namespace, supplyChainName, serviceAccountName)
+		if err := c.Create(ctx, el); err != nil {
+			return fmt.Errorf("creating EventListener: %w", err)
+		}
+	} else if err != nil {
 		return fmt.Errorf("fetching EventListener: %w", err)
-	}
-
-	// Add trigger for this SupplyChain if not already present.
-	triggerName := fmt.Sprintf("trigger-%s", supplyChainName)
-	for _, t := range existing.Spec.Triggers {
-		if t.Name == triggerName {
-			return nil
+	} else {
+		// Add trigger for this SupplyChain if not already present.
+		triggerName := fmt.Sprintf("trigger-%s", supplyChainName)
+		found := false
+		for _, t := range existing.Spec.Triggers {
+			if t.Name == triggerName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing.Spec.Triggers = append(existing.Spec.Triggers,
+				buildTrigger(triggerName, supplyChainName),
+			)
+			if err := c.Update(ctx, &existing); err != nil {
+				return fmt.Errorf("updating EventListener: %w", err)
+			}
 		}
 	}
-	existing.Spec.Triggers = append(existing.Spec.Triggers,
-		buildTrigger(triggerName, supplyChainName),
-	)
-	return c.Update(ctx, &existing)
+
+	// ── Ingress ───────────────────────────────────────────────────────────
+	// Exposes the EventListener service via nginx so GitHub can reach it
+	// directly — no port-forward, no smee.io required for production.
+	if err := ensureIngress(ctx, c, namespace); err != nil {
+		return fmt.Errorf("ensuring EventListener ingress: %w", err)
+	}
+
+	return nil
+}
+
+// ensureIngress creates the nginx Ingress for the EventListener if it doesn't exist.
+func ensureIngress(ctx context.Context, c client.Client, namespace string) error {
+	var existing networkingv1.Ingress
+	err := c.Get(ctx, client.ObjectKey{Name: ingressName, Namespace: namespace}, &existing)
+	if apierrors.IsNotFound(err) {
+		return c.Create(ctx, buildIngress(namespace))
+	}
+	if err != nil {
+		return fmt.Errorf("fetching Ingress: %w", err)
+	}
+	// Already exists — path and backend are stable, nothing to update.
+	return nil
+}
+
+// buildIngress constructs the nginx Ingress for the EventListener service.
+// The EventListener service name follows Tekton's convention: el-<name>.
+//
+// Traffic flow:
+//
+//	GitHub → <node-ip>:80 → ingress-nginx → el-<name>:8080 → EventListener
+func buildIngress(namespace string) *networkingv1.Ingress {
+	ingressClassName := ingressClass
+	pathType := networkingv1.PathTypePrefix
+	svcName := fmt.Sprintf("el-%s", eventListenerName)
+	svcPort := int32(eventListenerPort)
+
+	return &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ingressName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"blanketops.dev/managed":   "true",
+				"blanketops.dev/component": "supply-chain-triggers",
+			},
+			Annotations: map[string]string{
+				// EventListener speaks plain HTTP — no SSL redirect.
+				"nginx.ingress.kubernetes.io/ssl-redirect": "false",
+				// Preserve Host header for GitHub webhook signature validation.
+				"nginx.ingress.kubernetes.io/preserve-host": "true",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: &ingressClassName,
+			Rules: []networkingv1.IngressRule{
+				{
+					// No host — matches all requests on port 80.
+					// Set to a real hostname in production.
+					IngressRuleValue: networkingv1.IngressRuleValue{
+						HTTP: &networkingv1.HTTPIngressRuleValue{
+							Paths: []networkingv1.HTTPIngressPath{
+								{
+									Path:     "/",
+									PathType: &pathType,
+									Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{
+											Name: svcName,
+											Port: networkingv1.ServiceBackendPort{
+												Number: svcPort,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 func buildEventListener(
@@ -115,7 +215,8 @@ func buildTrigger(triggerName, supplyChainName string) triggersv1beta1.EventList
 				Params: []triggersv1beta1.InterceptorParams{
 					{
 						Name:  "filter",
-						Value: apiextensionsv1.JSON{Raw: []byte(`"body.ref.startsWith('refs/heads/')"`)}},
+						Value: apiextensionsv1.JSON{Raw: []byte(`"body.ref.startsWith('refs/heads/')"`)},
+					},
 					{
 						Name: "overlays",
 						Value: apiextensionsv1.JSON{Raw: []byte(`[

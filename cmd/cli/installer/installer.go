@@ -110,6 +110,10 @@ var installOrder = []step{
 		Name:  "Grafeas",
 		Paths: []string{"dependencies/grafeas"},
 	},
+	{
+		Name:  "Ingress NGINX",
+		Paths: []string{"dependencies/ingress"},
+	},
 }
 
 // statusChecks are the namespaces and deployments to verify after install.

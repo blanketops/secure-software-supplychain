@@ -24,5 +24,5 @@ import "embed"
 // The embed directive is relative to the package directory, so this package
 // should be placed at the repo root or the embed path adjusted accordingly.
 //
-//go:embed dependencies/tekton/pipelines/*.yaml dependencies/tekton/chains/*.yaml dependencies/tekton/dashboard/*.yaml dependencies/tekton/results/*.yaml dependencies/tekton/task/*.yaml dependencies/tekton/triggers/core/*.yaml dependencies/tekton/triggers/interceptors/*.yaml dependencies/sigstore/fulcio/*.yaml dependencies/sigstore/rekor/*.yaml dependencies/grafeas/*.yaml
+//go:embed dependencies/tekton/pipelines/*.yaml dependencies/tekton/chains/*.yaml dependencies/tekton/dashboard/*.yaml dependencies/tekton/results/*.yaml dependencies/tekton/task/*.yaml dependencies/tekton/triggers/core/*.yaml dependencies/tekton/triggers/interceptors/*.yaml dependencies/sigstore/fulcio/*.yaml dependencies/sigstore/rekor/*.yaml dependencies/ingress/*.yaml dependencies/grafeas/*.yaml
 var Dependencies embed.FS
