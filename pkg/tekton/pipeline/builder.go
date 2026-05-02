@@ -17,6 +17,7 @@ package pipeline
 
 import (
 	"strings"
+	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -409,15 +410,27 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 		Name:     stepTrivy,
 		RunAfter: after(runAfter),
 		TaskRef:  &tektonv1.TaskRef{Name: "trivy-scanner"},
+		Timeout:  &metav1.Duration{Duration: 15 * time.Minute},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
 			{Name: "manifest-dir", Workspace: workspaceShared},
 		},
 		Params: tektonv1.Params{
-			// Scan the registry image by digest — image is already pushed
-			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(params.image-ref)"}},
+			// Scan the registry image by digest — image is already pushed.
+			// --skip-java-db-update avoids downloading the 860MB Java DB on every run.
+			// --timeout gives Trivy enough time to complete the scan.
+			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{
+				Type:      tektonv1.ParamTypeString,
+				StringVal: "$(params.image-ref)",
+			}},
 			{Name: "ARGS", Value: tektonv1.ParamValue{
-				Type:     tektonv1.ParamTypeArray,
-				ArrayVal: []string{"image", "--exit-code", "0", "--severity", "HIGH,CRITICAL"},
+				Type: tektonv1.ParamTypeArray,
+				ArrayVal: []string{
+					"image",
+					"--exit-code", "0",
+					"--severity", "HIGH,CRITICAL",
+					"--skip-java-db-update",
+					"--timeout", "10m",
+				},
 			}},
 		},
 	}

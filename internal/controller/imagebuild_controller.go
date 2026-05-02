@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -93,9 +94,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if sc.Status.Phase != "Ready" {
-		logger.Info("SupplyChain not ready yet, waiting",
-			"phase", sc.Status.Phase,
-		)
+		logger.Info("SupplyChain not ready yet, waiting", "phase", sc.Status.Phase)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -107,7 +106,6 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		logger.Error(err, "failed to reconcile PipelineRun")
 		return r.setFailed(ctx, &ib, err)
 	}
-
 	if result != nil {
 		return *result, nil
 	}
@@ -131,6 +129,19 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
+// pipelineRunName generates a deterministic PipelineRun name from the
+// ImageBuild name that always fits within Kubernetes' 63-char limit.
+//
+// Format: pr-<8-hex-chars-of-sha256(imageBuildName)>
+// e.g.    pr-a3f2c1b8
+//
+// The full ImageBuild name is stored in the PipelineRun's labels for
+// traceability — nothing is lost.
+func pipelineRunName(ibName string) string {
+	h := sha256.Sum256([]byte(ibName))
+	return fmt.Sprintf("pr-%x", h[:4])
+}
+
 func (r *ImageBuildReconciler) reconcilePipelineRun(
 	ctx context.Context,
 	ib *supplychainv1alpha1.ImageBuild,
@@ -138,7 +149,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 ) (*tektonv1.PipelineRun, *ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	prName := ib.Name + "-run"
+	prName := pipelineRunName(ib.Name)
 
 	// Idempotency — return existing PipelineRun if already created
 	var existing tektonv1.PipelineRun
@@ -165,7 +176,6 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	if err != nil {
 		return nil, nil, fmt.Errorf("signing context: %w", err)
 	}
-
 	logger.Info("signing context ready",
 		"principal", sigCtx.ScopeProof.Principal,
 		"certExpiry", sigCtx.Cert.ExpiresAt,
@@ -185,6 +195,12 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 
 	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef, sigCtx)
 
+	// store full ImageBuild name in labels for traceability
+	if pr.Labels == nil {
+		pr.Labels = map[string]string{}
+	}
+	pr.Labels["blanketops.dev/image-build"] = ib.Name
+
 	if err := controllerutil.SetControllerReference(ib, pr, r.Scheme); err != nil {
 		return nil, nil, err
 	}
@@ -196,6 +212,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	logger.Info("PipelineRun created",
 		"pipelineRun", prName,
 		"image", imageRef,
+		"imageBuild", ib.Name,
 	)
 
 	now := metav1.Now()
