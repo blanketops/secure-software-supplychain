@@ -18,6 +18,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -49,9 +50,9 @@ func NewGitHubTokenSecretReconciler(
 	}
 }
 
-// Reconcile ensures the GitHub token ExternalSecret exists for the given
-// GitHubWebhook. Called by the GitHubWebhookReconciler before the token
-// is read from the Secret.
+// Reconcile ensures the GitHub token ExternalSecret exists and is up-to-date
+// for the given GitHubWebhook. Mirrors the git SSH secret pattern exactly:
+// ownership set to GitHubWebhook, create on first run, update on spec drift.
 func (r *GitHubTokenSecretReconciler) Reconcile(
 	ctx context.Context,
 	ghw *supplyv1alpha1.GitHubWebhook,
@@ -62,6 +63,7 @@ func (r *GitHubTokenSecretReconciler) Reconcile(
 
 	desired := newGitHubTokenExternalSecret(ghw)
 
+	// ── Ownership (GitHubWebhook → ExternalSecret) ────────────────────────
 	if err := controllerutil.SetControllerReference(
 		ghw,
 		desired,
@@ -70,24 +72,43 @@ func (r *GitHubTokenSecretReconciler) Reconcile(
 		return err
 	}
 
+	// ── Fetch existing ────────────────────────────────────────────────────
 	var existing unstructured.Unstructured
 	existing.SetGroupVersionKind(desired.GroupVersionKind())
 
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-	if err == nil {
-		// Already exists — nothing to do.
-		return nil
+
+	// ── Create ────────────────────────────────────────────────────────────
+	if apierrors.IsNotFound(err) {
+		r.Log.Info("Creating ExternalSecret for GitHub token",
+			"githubwebhook", ghw.Name,
+			"secret", desired.GetName(),
+		)
+		return r.Client.Create(ctx, desired)
 	}
-	if !apierrors.IsNotFound(err) {
+	if err != nil {
 		return err
 	}
 
-	r.Log.Info("Creating ExternalSecret for GitHub token",
+	// ── Update (spec drift only) ──────────────────────────────────────────
+	if !reflect.DeepEqual(
+		existing.Object["spec"],
+		desired.Object["spec"],
+	) {
+		existing.Object["spec"] = desired.Object["spec"]
+		r.Log.Info("Updating ExternalSecret for GitHub token",
+			"githubwebhook", ghw.Name,
+			"secret", desired.GetName(),
+		)
+		return r.Client.Update(ctx, &existing)
+	}
+
+	// ── No-op ─────────────────────────────────────────────────────────────
+	r.Log.V(1).Info("ExternalSecret for GitHub token already up-to-date",
 		"githubwebhook", ghw.Name,
 		"secret", desired.GetName(),
 	)
-
-	return r.Client.Create(ctx, desired)
+	return nil
 }
 
 // newGitHubTokenExternalSecret builds the ExternalSecret for the GitHub
@@ -95,7 +116,7 @@ func (r *GitHubTokenSecretReconciler) Reconcile(
 //
 //	/supplychain/github/token  →  key: "token"
 //
-// This mirrors the pattern used by registry and git SSH secrets.
+// Mirrors the pattern used by registry and git SSH secrets.
 func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
@@ -115,7 +136,6 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				},
 			},
 			"spec": map[string]any{
-				// refreshInterval 0s — token is stable, no need to poll.
 				"refreshInterval": "0s",
 				"secretStoreRef": map[string]any{
 					"name": "secure-software-supply-chain-store",
@@ -129,11 +149,8 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				},
 				"data": []any{
 					map[string]any{
-						// "token" is the key the GitHubWebhookReconciler reads.
 						"secretKey": "token",
 						"remoteRef": map[string]any{
-							// Key path in the fake store — update to match
-							// your real secret store backend key.
 							"key": "/supplychain/github/token",
 						},
 					},
@@ -141,7 +158,6 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 			},
 		},
 	}
-
 }
 
 // sanitiseLabel replaces characters invalid in Kubernetes label values.
