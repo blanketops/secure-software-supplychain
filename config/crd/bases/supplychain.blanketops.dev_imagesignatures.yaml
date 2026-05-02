@@ -11,13 +11,35 @@ spec:
     kind: ImageSignature
     listKind: ImageSignatureList
     plural: imagesignatures
+    shortNames:
+    - ims
     singular: imagesignature
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .spec.signedBy
+      name: SignedBy
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.rekorLogIndex
+      name: RekorIndex
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ImageSignature is the Schema for the imagesignatures API
+        description: |-
+          ImageSignature is the cryptographic audit record of a signed image.
+          Created by the controller after a successful PipelineRun. Carries the
+          full signing identity, Fulcio certificate reference, and Rekor log index.
+          Owned by the ImageBuild — deleted when the ImageBuild is deleted.
         properties:
           apiVersion:
             description: |-
@@ -37,28 +59,47 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of ImageSignature
+            description: |-
+              ImageSignatureSpec defines the desired state of ImageSignature.
+              Created by the ImageBuildReconciler after a successful PipelineRun.
+              Carries the full signing identity and transparency log references.
             properties:
               digest:
-                description: Digest is the image digest at time of signing
+                description: |-
+                  Digest is the content-addressable digest of the image at time of signing.
+                  e.g. sha256:abc123...
                 type: string
               fulcioURL:
-                description: FulcioURL is the CA authority used
+                description: FulcioURL is the Fulcio CA that issued the ephemeral
+                  signing certificate.
+                type: string
+              grafeasOccurrence:
+                description: |-
+                  GrafeasOccurrence is the Grafeas occurrence name for this signing event.
+                  e.g. projects/blanketops/occurrences/abc123
                 type: string
               image:
-                description: Image is the fully qualified image reference
+                description: |-
+                  Image is the fully qualified image reference that was signed.
+                  e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
                 type: string
               imageBuild:
-                description: ImageBuild is the owning ImageBuild
+                description: ImageBuild is the name of the ImageBuild that produced
+                  this signature.
                 type: string
               rekorURL:
-                description: RekorURL is the transparency log used
+                description: RekorURL is the Rekor transparency log where the signature
+                  was recorded.
                 type: string
               signedBy:
-                description: SignedBy is the ServiceAccount identity that signed
+                description: |-
+                  SignedBy is the SPIFFE/SPIRE identity of the ServiceAccount that signed.
+                  Sourced from the Fulcio certificate subject.
+                  e.g. system:serviceaccount:default:supply-chain-runner
                 type: string
               supplyChain:
-                description: SupplyChain is the owning SupplyChain
+                description: SupplyChain is the name of the SupplyChain that governed
+                  this build.
                 type: string
             required:
             - digest
@@ -70,19 +111,16 @@ spec:
             - supplyChain
             type: object
           status:
-            description: status defines the observed state of ImageSignature
+            description: ImageSignatureStatus defines the observed state of ImageSignature.
             properties:
               certificate:
-                description: Certificate is the Fulcio-issued certificate
+                description: |-
+                  Certificate is the PEM-encoded Fulcio ephemeral certificate used to sign.
+                  Stored for audit — the private key is discarded after signing.
                 type: string
               conditions:
-                description: |-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Conditions represent the current state of the ImageSignature
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -142,21 +180,20 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               phase:
-                description: |-
-                  conditions represent the current state of the ImageSignature resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-                  Phase is the current phase
+                description: Phase is the current signing phase.
                 enum:
                 - Pending
                 - Signed
                 - Failed
                 type: string
               rekorLogIndex:
-                description: RekorLogIndex is the Rekor transparency log index
+                description: |-
+                  RekorLogIndex is the Rekor transparency log entry index.
+                  Populated after successful attestation.
                 format: int64
                 type: integer
               signedAt:
-                description: SignedAt is the time of signing
+                description: SignedAt is the timestamp when the image was signed.
                 format: date-time
                 type: string
             type: object

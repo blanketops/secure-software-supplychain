@@ -35,6 +35,8 @@ import (
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	supplychain "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/supplychain"
 	pipeline "github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pruner"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
 )
 
 type ImageBuildReconciler struct {
@@ -42,6 +44,8 @@ type ImageBuildReconciler struct {
 	Scheme    *runtime.Scheme
 	Clientset kubernetes.Interface
 	Mediator  *supplychain.Mediator
+	Recorder  *results.Recorder
+	Pruner    *pruner.Pruner
 }
 
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds,verbs=get;list;watch;create;update;patch;delete
@@ -69,15 +73,13 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Terminal state guard
+	// Terminal state guard — stop reconciling once done.
 	if ib.Status.Phase == "Succeeded" || ib.Status.Phase == "Failed" {
 		logger.Info("ImageBuild terminal, skipping", "phase", ib.Status.Phase)
 		return ctrl.Result{}, nil
 	}
 
-	// -------------------------------------------------------------------------
-	// 1. Resolve SupplyChain dependency (HARD BLOCKING)
-	// -------------------------------------------------------------------------
+	// ── 1. Resolve SupplyChain ────────────────────────────────────────────
 	var sc supplychainv1alpha1.SupplyChain
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      ib.Spec.SupplyChainRef.Name,
@@ -98,9 +100,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// -------------------------------------------------------------------------
-	// 2. Reconcile PipelineRun (includes mediator gating + signing)
-	// -------------------------------------------------------------------------
+	// ── 2. Reconcile PipelineRun ──────────────────────────────────────────
 	pr, result, err := r.reconcilePipelineRun(ctx, &ib, &sc)
 	if err != nil {
 		logger.Error(err, "failed to reconcile PipelineRun")
@@ -110,9 +110,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return *result, nil
 	}
 
-	// -------------------------------------------------------------------------
-	// 3. Sync status ONLY if PipelineRun exists
-	// -------------------------------------------------------------------------
+	// ── 3. Sync status ────────────────────────────────────────────────────
 	if pr != nil {
 		r.syncStatus(ctx, &ib, pr)
 	}
@@ -121,6 +119,27 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"phase", ib.Status.Phase,
 		"pipelineRun", ib.Status.PipelineRunRef,
 	)
+
+	// ── 4. Terminal actions: Record result + Prune old PipelineRuns ───────
+	// Both are best-effort — errors are logged but do not fail the reconcile.
+	// The recorder creates an ImageBuildResult CR that survives PipelineRun pruning.
+	// The pruner deletes old PipelineRuns beyond the retention window.
+	if pr != nil && pr.IsDone() {
+		if err := r.Recorder.Record(ctx, &ib, pr); err != nil {
+			logger.Error(err, "failed to record ImageBuildResult")
+		}
+		if ib.Status.Phase == "Succeeded" {
+			if err := r.reconcileImageSignature(ctx, &ib, pr, &sc); err != nil {
+				logger.Error(err, "failed to reconcile ImageSignature")
+			}
+		}
+
+		if err := r.Pruner.PruneForImageBuild(ctx, &ib); err != nil {
+			logger.Error(err, "failed to prune PipelineRuns")
+		}
+
+		return ctrl.Result{}, nil
+	}
 
 	if ib.Status.Phase == "Running" || ib.Status.Phase == "Pending" {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -133,10 +152,6 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 // ImageBuild name that always fits within Kubernetes' 63-char limit.
 //
 // Format: pr-<8-hex-chars-of-sha256(imageBuildName)>
-// e.g.    pr-a3f2c1b8
-//
-// The full ImageBuild name is stored in the PipelineRun's labels for
-// traceability — nothing is lost.
 func pipelineRunName(ibName string) string {
 	h := sha256.Sum256([]byte(ibName))
 	return fmt.Sprintf("pr-%x", h[:4])
@@ -151,7 +166,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 
 	prName := pipelineRunName(ib.Name)
 
-	// Idempotency — return existing PipelineRun if already created
+	// Idempotency — return existing PipelineRun if already created.
 	var existing tektonv1.PipelineRun
 	err := r.Get(ctx, types.NamespacedName{Name: prName, Namespace: ib.Namespace}, &existing)
 	if err == nil {
@@ -195,7 +210,6 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 
 	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef, sigCtx)
 
-	// store full ImageBuild name in labels for traceability
 	if pr.Labels == nil {
 		pr.Labels = map[string]string{}
 	}
@@ -286,12 +300,23 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	r.Clientset = clientset
+
 	r.Mediator = supplychain.New(
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
 		log.WithName("mediator"),
 		recorder,
+	)
+
+	r.Recorder = results.New(
+		mgr.GetClient(),
+		log.WithName("recorder"),
+	)
+
+	r.Pruner = pruner.New(
+		mgr.GetClient(),
+		log.WithName("pruner"),
 	)
 
 	return ctrl.NewControllerManagedBy(mgr).
