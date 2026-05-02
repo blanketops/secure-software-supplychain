@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: blanketops/supply-chain-controller
-  newTag: v9.0.9
+  newTag: v9.1.0

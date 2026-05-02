@@ -37,8 +37,7 @@ spec:
       openAPIV3Schema:
         description: |-
           ImageBuildResult is the durable record of a completed ImageBuild execution.
-          It is created by the controller when a PipelineRun reaches a terminal state
-          and survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
+          Survives PipelineRun pruning. One ImageBuildResult per ImageBuild.
         properties:
           apiVersion:
             description: |-
@@ -58,11 +57,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              ImageBuildResultSpec defines the desired state of ImageBuildResult.
-              The spec is intentionally minimal — ImageBuildResult is a write-once
-              record created by the controller. The references are stored here so
-              the CR is self-describing even if the referenced resources are pruned.
+            description: ImageBuildResultSpec defines the desired state of ImageBuildResult.
             properties:
               imageBuildRef:
                 description: ImageBuildRef references the ImageBuild that produced
@@ -92,36 +87,53 @@ spec:
             description: ImageBuildResultStatus defines the observed state of ImageBuildResult.
             properties:
               buildResults:
-                description: BuildResults contains the structured output of all pipeline
-                  steps.
+                description: |-
+                  BuildResults contains the full structured output of all pipeline steps.
+                  Populated from PipelineRun results — covers git, build, security, attestation.
                 properties:
                   commit:
-                    description: Git
+                    description: Commit is the full git commit SHA cloned.
                     type: string
                   committerDate:
+                    description: CommitterDate is the date of the commit.
                     type: string
                   grafeasOccurrence:
-                    description: Attestation
+                    description: |-
+                      GrafeasOccurrence is the Grafeas occurrence name for this build event.
+                      e.g. projects/blanketops/occurrences/abc123
                     type: string
                   imageDigest:
+                    description: ImageDigest is the content-addressable digest of
+                      the built image.
                     type: string
                   imageURL:
-                    description: Build
+                    description: ImageURL is the fully-qualified image reference that
+                      was built and pushed.
                     type: string
                   repoURL:
+                    description: RepoURL is the git repository URL.
                     type: string
                   sonarGateStatus:
+                    description: SonarGateStatus is the SonarQube quality gate result.
                     type: string
                   trivyCriticalCount:
+                    description: TrivyCriticalCount is the number of CRITICAL vulnerabilities
+                      found.
                     type: string
                   trivyHighCount:
+                    description: TrivyHighCount is the number of HIGH vulnerabilities
+                      found.
                     type: string
                   trivySarifPath:
+                    description: TrivySarifPath is the path to the SARIF report in
+                      the workspace.
                     type: string
                   trivyScanSummary:
-                    description: Security
+                    description: TrivyScanSummary is PASS or FAIL from the Trivy vulnerability
+                      scan.
                     type: string
                   trivyTotalCount:
+                    description: TrivyTotalCount is the total HIGH+CRITICAL count.
                     type: string
                 type: object
               completedAt:
@@ -193,13 +205,12 @@ spec:
               imageDigest:
                 description: |-
                   ImageDigest is the content-addressable digest of the built image.
-                  e.g. sha256:abc123...
-                  Populated from the buildah task IMAGE_DIGEST result.
+                  Kept at the top level for quick access — also in BuildResults.
                 type: string
               imageURL:
                 description: |-
-                  ImageURL is the fully-qualified image reference that was built and pushed.
-                  e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+                  ImageURL is the fully-qualified image reference that was built.
+                  Kept at the top level for quick access — also in BuildResults.
                 type: string
               phase:
                 description: Phase is the terminal phase of the build execution.
@@ -214,9 +225,8 @@ spec:
                   Stored here so the result remains useful after PipelineRun pruning.
                 type: string
               reason:
-                description: |-
-                  Reason is the machine-readable reason for the terminal phase,
-                  sourced directly from the PipelineRun condition reason.
+                description: Reason is the machine-readable reason for the terminal
+                  phase.
                 type: string
             type: object
         required:
