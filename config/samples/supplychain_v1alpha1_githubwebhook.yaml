@@ -4,6 +4,33 @@ metadata:
   labels:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
-  name: githubwebhook-sample
+  name: for-kaniko-app-webhook
+  namespace: default
 spec:
-  # TODO(user): Add fields here
+  # Repository to register the webhook on — owner/repo format.
+  repository: ntlaletsi70/for-kaniko-app
+  # SupplyChain that owns the EventListener this webhook targets.
+  # Controller waits for the SupplyChain to be Ready before registering.
+  supplyChainRef:
+    name: for-kaniko-app
+  # URL where GitHub delivers webhook payloads.
+  # Local kind dev: use a smee.io channel URL.
+  # Production: use the EventListener ingress URL.
+  hookURL: https://smee.io/XuueXgpAIZDpcz3f
+
+  # GitHub event types to subscribe to.
+  events:
+  - push
+  # Webhook payload format.
+  contentType: json
+
+  # Set to true only for local dev with self-signed certs.
+  insecureSSL: false
+
+  # Secret containing the GitHub API token (key: "token").
+  # Must have admin:repo_hook and repo permissions.
+  secretRef:
+    name: github-app-credentials
+  # Optional: shared secret for GitHub payload signature verification (key: "secret").
+  # webhookSecretRef:
+  #   name: github-webhook-secret
