@@ -112,6 +112,10 @@ var installOrder = []step{
 		Name:  "Grafeas",
 		Paths: []string{"dependencies/grafeas"},
 	},
+	{
+		Name:  "SonarQube",
+		Paths: []string{"dependencies/sonarqube"},
+	},
 }
 
 // statusChecks are the namespaces and deployments to verify after install.
