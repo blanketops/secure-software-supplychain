@@ -113,6 +113,10 @@ var installOrder = []step{
 		Paths: []string{"dependencies/grafeas"},
 	},
 	{
+		Name:  "NGINX Ingress Controller",
+		Paths: []string{"dependencies/ingress"},
+	},
+	{
 		Name:  "SonarQube",
 		Paths: []string{"dependencies/sonarqube"},
 	},
