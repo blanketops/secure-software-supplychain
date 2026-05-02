@@ -178,6 +178,12 @@ force-uninstall: manifests kustomize ## Patch out finalizers then uninstall CRDs
 		done
 	@$(MAKE) uninstall
 
+.PHONY: verify-rbac
+	@echo "=== Checking for broken markers ==="
+	@grep "kubebuilder:rbac" internal/controller/*.go | grep "http://" && \
+		echo "❌ BROKEN markers found — fix before make manifests" || \
+		echo "✅ Markers clean"
+		
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
