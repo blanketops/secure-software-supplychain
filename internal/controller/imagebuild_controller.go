@@ -34,6 +34,7 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	supplychain "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/supplychain"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 	pipeline "github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pruner"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
@@ -46,6 +47,7 @@ type ImageBuildReconciler struct {
 	Mediator  *supplychain.Mediator
 	Recorder  *results.Recorder
 	Pruner    *pruner.Pruner
+	Signature *signing.SignatureReconciler
 }
 
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds,verbs=get;list;watch;create;update;patch;delete
@@ -53,6 +55,8 @@ type ImageBuildReconciler struct {
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds/finalizers,verbs=update
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagesignatures,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagesignatures/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns;pipelines;taskruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=external-secrets.io,resources=externalsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
@@ -73,7 +77,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Terminal state guard — stop reconciling once done.
+	// Terminal state guard.
 	if ib.Status.Phase == "Succeeded" || ib.Status.Phase == "Failed" {
 		logger.Info("ImageBuild terminal, skipping", "phase", ib.Status.Phase)
 		return ctrl.Result{}, nil
@@ -120,20 +124,32 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"pipelineRun", ib.Status.PipelineRunRef,
 	)
 
-	// ── 4. Terminal actions: Record result + Prune old PipelineRuns ───────
-	// Both are best-effort — errors are logged but do not fail the reconcile.
-	// The recorder creates an ImageBuildResult CR that survives PipelineRun pruning.
-	// The pruner deletes old PipelineRuns beyond the retention window.
+	// ── 4. Terminal actions ───────────────────────────────────────────────
+	// All best-effort — errors logged, reconcile does not fail.
 	if pr != nil && pr.IsDone() {
+		// 4a. Record ImageBuildResult
 		if err := r.Recorder.Record(ctx, &ib, pr); err != nil {
 			logger.Error(err, "failed to record ImageBuildResult")
 		}
+
+		// 4b. Reconcile ImageSignature
+		// sigCtx fields are stored on Status before the PipelineRun is created.
+		// Read them back here — the cert and principal survive in Status.
 		if ib.Status.Phase == "Succeeded" {
-			if err := r.reconcileImageSignature(ctx, &ib, pr, &sc); err != nil {
-				logger.Error(err, "failed to reconcile ImageSignature")
+			_, imageDigest := results.ExtractImageResults(pr)
+			if err := r.Signature.MarkSigned(
+				ctx, &ib, imageDigest,
+				[]byte(ib.Status.SigningCertPEM),
+			); err != nil {
+				logger.Error(err, "failed to mark ImageSignature signed")
+			}
+		} else {
+			if err := r.Signature.MarkFailed(ctx, &ib); err != nil {
+				logger.Error(err, "failed to mark ImageSignature failed")
 			}
 		}
 
+		// 4c. Prune old PipelineRuns
 		if err := r.Pruner.PruneForImageBuild(ctx, &ib); err != nil {
 			logger.Error(err, "failed to prune PipelineRuns")
 		}
@@ -150,8 +166,6 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 // pipelineRunName generates a deterministic PipelineRun name from the
 // ImageBuild name that always fits within Kubernetes' 63-char limit.
-//
-// Format: pr-<8-hex-chars-of-sha256(imageBuildName)>
 func pipelineRunName(ibName string) string {
 	h := sha256.Sum256([]byte(ibName))
 	return fmt.Sprintf("pr-%x", h[:4])
@@ -196,20 +210,28 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
 
-	// ── Build and create PipelineRun ─────────────────────────────────────
+	// ── Build image reference ─────────────────────────────────────────────
 	imageTag := ib.Spec.ImageTag
 	if imageTag == "" {
 		imageTag = ib.Spec.GitRef.Revision
 	}
-
 	imageRef := fmt.Sprintf("%s/%s:%s",
 		sc.Spec.Image.Registry,
 		sc.Spec.Image.Name,
 		imageTag,
 	)
 
-	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef, sigCtx)
+	// ── Ensure ImageSignature (Pending) before PipelineRun ───────────────
+	// Created early so the signing identity is recorded before execution.
+	// The cert and principal are stored on Status so the terminal block
+	// can read them back without needing the sigCtx in scope.
+	if err := r.Signature.EnsureSignature(ctx, ib, sc, sigCtx, imageRef); err != nil {
+		logger.Error(err, "failed to ensure ImageSignature")
+		// non-fatal — continue
+	}
 
+	// ── Build and create PipelineRun ─────────────────────────────────────
+	pr := pipeline.BuildPipelineRun(prName, ib.Namespace, sc, ib, imageRef, sigCtx)
 	if pr.Labels == nil {
 		pr.Labels = map[string]string{}
 	}
@@ -229,11 +251,15 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 		"imageBuild", ib.Name,
 	)
 
+	// ── Store signing identity on Status for terminal block ───────────────
+	// sigCtx is scoped to this method. Store what the terminal block needs.
 	now := metav1.Now()
 	ib.Status.Phase = "Pending"
 	ib.Status.PipelineRunRef = prName
 	ib.Status.ImageRef = imageRef
 	ib.Status.StartTime = &now
+	ib.Status.SignedBy = sigCtx.ScopeProof.Principal
+	ib.Status.SigningCertPEM = string(sigCtx.Cert.CertPEM)
 	_ = r.Status().Update(ctx, ib)
 
 	return pr, nil, nil
@@ -317,6 +343,11 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Pruner = pruner.New(
 		mgr.GetClient(),
 		log.WithName("pruner"),
+	)
+
+	r.Signature = signing.NewSignatureReconciler(
+		mgr.GetClient(),
+		log.WithName("signature"),
 	)
 
 	return ctrl.NewControllerManagedBy(mgr).

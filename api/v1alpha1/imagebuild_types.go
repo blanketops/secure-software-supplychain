@@ -99,6 +99,14 @@ type ImageBuildStatus struct {
 	// CompletionTime is when the build finished (success or failure).
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+
+	// SignedBy is the principal identity from the Fulcio cert.
+	// +optional
+	SignedBy string `json:"signedBy,omitempty"`
+
+	// SigningCertPEM is the Fulcio ephemeral cert used for signing.
+	// +optional
+	SigningCertPEM string `json:"signingCertPEM,omitempty"`
 }
 
 // StepStatus tracks an individual pipeline step.

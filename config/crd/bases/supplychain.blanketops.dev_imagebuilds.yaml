@@ -193,6 +193,13 @@ spec:
                 description: PipelineRunRef is the name of the Tekton PipelineRun
                   driving this build.
                 type: string
+              signedBy:
+                description: SignedBy is the principal identity from the Fulcio cert.
+                type: string
+              signingCertPEM:
+                description: SigningCertPEM is the Fulcio ephemeral cert used for
+                  signing.
+                type: string
               startTime:
                 description: StartTime is when the build began.
                 format: date-time

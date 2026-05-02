@@ -59,12 +59,11 @@ func (r *Recorder) Record(
 	)
 
 	if run.Status.CompletionTime == nil {
-		// Not terminal yet — nothing to record.
 		return nil
 	}
 
 	phase, reason := extractPhase(run)
-	imageURL, imageDigest := extractImageResults(run)
+	imageURL, imageDigest := ExtractImageResults(run)
 
 	log.Info("recording build result",
 		"phase", phase,
@@ -81,7 +80,6 @@ func (r *Recorder) Record(
 				"blanketops.dev/image-build":  ib.Name,
 				"blanketops.dev/supply-chain": ib.Spec.SupplyChainRef.Name,
 			},
-			// Owned by the ImageBuild — deleted when the ImageBuild is deleted.
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         ib.APIVersion,
@@ -103,18 +101,15 @@ func (r *Recorder) Record(
 		},
 	}
 
-	// Check if the result already exists.
 	var existing supplyv1alpha1.ImageBuildResult
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if err == nil {
-		// Already recorded — update status only.
 		existing.Status.Phase = phase
 		existing.Status.Reason = reason
 		existing.Status.ImageURL = imageURL
 		existing.Status.ImageDigest = imageDigest
 		existing.Status.CompletedAt = run.Status.CompletionTime
 		existing.Status.PipelineRunName = run.Name
-
 		if updateErr := r.Client.Status().Update(ctx, &existing); updateErr != nil {
 			return fmt.Errorf("updating ImageBuildResult status: %w", updateErr)
 		}
@@ -122,12 +117,10 @@ func (r *Recorder) Record(
 		return nil
 	}
 
-	// Create new result.
 	if createErr := r.Client.Create(ctx, desired); createErr != nil {
 		return fmt.Errorf("creating ImageBuildResult: %w", createErr)
 	}
 
-	// Set initial status.
 	desired.Status.Phase = phase
 	desired.Status.Reason = reason
 	desired.Status.ImageURL = imageURL
@@ -141,6 +134,21 @@ func (r *Recorder) Record(
 
 	log.Info("ImageBuildResult created", "phase", phase)
 	return nil
+}
+
+// ExtractImageResults pulls IMAGE_URL and IMAGE_DIGEST from PipelineRun results.
+// Exported so the ImageBuildReconciler terminal block can call it directly.
+// These are emitted by the buildah task and mapped to PipelineRun results in builder.go.
+func ExtractImageResults(run *tektonv1.PipelineRun) (imageURL, imageDigest string) {
+	for _, result := range run.Status.Results {
+		switch result.Name {
+		case "IMAGE_URL":
+			imageURL = result.Value.StringVal
+		case "IMAGE_DIGEST":
+			imageDigest = result.Value.StringVal
+		}
+	}
+	return imageURL, imageDigest
 }
 
 // extractPhase maps PipelineRun condition to ImageBuildResult phase.
@@ -159,20 +167,6 @@ func extractPhase(run *tektonv1.PipelineRun) (phase, reason string) {
 		}
 	}
 	return "Unknown", ""
-}
-
-// extractImageResults pulls IMAGE_URL and IMAGE_DIGEST from PipelineRun results.
-// These are emitted by the buildah task and mapped to PipelineRun results in builder.go.
-func extractImageResults(run *tektonv1.PipelineRun) (imageURL, imageDigest string) {
-	for _, result := range run.Status.Results {
-		switch result.Name {
-		case "IMAGE_URL":
-			imageURL = result.Value.StringVal
-		case "IMAGE_DIGEST":
-			imageDigest = result.Value.StringVal
-		}
-	}
-	return imageURL, imageDigest
 }
 
 func boolPtr(b bool) *bool {
