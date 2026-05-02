@@ -123,15 +123,15 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 
-	if err := events.EnsureEventListener(ctx, r.Client, sc.Namespace, sc.Name, saName); err != nil {
+	if err := events.EnsureEventListener(ctx, r.Client, r.Scheme, &sc, saName); err != nil {
 		logger.Error(err, "failed to reconcile EventListener")
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 
 	logger.Info("trigger layer reconciled",
-		"triggerBinding", fmt.Sprintf("secure-software-supplychaingithub-binding-%s", sc.Name),
-		"triggerTemplate", fmt.Sprintf("secure-software-supplychainimagebuild-template-%s", sc.Name),
-		"eventListener", "secure-software-supplychainsupply-chain-listener",
+		"triggerBinding", fmt.Sprintf("secure-software-supplychain-github-binding-%s", sc.Name),
+		"triggerTemplate", fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", sc.Name),
+		"eventListener", "secure-software-supplychain-eventlistener",
 	)
 
 	sc.Status.Phase = "Ready"
