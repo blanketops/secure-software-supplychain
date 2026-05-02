@@ -113,60 +113,7 @@ func BuildPipelineRun(
 				// Drop this Results block into BuildPipelineRun() in pkg/tekton/pipeline/builder.go
 				// replacing the existing Results: []tektonv1.PipelineResult{...} section.
 
-				Results: []tektonv1.PipelineResult{
-					// ── Git Provenance ────────────────────────────────────────────────
-					{
-						Name:  "commit",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"},
-					},
-					{
-						Name:  "committer-date",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"},
-					},
-					{
-						Name:  "url",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"},
-					},
-					// ── Build ─────────────────────────────────────────────────────────
-					{
-						Name:  "IMAGE_DIGEST",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"},
-					},
-					{
-						Name:  "IMAGE_URL",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"},
-					},
-					// ── Security & Quality Gates ──────────────────────────────────────
-					{
-						Name:  "TRIVY_SCAN_SUMMARY",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"},
-					},
-					{
-						Name:  "TRIVY_CRITICAL_COUNT",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_CRITICAL_COUNT)"},
-					},
-					{
-						Name:  "TRIVY_HIGH_COUNT",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_HIGH_COUNT)"},
-					},
-					{
-						Name:  "TRIVY_TOTAL_COUNT",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_TOTAL_COUNT)"},
-					},
-					{
-						Name:  "TRIVY_SARIF_PATH",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"},
-					},
-					{
-						Name:  "GATE_STATUS",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks.scan-code.results.GATE_STATUS)"},
-					},
-					// ── Attestation ───────────────────────────────────────────────────
-					// {
-					// 	Name:  "GRAFEAS_OCCURRENCE",
-					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGrafeas + ".results.OCCURRENCE_NAME)"},
-					// },
-				},
+				Results: buildResults(sc),
 			},
 			Params: tektonv1.Params{
 				{
@@ -193,6 +140,34 @@ func BuildPipelineRun(
 			},
 		},
 	}
+}
+
+func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
+	results := []tektonv1.PipelineResult{
+		{Name: "commit", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"}},
+		{Name: "committer-date", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"}},
+		{Name: "url", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"}},
+		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
+		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"}},
+	}
+
+	if sc.Spec.Steps.Trivy {
+		results = append(results,
+			tektonv1.PipelineResult{Name: "TRIVY_SCAN_SUMMARY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"}},
+			tektonv1.PipelineResult{Name: "TRIVY_CRITICAL_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_CRITICAL_COUNT)"}},
+			tektonv1.PipelineResult{Name: "TRIVY_HIGH_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_HIGH_COUNT)"}},
+			tektonv1.PipelineResult{Name: "TRIVY_TOTAL_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_TOTAL_COUNT)"}},
+			tektonv1.PipelineResult{Name: "TRIVY_SARIF_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"}},
+		)
+	}
+
+	// if sc.Spec.Steps.SonarQube != nil {
+	// 	results = append(results,
+	// 		tektonv1.PipelineResult{Name: "SONAR_GATE_STATUS", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"}},
+	// 	)
+	// }
+
+	return results
 }
 
 func buildTaskList(
