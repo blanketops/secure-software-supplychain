@@ -29,8 +29,8 @@ import (
 func main() {
 	root := &cobra.Command{
 		Use:   "supplychain",
-		Short: "BlanketOps Supply Chain CLI",
-		Long:  "CLI for installing and managing the BlanketOps supply chain platform dependencies.",
+		Short: "Secure Software Supply Chain CLI",
+		Long:  "CLI for installing and managing the Secure Software Supply Chain platform dependencies.",
 	}
 
 	root.AddCommand(installCmd())
@@ -130,7 +130,7 @@ func observeCmd() *cobra.Command {
 				page = "rbac.html"
 			}
 
-			fmt.Println("  blanketops supply chain observer")
+			fmt.Println("  Secure Software Supply Chain observer")
 			fmt.Println("  ────────────────────────────────")
 
 			return ui.Serve(ctx, page)

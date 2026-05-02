@@ -15,9 +15,6 @@ spec:
       containers:
       - name: grafeas
         image: emunari/grafeas-server
-        args:
-        - --grpc-port=8080
-        - --http-port=8081
         ports:
         - containerPort: 8080
         - containerPort: 8081
