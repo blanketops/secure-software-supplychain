@@ -1,7 +1,12 @@
 resources:
 - buildah.yaml
+- buildpacks.yaml
+
 - cosignsign.yaml
+- gitclone.yaml
+
 - grafeaspublish.yaml
 - sonarqubescanner.yaml
+- kaniko.yaml
 - tektonchainattest.yaml
 - trivvyscanner.yaml

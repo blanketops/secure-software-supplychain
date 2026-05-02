@@ -158,14 +158,14 @@ func BuildPipelineRun(
 						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"},
 					},
 					{
-						Name:  "SONAR_GATE_STATUS",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"},
+						Name:  "GATE_STATUS",
+						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks.scan-code.results.GATE_STATUS)"},
 					},
 					// ── Attestation ───────────────────────────────────────────────────
-					{
-						Name:  "GRAFEAS_OCCURRENCE",
-						Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGrafeas + ".results.OCCURRENCE_NAME)"},
-					},
+					// {
+					// 	Name:  "GRAFEAS_OCCURRENCE",
+					// 	Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGrafeas + ".results.OCCURRENCE_NAME)"},
+					// },
 				},
 			},
 			Params: tektonv1.Params{
