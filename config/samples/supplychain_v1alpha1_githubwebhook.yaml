@@ -1,0 +1,9 @@
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: GitHubWebhook
+metadata:
+  labels:
+    app.kubernetes.io/name: secure-software-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: githubwebhook-sample
+spec:
+  # TODO(user): Add fields here

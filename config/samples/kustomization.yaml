@@ -8,4 +8,5 @@ resources:
 
 #- supplychain_v1alpha1_imagesignature.yaml
 #- supplychain_v1alpha1_imagebuildresult.yaml
+- supplychain_v1alpha1_githubwebhook.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

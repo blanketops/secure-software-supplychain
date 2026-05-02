@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the secure-software-supply-chain itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- githubwebhook_admin_role.yaml
+- githubwebhook_editor_role.yaml
+- githubwebhook_viewer_role.yaml
 - imagebuildresult_admin_role.yaml
 - imagebuildresult_editor_role.yaml
 - imagebuildresult_viewer_role.yaml
@@ -36,3 +39,5 @@ resources:
 - supplychain_viewer_role.yaml
 - signing_role.yaml
 - eventlisterner_role.yaml
+
+
