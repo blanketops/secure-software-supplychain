@@ -38,6 +38,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -54,23 +55,27 @@ const (
 )
 
 // step represents a named installation phase with a set of manifest paths.
-// PreHook runs before applying manifests — used for steps that need
-// resources created programmatically (e.g. TLS certs).
+// PreHook runs before applying manifests.
+// PostHook runs after applying manifests — used for config patches and restarts.
 type step struct {
-	Name    string
-	Paths   []string
-	PreHook func(ctx context.Context, i *Installer) error
+	Name     string
+	Paths    []string
+	PreHook  func(ctx context.Context, i *Installer) error
+	PostHook func(ctx context.Context, i *Installer) error
 }
 
 // installOrder defines the sequence in which dependencies are applied.
 // Order matters: Tekton Pipelines CRDs must exist before Triggers, Chains, or Tasks.
 // Tekton Triggers must exist before Tasks that reference ClusterInterceptors.
+// Fulcio is patched after install to configure the in-cluster Kubernetes OIDC issuer.
 var installOrder = []step{
 	{
 		Name:  "Tekton Pipelines",
 		Paths: []string{"dependencies/tekton/pipelines"},
 	},
 	{
+		// Triggers must come after Pipelines — it depends on Tekton CRDs.
+		// Must come before Tasks — EventListeners reference ClusterInterceptors.
 		Name:  "Tekton Triggers",
 		Paths: []string{"dependencies/tekton/triggers/core"},
 	},
@@ -82,6 +87,12 @@ var installOrder = []step{
 	{
 		Name:  "Fulcio",
 		Paths: []string{"dependencies/sigstore/fulcio"},
+		// PostHook patches the Fulcio ConfigMap to trust the in-cluster
+		// Kubernetes OIDC issuer, then restarts Fulcio to pick up the change.
+		// Without this, keyless signing fails with "unsupported issuer".
+		PostHook: func(ctx context.Context, i *Installer) error {
+			return i.patchFulcioConfig(ctx)
+		},
 	},
 	{
 		Name:  "Rekor",
@@ -109,10 +120,6 @@ var installOrder = []step{
 	{
 		Name:  "Grafeas",
 		Paths: []string{"dependencies/grafeas"},
-	},
-	{
-		Name:  "Ingress NGINX",
-		Paths: []string{"dependencies/ingress"},
 	},
 }
 
@@ -185,6 +192,7 @@ func (i *Installer) Install(ctx context.Context) error {
 	for idx, s := range installOrder {
 		fmt.Printf("[%d/%d] %s\n", idx+1, len(installOrder), s.Name)
 
+		// PreHook — runs before manifests (e.g. TLS cert generation).
 		if s.PreHook != nil && !i.dryRun {
 			if err := s.PreHook(ctx, i); err != nil {
 				return fmt.Errorf("  ✗ %s pre-hook failed: %w", s.Name, err)
@@ -217,6 +225,13 @@ func (i *Installer) Install(ctx context.Context) error {
 			fmt.Printf("  ✓ %s applied (dry-run)\n", s.Name)
 		}
 
+		// PostHook — runs after manifests (e.g. config patches, restarts).
+		if s.PostHook != nil && !i.dryRun {
+			if err := s.PostHook(ctx, i); err != nil {
+				return fmt.Errorf("  ✗ %s post-hook failed: %w", s.Name, err)
+			}
+		}
+
 		// Wait briefly between major components to let CRDs register.
 		if s.Name == "Tekton Pipelines" && !i.dryRun {
 			waitSp := newSpinner("Waiting for Tekton CRDs to register...")
@@ -229,7 +244,7 @@ func (i *Installer) Install(ctx context.Context) error {
 			waitSp.succeed("Tekton CRDs registered")
 		}
 
-		// Wait for Triggers CRDs before proceeding to components that use them.
+		// Wait for Triggers CRDs before proceeding to Interceptors.
 		if s.Name == "Tekton Triggers" && !i.dryRun {
 			waitSp := newSpinner("Waiting for Tekton Triggers CRDs to register...")
 			waitSp.start()
@@ -311,6 +326,106 @@ func (i *Installer) Status(ctx context.Context) error {
 	}
 
 	fmt.Println()
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Fulcio config patch
+// ---------------------------------------------------------------------------
+
+// patchFulcioConfig replaces the Fulcio ConfigMap with one that configures
+// the in-cluster Kubernetes OIDC issuer, then restarts the Fulcio deployment.
+//
+// Without this patch, Fulcio rejects TokenRequest OIDC tokens because the
+// default config only trusts external providers (Dex, Google, etc).
+// This is what makes keyless signing work inside a local kind cluster.
+//
+// Equivalent to:
+//
+//	kubectl delete configmap fulcio-config -n fulcio-system
+//	kubectl apply -f fulcio-config.yaml
+//	kubectl rollout restart deployment/fulcio-server -n fulcio-system
+func (i *Installer) patchFulcioConfig(ctx context.Context) error {
+	fmt.Println("  🔐 Patching Fulcio config for in-cluster Kubernetes OIDC issuer...")
+
+	configMapGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+
+	const namespace = "fulcio-system"
+	const configMapName = "fulcio-config"
+	const deploymentName = "fulcio-server"
+
+	desired := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      configMapName,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"blanketops.dev/managed":   "true",
+					"blanketops.dev/component": "sigstore",
+				},
+				"annotations": map[string]interface{}{
+					"blanketops.dev/description": "Patched for in-cluster Kubernetes OIDC issuer",
+				},
+			},
+			"data": map[string]interface{}{
+				"config.json": `{
+  "OIDCIssuers": {
+    "https://kubernetes.default.svc.cluster.local": {
+      "IssuerURL": "https://kubernetes.default.svc.cluster.local",
+      "ClientID": "sigstore",
+      "Type": "kubernetes"
+    }
+  }
+}`,
+			},
+		},
+	}
+
+	if err := i.ensureNamespace(ctx, namespace); err != nil {
+		return fmt.Errorf("ensuring fulcio-system namespace: %w", err)
+	}
+
+	// Delete existing ConfigMap — ignore not-found.
+	_ = i.dynamic.Resource(configMapGVR).Namespace(namespace).
+		Delete(ctx, configMapName, metav1.DeleteOptions{})
+
+	// Create our patched ConfigMap.
+	if _, err := i.dynamic.Resource(configMapGVR).Namespace(namespace).
+		Create(ctx, desired, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating Fulcio ConfigMap: %w", err)
+	}
+
+	fmt.Println("  ✓ Fulcio ConfigMap patched")
+
+	// Rollout restart — patch the pod template annotation to trigger a rolling restart.
+	// Equivalent to: kubectl rollout restart deployment/fulcio-server -n fulcio-system
+	patch := []byte(fmt.Sprintf(`{
+		"spec": {
+			"template": {
+				"metadata": {
+					"annotations": {
+						"blanketops.dev/restartedAt": %q
+					}
+				}
+			}
+		}
+	}`, time.Now().Format(time.RFC3339)))
+
+	_, err := i.dynamic.Resource(deploymentGVR).Namespace(namespace).
+		Patch(ctx, deploymentName, types.MergePatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Fulcio deployment not yet up — config will be picked up on first start.
+			fmt.Println("  ✓ Fulcio not yet deployed — config will apply on first start")
+			return nil
+		}
+		return fmt.Errorf("restarting Fulcio deployment: %w", err)
+	}
+
+	fmt.Println("  ✓ Fulcio deployment restarted")
 	return nil
 }
 

@@ -141,6 +141,7 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 			},
 		},
 	}
+
 }
 
 // sanitiseLabel replaces characters invalid in Kubernetes label values.
