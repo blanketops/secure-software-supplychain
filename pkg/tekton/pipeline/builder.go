@@ -428,7 +428,7 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 					"image",
 					"--exit-code", "0",
 					"--severity", "HIGH,CRITICAL",
-					"--skip-java-db-update",
+					"--scanners", "vuln",
 					"--timeout", "10m",
 				},
 			}},

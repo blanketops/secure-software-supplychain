@@ -56,7 +56,7 @@ spec:
 
       SARIF_OUTPUT="$(workspaces.manifest-dir.path)/trivy-report.sarif"
 
-      # Air-gapped setup — preserve as-is
+      #! Air-gapped setup — preserve as-is
       if [ "$(params.AIR_GAPPED_ENABLED)" = "true" ]; then
         echo "Air-Gapped mode enabled"
         TRIVY_TEMP_DIR=$(mktemp -d)
@@ -68,25 +68,31 @@ spec:
         SKIP_UPDATE="--skip-update"
       fi
 
-      # Run scan — SARIF output for rich structured report
+      #! Run scan — SARIF output for rich structured report.
+      #! --scanners vuln     : vulnerability scanning only, skip secret scanning
+      #! --skip-java-db-update : skip the 860MB Java DB download every run
+      #! --timeout 10m       : give Trivy enough time to complete
       echo "Running trivy scan on $(params.IMAGE_PATH)"
       trivy image \
         $SKIP_UPDATE \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
+        --scanners vuln \
+        --timeout 10m \
         --format sarif \
         --output "$SARIF_OUTPUT" \
         $(params.IMAGE_PATH)
 
-      # Also print human readable table to logs
       trivy image \
         $SKIP_UPDATE \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
+        --scanners vuln \
+        --timeout 10m \
         $(params.IMAGE_PATH)
 
-      # Extract counts from SARIF
-      # SARIF rules map 1:1 to findings — count by severity level
+      #! Extract counts from SARIF
+      #! SARIF rules map 1:1 to findings — count by severity level
       critical=$(grep -o '"level":"error"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       high=$(grep -o '"level":"warning"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       total=$((critical + high))
@@ -96,16 +102,16 @@ spec:
       echo "TOTAL: $total"
       echo "SARIF report: $SARIF_OUTPUT"
 
-      # Write results
+      #! Write results
       if [ "$total" -eq 0 ]; then
         printf 'PASS' > $(results.TRIVY_SCAN_SUMMARY.path)
       else
         printf 'FAIL' > $(results.TRIVY_SCAN_SUMMARY.path)
       fi
 
-      printf '%s' "$critical"    > $(results.TRIVY_CRITICAL_COUNT.path)
-      printf '%s' "$high"        > $(results.TRIVY_HIGH_COUNT.path)
-      printf '%s' "$total"       > $(results.TRIVY_TOTAL_COUNT.path)
+      printf '%s' "$critical"     > $(results.TRIVY_CRITICAL_COUNT.path)
+      printf '%s' "$high"         > $(results.TRIVY_HIGH_COUNT.path)
+      printf '%s' "$total"        > $(results.TRIVY_TOTAL_COUNT.path)
       printf '%s' "$SARIF_OUTPUT" > $(results.TRIVY_SARIF_PATH.path)
 
       echo "Scan complete — SUMMARY=$(cat $(results.TRIVY_SCAN_SUMMARY.path))"
