@@ -58,8 +58,6 @@ const (
 )
 
 // step represents a named installation phase with a set of manifest paths.
-// PreHook runs before applying manifests.
-// PostHook runs after applying manifests.
 type step struct {
 	Name     string
 	Paths    []string
@@ -68,10 +66,6 @@ type step struct {
 }
 
 // installOrder defines the sequence in which dependencies are applied.
-// Order matters: Tekton Pipelines CRDs must exist before Triggers, Chains, or Tasks.
-// Tekton Triggers must exist before Tasks that reference ClusterInterceptors.
-// Fulcio release.yaml already contains the correct in-cluster OIDC config and
-// --oidc-trusted-ca-file flag — no PostHook patching required.
 var installOrder = []step{
 	{
 		Name:  "MetalLB Install",
@@ -125,8 +119,27 @@ var installOrder = []step{
 		Paths: []string{"dependencies/metallb/setup"},
 	},
 	{
+		// Apply the nginx controller manifest first, then wait for it to be
+		// ready before applying ingress routes — the admission webhook must
+		// be up before any Ingress objects are created.
 		Name:  "NGINX Ingress Controller",
-		Paths: []string{"dependencies/ingress"},
+		Paths: []string{"dependencies/ingress/controller"},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for NGINX Ingress Controller to be ready...")
+			waitSp.start()
+			if err := i.waitForDeployment(ctx, "ingress-nginx", "ingress-nginx-controller", 2*time.Minute); err != nil {
+				waitSp.fail("NGINX Ingress Controller not ready")
+				return err
+			}
+			waitSp.succeed("NGINX Ingress Controller ready")
+			return nil
+		},
+	},
+	{
+		// Ingress routes are applied after the controller is ready.
+		// WEBHOOK_HOST placeholder is substituted with --webhook-host flag value.
+		Name:  "Ingress Routes",
+		Paths: []string{"dependencies/ingress/routes"},
 	},
 	{
 		Name:  "SonarQube",
@@ -152,6 +165,7 @@ var statusChecks = []struct {
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},
 	{Namespace: "default", Deployment: "grafeas-server", Label: "Grafeas"},
+	{Namespace: "ingress-nginx", Deployment: "ingress-nginx-controller", Label: "NGINX Ingress"},
 }
 
 // Installer applies embedded supply chain manifests to a Kubernetes cluster.
@@ -160,7 +174,7 @@ type Installer struct {
 	discovery   discovery.DiscoveryInterface
 	mapper      meta.RESTMapper
 	dryRun      bool
-	webhookHost string // substituted into ingress manifests at apply time
+	webhookHost string
 }
 
 // New creates an Installer from a kubeconfig path.
@@ -208,8 +222,8 @@ func (i *Installer) Install(ctx context.Context) error {
 	if i.webhookHost != "" {
 		fmt.Printf("   Webhook host: %s\n", i.webhookHost)
 	} else {
-		fmt.Println("   ⚠  No --webhook-host set — ingress manifests will use placeholder host.")
-		fmt.Println("      Run 'supplychain install --webhook-host <host>' to configure ingress routing.")
+		fmt.Println("   ⚠  No --webhook-host set — ingress routes will use WEBHOOK_HOST placeholder.")
+		fmt.Println("      Run with --webhook-host <host> to configure ingress routing.")
 	}
 	fmt.Println()
 
@@ -343,6 +357,30 @@ func (i *Installer) Status(ctx context.Context) error {
 
 	fmt.Println()
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Readiness helpers
+// ---------------------------------------------------------------------------
+
+// waitForDeployment polls until the named deployment has all replicas available
+// or the timeout is exceeded.
+func (i *Installer) waitForDeployment(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		deploy, err := i.dynamic.Resource(
+			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+		).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			replicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
+			desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
+			if replicas >= desired && desired > 0 {
+				return nil
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return fmt.Errorf("deployment %s/%s not ready after %s", namespace, name, timeout)
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +528,7 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 // ---------------------------------------------------------------------------
 
 // substituteManifest replaces known placeholders in manifest data.
-// Currently substitutes WEBHOOK_HOST with the configured webhook host.
+// WEBHOOK_HOST is replaced with the configured webhook host.
 func (i *Installer) substituteManifest(data []byte) []byte {
 	if i.webhookHost == "" {
 		return data
@@ -518,7 +556,6 @@ func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 			return fmt.Errorf("failed to read %q: %w", path, err)
 		}
 
-		// Substitute placeholders (e.g. WEBHOOK_HOST in ingress manifests).
 		data = i.substituteManifest(data)
 
 		if err := i.applyManifest(ctx, data, path); err != nil {
