@@ -138,9 +138,17 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Read them back here — the cert and principal survive in Status.
 		if ib.Status.Phase == "Succeeded" {
 			_, imageDigest := results.ExtractImageResults(pr)
+
+			// Get rekorURL from SupplyChain spec
+			rekorURL := ""
+			if sc.Spec.Signing != nil {
+				rekorURL = sc.Spec.Signing.RekorURL
+			}
+
 			if err := r.Signature.MarkSigned(
 				ctx, &ib, imageDigest,
 				[]byte(ib.Status.SigningCertPEM),
+				rekorURL,
 			); err != nil {
 				logger.Error(err, "failed to mark ImageSignature signed")
 			}
@@ -149,7 +157,6 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				logger.Error(err, "failed to mark ImageSignature failed")
 			}
 		}
-
 		// 4c. Prune old PipelineRuns
 		if err := r.Pruner.PruneForImageBuild(ctx, &ib); err != nil {
 			logger.Error(err, "failed to prune PipelineRuns")

@@ -162,15 +162,6 @@ func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
 		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"}},
 	}
 
-	if sc.Spec.Steps.Sign {
-		results = append(results,
-			tektonv1.PipelineResult{
-				Name:  "REKOR_LOG_INDEX",
-				Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSign + ".results.REKOR_LOG_INDEX)"},
-			},
-		)
-	}
-
 	if sc.Spec.Steps.Trivy {
 		results = append(results,
 			tektonv1.PipelineResult{Name: "TRIVY_SCAN_SUMMARY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"}},
@@ -445,9 +436,6 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 		},
 	}
 }
-
-// ── signTask update ────────────────────────────────────────────────────────
-// Full replacement for signTask in builder.go
 func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
 	fulcio := "https://fulcio.sigstore.dev"
 	rekor := "https://rekor.sigstore.dev"
@@ -470,19 +458,12 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 			TaskSpec: tektonv1.TaskSpec{
 				Params: []tektonv1.ParamSpec{
 					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+					{Name: "DIGEST", Type: tektonv1.ParamTypeString},
 					{Name: "FULCIO_URL", Type: tektonv1.ParamTypeString},
 					{Name: "REKOR_URL", Type: tektonv1.ParamTypeString},
 				},
 				Workspaces: []tektonv1.WorkspaceDeclaration{
 					{Name: "dockerconfig"},
-				},
-				// REKOR_LOG_INDEX — extracted from cosign stderr output.
-				// Cosign prints "tlog entry created with index: N" when it
-				// submits the signature to the Rekor transparency log.
-				// This result is consumed by buildResults and stored on
-				// ImageSignature.status.rekorLogIndex by the recorder.
-				Results: []tektonv1.TaskResult{
-					{Name: "REKOR_LOG_INDEX", Type: tektonv1.ResultsTypeString, Description: "Rekor transparency log index for this signature"},
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -504,7 +485,10 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 				},
 				Steps: []tektonv1.Step{
 					{
-						// Step 1: cosign sign — distroless image, Args only, no shell
+						// Sign by digest — ensures Rekor indexes by the content hash.
+						// Cosign WARNING about tags goes away, and the retrieve API
+						// can find the entry by sha256 digest.
+						// IMAGE@DIGEST format: docker.io/org/repo:tag@sha256:abc...
 						Name:  "sign",
 						Image: "gcr.io/projectsigstore/cosign:v2.2.3",
 						VolumeMounts: []corev1.VolumeMount{
@@ -514,7 +498,6 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
 							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
-							{Name: "COSIGN_REKOR_URL", Value: rekor},
 						},
 						Args: []string{
 							"sign",
@@ -523,44 +506,20 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
 							"--insecure-skip-verify",
 							"--yes",
-							"$(params.IMAGE)",
+							"$(params.IMAGE)@$(params.DIGEST)",
 						},
-					},
-					{
-						// Step 2: query Rekor for the log index using the image digest
-						// busybox has wget and sh — use it to query Rekor search API
-						Name:  "get-rekor-index",
-						Image: "busybox:latest",
-						Script: `#!/bin/sh
-set -e
-REKOR_URL="$(params.REKOR_URL)"
-IMAGE="$(params.IMAGE)"
-
-# Query Rekor search API by image tag
-# Rekor stores the entry — find it by artifact hash
-INDEX=$(wget -qO- "${REKOR_URL}/api/v1/log" 2>/dev/null | grep -oE '"treeSize":[0-9]+' | grep -oE '[0-9]+$' || echo "")
-TREE_SIZE=${INDEX:-0}
-# Log index is treeSize - 1 (last entry)
-if [ "$TREE_SIZE" -gt 0 ]; then
-  LOG_INDEX=$((TREE_SIZE - 1))
-else
-  LOG_INDEX=0
-fi
-echo "Rekor tree size: $TREE_SIZE, log index: $LOG_INDEX"
-printf '%s' "$LOG_INDEX" > $(results.REKOR_LOG_INDEX.path)
-`,
 					},
 				},
 			},
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+			{Name: "DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
 			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: fulcio}},
 			{Name: "REKOR_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: rekor}},
 		},
 	}
 }
-
 func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
 		Name:     stepAttest,
