@@ -42,7 +42,8 @@ const (
 	workspaceShared       = "shared-data"
 	workspaceSSHCreds     = "ssh-creds"
 	workspaceDockerConfig = "dockerconfig"
-	workspaceTrivyCache   = "trivy-cache"
+	// workspaceTrivyCache removed — Trivy DB is now baked into the scanner image.
+	// See dependencies/tekton/task/trivy-db/Dockerfile.
 )
 
 func BuildPipelineRun(
@@ -59,14 +60,15 @@ func BuildPipelineRun(
 
 	// ── Workspace bindings ─────────────────────────────────────────────────
 	//
-	// workspaceShared      — ephemeral per-run scratch space (source + build artifacts)
-	// workspaceSSHCreds    — git SSH key secret, read-only
-	// workspaceDockerConfig— registry auth secret, read-only
-	// workspaceTrivyCache  — PERSISTENT PVC shared across all runs.
-	//                        Trivy downloads its vulnerability DB (~91MB) on first run
-	//                        and reuses it on every subsequent run. Using a
-	//                        VolumeClaimTemplate here would create a new PVC per run,
-	//                        defeating the cache entirely.
+	// workspaceShared       — ephemeral VolumeClaimTemplate per run.
+	//                         Holds cloned source, build artifacts, and
+	//                         the Trivy SARIF report. Deleted after the run.
+	// workspaceSSHCreds     — git SSH key secret, read-only.
+	// workspaceDockerConfig — registry auth secret, read-only.
+	//
+	// Note: Trivy no longer needs a cache workspace. The vulnerability DB
+	// is pre-baked into docker.io/nkanyezisolutions/trivy-db:latest at
+	// image build time. Rebuild that image periodically to refresh the DB.
 	workspaces := []tektonv1.WorkspaceBinding{
 		{
 			Name: workspaceShared,
@@ -95,15 +97,6 @@ func BuildPipelineRun(
 				SecretName: sc.Spec.Image.RegistrySecretRef,
 			},
 		},
-		{
-			// Persistent across runs — Trivy DB downloaded once, reused forever.
-			// PVC must exist before the first PipelineRun:
-			//   kubectl apply -f dependencies/tekton/task/trivy-cache-pvc.yaml
-			Name: workspaceTrivyCache,
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: "trivy-db-cache",
-			},
-		},
 	}
 
 	return &tektonv1.PipelineRun{
@@ -121,7 +114,6 @@ func BuildPipelineRun(
 					{Name: workspaceShared},
 					{Name: workspaceSSHCreds},
 					{Name: workspaceDockerConfig},
-					{Name: workspaceTrivyCache},
 				},
 				Params: []tektonv1.ParamSpec{
 					{Name: "image-ref", Type: tektonv1.ParamTypeString},
@@ -220,7 +212,8 @@ func buildTaskList(
 	last = stepPushImage
 
 	// Step 6: trivy — scan the real registry image digest, not a local tar
-	// Scanning after push guarantees we're scanning what will actually run
+	// Scanning after push guarantees we're scanning what will actually run.
+	// Uses a custom image with the vulnerability DB pre-baked — no downloads.
 	if sc.Spec.Steps.Trivy {
 		tasks = append(tasks, trivyTask(last))
 		last = stepTrivy
@@ -416,6 +409,10 @@ echo "Pushed $(params.IMAGE)"
 }
 
 func trivyTask(runAfter string) tektonv1.PipelineTask {
+	// Uses docker.io/nkanyezisolutions/trivy-db:latest — a custom image with
+	// the vulnerability DB pre-baked at build time. No DB downloads at runtime.
+	// --skip-db-update and --skip-java-db-update are set in the task itself.
+	// Rebuild the image periodically: see dependencies/tekton/task/trivy-db/Dockerfile
 	return tektonv1.PipelineTask{
 		Name:     stepTrivy,
 		RunAfter: after(runAfter),
@@ -423,7 +420,6 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 		Timeout:  &metav1.Duration{Duration: 15 * time.Minute},
 		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
 			{Name: "manifest-dir", Workspace: workspaceShared},
-			{Name: "cache", Workspace: workspaceTrivyCache},
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{
