@@ -47,22 +47,31 @@ func main() {
 func installCmd() *cobra.Command {
 	var kubeconfig string
 	var dryRun bool
+	var webhookHost string
 
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install supply chain dependencies onto the cluster",
 		Long: `Installs all supply chain platform dependencies in the correct order:
-  1. Tekton Pipelines
-  2. Tekton Chains
-  3. Tekton Dashboard
-  4. Tekton Tasks (buildah, trivy, cosign, etc.)
-  5. Grafeas
+  1. MetalLB
+  2. Tekton Pipelines, Triggers, Chains, Dashboard, Tasks, Results
+  3. Sigstore (Fulcio, Rekor)
+  4. Grafeas
+  5. NGINX Ingress Controller
+  6. SonarQube
 
 All manifests are embedded in the binary — no network access required
-beyond connectivity to the Kubernetes API server.`,
+beyond connectivity to the Kubernetes API server.
+
+Use --webhook-host to set the public hostname for ingress routing
+(e.g. your Tailscale Funnel URL). This substitutes WEBHOOK_HOST in
+ingress manifests for the Tekton Dashboard and SonarQube.
+
+Example:
+  supplychain install --webhook-host pop-os.tailf8145.ts.net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			i, err := installer.New(kubeconfig, dryRun)
+			i, err := installer.NewWithOptions(kubeconfig, dryRun, webhookHost)
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
 			}
@@ -72,6 +81,7 @@ beyond connectivity to the Kubernetes API server.`,
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")
+	cmd.Flags().StringVar(&webhookHost, "webhook-host", "", "Public hostname for ingress routing (e.g. pop-os.tailf8145.ts.net)")
 	return cmd
 }
 

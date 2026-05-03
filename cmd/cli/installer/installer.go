@@ -51,6 +51,10 @@ import (
 const (
 	resultsTLSSecretName = "tekton-results-tls"
 	resultsTLSNamespace  = "tekton-pipelines"
+
+	// webhookHostPlaceholder is replaced in ingress manifests at apply time
+	// with the actual public hostname (e.g. Tailscale Funnel URL).
+	webhookHostPlaceholder = "WEBHOOK_HOST"
 )
 
 // step represents a named installation phase with a set of manifest paths.
@@ -152,14 +156,20 @@ var statusChecks = []struct {
 
 // Installer applies embedded supply chain manifests to a Kubernetes cluster.
 type Installer struct {
-	dynamic   dynamic.Interface
-	discovery discovery.DiscoveryInterface
-	mapper    meta.RESTMapper
-	dryRun    bool
+	dynamic     dynamic.Interface
+	discovery   discovery.DiscoveryInterface
+	mapper      meta.RESTMapper
+	dryRun      bool
+	webhookHost string // substituted into ingress manifests at apply time
 }
 
 // New creates an Installer from a kubeconfig path.
 func New(kubeconfig string, dryRun bool) (*Installer, error) {
+	return NewWithOptions(kubeconfig, dryRun, "")
+}
+
+// NewWithOptions creates an Installer with a webhook host for ingress substitution.
+func NewWithOptions(kubeconfig string, dryRun bool, webhookHost string) (*Installer, error) {
 	config, err := buildConfig(kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
@@ -183,10 +193,11 @@ func New(kubeconfig string, dryRun bool) (*Installer, error) {
 	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
 
 	return &Installer{
-		dynamic:   dynClient,
-		discovery: disc,
-		mapper:    mapper,
-		dryRun:    dryRun,
+		dynamic:     dynClient,
+		discovery:   disc,
+		mapper:      mapper,
+		dryRun:      dryRun,
+		webhookHost: webhookHost,
 	}, nil
 }
 
@@ -194,6 +205,12 @@ func New(kubeconfig string, dryRun bool) (*Installer, error) {
 func (i *Installer) Install(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("🔧 Installing Secure Software Supply Chain dependencies...")
+	if i.webhookHost != "" {
+		fmt.Printf("   Webhook host: %s\n", i.webhookHost)
+	} else {
+		fmt.Println("   ⚠  No --webhook-host set — ingress manifests will use placeholder host.")
+		fmt.Println("      Run 'supplychain install --webhook-host <host>' to configure ingress routing.")
+	}
 	fmt.Println()
 
 	for idx, s := range installOrder {
@@ -265,8 +282,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Wait for pods to be ready:  kubectl get pods -n tekton-pipelines")
-	fmt.Println("  2. Deploy the supply chain operator")
-	fmt.Println("  3. Apply a SupplyChain CR")
+	fmt.Println("  2. Bootstrap SonarQube:        supplychain init-sonarqube --new-password <password>")
+	fmt.Println("  3. Deploy the supply chain operator")
+	fmt.Println("  4. Apply a SupplyChain CR")
 	fmt.Println()
 	return nil
 }
@@ -279,18 +297,15 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 	for idx := len(installOrder) - 1; idx >= 0; idx-- {
 		s := installOrder[idx]
 		fmt.Printf("[%d/%d] Removing %s\n", len(installOrder)-idx, len(installOrder), s.Name)
-
 		for _, dir := range s.Paths {
 			if err := i.deleteDirectory(ctx, dir); err != nil {
 				fmt.Printf("  ⚠ %s: %v\n", s.Name, err)
 				continue
 			}
 		}
-
 		if s.Name == "Tekton Results" {
 			_ = i.deleteResultsTLS(ctx)
 		}
-
 		fmt.Printf("  ✓ %s removed\n", s.Name)
 	}
 
@@ -308,7 +323,6 @@ func (i *Installer) Status(ctx context.Context) error {
 		deploy, err := i.dynamic.Resource(
 			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		).Namespace(check.Namespace).Get(ctx, check.Deployment, metav1.GetOptions{})
-
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				fmt.Printf("  ✗ %-30s  not installed\n", check.Label)
@@ -320,7 +334,6 @@ func (i *Installer) Status(ctx context.Context) error {
 
 		replicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
 		desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
-
 		if replicas >= desired && desired > 0 {
 			fmt.Printf("  ✓ %-30s  running (%d/%d)\n", check.Label, replicas, desired)
 		} else {
@@ -338,7 +351,6 @@ func (i *Installer) Status(ctx context.Context) error {
 
 func (i *Installer) ensureResultsTLS(ctx context.Context) error {
 	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-
 	_, err := i.dynamic.Resource(secretGVR).
 		Namespace(resultsTLSNamespace).
 		Get(ctx, resultsTLSSecretName, metav1.GetOptions{})
@@ -351,7 +363,6 @@ func (i *Installer) ensureResultsTLS(ctx context.Context) error {
 	}
 
 	fmt.Println("  🔐 Generating self-signed TLS certificate for Results API...")
-
 	certPEM, keyPEM, err := generateSelfSignedCert()
 	if err != nil {
 		return fmt.Errorf("failed to generate TLS cert: %w", err)
@@ -408,6 +419,7 @@ func (i *Installer) ensureNamespace(ctx context.Context, name string) error {
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
+
 	ns := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -477,6 +489,15 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 // Core manifest application logic
 // ---------------------------------------------------------------------------
 
+// substituteManifest replaces known placeholders in manifest data.
+// Currently substitutes WEBHOOK_HOST with the configured webhook host.
+func (i *Installer) substituteManifest(data []byte) []byte {
+	if i.webhookHost == "" {
+		return data
+	}
+	return bytes.ReplaceAll(data, []byte(webhookHostPlaceholder), []byte(i.webhookHost))
+}
+
 func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 	entries, err := manifests.Dependencies.ReadDir(dir)
 	if err != nil {
@@ -496,6 +517,9 @@ func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read %q: %w", path, err)
 		}
+
+		// Substitute placeholders (e.g. WEBHOOK_HOST in ingress manifests).
+		data = i.substituteManifest(data)
 
 		if err := i.applyManifest(ctx, data, path); err != nil {
 			return fmt.Errorf("failed to apply %q: %w", path, err)
@@ -553,7 +577,6 @@ func (i *Installer) applyManifest(ctx context.Context, data []byte, source strin
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
 		}
-
 		if obj.GetKind() == "" {
 			continue
 		}
@@ -593,7 +616,6 @@ func (i *Installer) deleteManifest(ctx context.Context, data []byte) error {
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
 		}
-
 		if obj.GetKind() == "" {
 			continue
 		}
