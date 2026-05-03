@@ -94,7 +94,6 @@ spec:
 
       #! ── SARIF scan ─────────────────────────────────────────────────────
       #! --scanners vuln          : vulnerability scanning only
-      #! --skip-java-db-update    : skip the 860MB Java DB download
       #! --cache-dir              : use persistent cache to avoid re-download
       trivy image \
         --cache-dir "$CACHE_DIR" \
@@ -102,7 +101,6 @@ spec:
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
-        --skip-java-db-update \
         --timeout 10m \
         --format sarif \
         --output "$SARIF_OUTPUT" \
@@ -115,7 +113,6 @@ spec:
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
-        --skip-java-db-update \
         --timeout 10m \
         $(params.IMAGE_PATH)
 
