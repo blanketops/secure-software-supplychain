@@ -17,7 +17,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -166,9 +165,20 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 // pipelineRunName generates a deterministic PipelineRun name from the
 // ImageBuild name that always fits within Kubernetes' 63-char limit.
-func pipelineRunName(ibName string) string {
-	h := sha256.Sum256([]byte(ibName))
-	return fmt.Sprintf("pr-%x", h[:4])
+func pipelineRunName(ib *supplychainv1alpha1.ImageBuild) string {
+	// ImageBuild name format: <supplychain>-<branch>-<sha>
+	// PipelineRun format:     pr-<supplychain>-<short-sha>
+	// e.g. pr-for-kaniko-app-408e8fce
+	sha := ib.Spec.GitRef.Revision
+	if len(sha) > 8 {
+		sha = sha[:8]
+	}
+	name := fmt.Sprintf("pr-%s-%s", ib.Spec.SupplyChainRef.Name, sha)
+	// Kubernetes name limit is 63 chars
+	if len(name) > 63 {
+		name = name[:63]
+	}
+	return name
 }
 
 func (r *ImageBuildReconciler) reconcilePipelineRun(
@@ -178,7 +188,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 ) (*tektonv1.PipelineRun, *ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	prName := pipelineRunName(ib.Name)
+	prName := pipelineRunName(ib)
 
 	// Idempotency — return existing PipelineRun if already created.
 	var existing tektonv1.PipelineRun

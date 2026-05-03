@@ -17,42 +17,55 @@ GitHub Push
     └── EventListener (Tekton Triggers)
             └── creates ──► ImageBuild CR
                                 └── owns ──► Tekton PipelineRun
-                                                 ├── git-clone             (source)
+                                                 ├── git-clone             (source fetch)
+                                                 ├── authentication-fulcio (OIDC warm-up)
                                                  ├── sonarqube-scanner     (quality gate)
-                                                 ├── buildah               (build)
-                                                 ├── skopeo                (image copy)
-                                                 ├── trivy-scanner         (vulnerability scan)
-                                                 ├── cosign-sign           (keyless signing)
-                                                 ├── tekton-chains-attest  (provenance)
-                                                 └── grafeas-publish       (metadata)
+                                                 ├── build-image-buildah   (OCI image build)
+                                                 ├── push-image-docker     (registry push)
+                                                 ├── vulnerability-scan-trivy (CVE scan)
+                                                 ├── sign-image-cosign     (keyless signing)
+                                                 ├── attest-image-rekor-fulcio (provenance)
+                                                 └── publish-metadata-grafeas  (metadata)
 ```
 
 ---
 
 ## Architecture
 
+![Supply Chain Architecture](docs/architecture.png)
+
+The pipeline is driven end-to-end by two CRs and a set of Tekton Tasks. The controller reconciles the full lifecycle — from webhook registration to signed image attestation.
+
+---
+
 ### CRs
 
-**`SupplyChain`** — the pipeline definition for a repository. One per repo, no exceptions. The controller enforces this at reconcile time. It owns and reconciles:
+**`SupplyChain`** — the pipeline definition for a repository. One per repo. The controller enforces this at reconcile time. It owns and reconciles:
 - Custom Tekton Tasks
 - TriggerBinding, TriggerTemplate, EventListener (GitHub webhook automation)
-- The `supply-chain-runner` ServiceAccount (created before the EventListener deployment uses it)
+- Ingress for the EventListener (host sourced from `spec.webhookHost`)
+- The `supply-chain-runner` ServiceAccount
 
-**`ImageBuild`** — a single pipeline execution. Auto-created by the EventListener on every GitHub push. It owns the Tekton `PipelineRun` and tracks per-step status. The controller guards on `SupplyChain` being `Ready` before creating the `PipelineRun`.
+**`GitHubWebhook`** — manages GitHub webhook registration. Automatically registers the webhook URL with GitHub using a GitHub App installation token. Idempotent — safe to apply on every reconcile.
 
-**`ImageSignature`** — the signing audit record. Created after a successful signing context is established. Carries the Fulcio cert reference, Rekor log index, and Grafeas occurrence.
+**`ImageBuild`** — a single pipeline execution. Auto-created by the EventListener on every GitHub push. Owns the Tekton `PipelineRun` and tracks per-step status.
+
+**`ImageSignature`** — the cryptographic audit record. Created before the PipelineRun with `Phase=Pending`, updated to `Phase=Signed` on success. Carries the Fulcio cert reference, principal identity, and Rekor log index.
+
+**`ImageBuildResult`** — the durable execution record. Survives PipelineRun pruning. Captures full pipeline step results: git provenance, image digest, Trivy scan summary, SonarQube gate status, Grafeas occurrence.
+
+---
 
 ### Trigger Layer
 
 The `SupplyChain` controller automatically provisions the full Tekton Triggers stack per chain:
 
 - **TriggerBinding** — extracts `git-repo-url`, `git-revision`, `git-commit-sha`, `short-sha`, `repo-full-name` from the GitHub push payload
-- **TriggerTemplate** — creates an `ImageBuild` CR with the extracted params. Name is deterministic: `<supplychain>-<branch>-<full-sha>` — idempotent on replay
-- **EventListener** — shared across all SupplyChains in the namespace, runs as `supply-chain-runner` SA
+- **TriggerTemplate** — creates an `ImageBuild` CR with extracted params. Name is deterministic: `<supplychain>-<branch>-<full-sha>` — idempotent on replay
+- **EventListener** — shared across all SupplyChains in the namespace, exposed via nginx Ingress
+- **Ingress** — routes `spec.webhookHost` → EventListener. Host updated automatically when `webhookHost` changes
 
-The repo full name (`org/repo`) lives in the `blanketops.dev/repo-full-name` annotation — Kubernetes label values cannot contain `/`.
-
-RBAC for the EventListener pod is managed in `config/rbac/eventlistener_role.yaml`.
+---
 
 ### Mediator
 
@@ -60,9 +73,9 @@ The `ImageBuildReconciler` uses a mediator pattern to sequence prerequisites bef
 
 **Gate 1 — Prerequisites**
 - Git SSH ExternalSecret reconciliation
-- Registry ExternalSecret reconciliation (Kaniko + Tekton Chains split credentials)
+- Registry ExternalSecret reconciliation (Buildah + Tekton Chains split credentials)
 - SonarQube ExternalSecret reconciliation
-- Convergence wait — all secrets must exist before proceeding
+- Convergence wait — all secrets must materialise before proceeding
 
 **Gate 2 — Signing Context (three-proof authorization)**
 
@@ -70,135 +83,139 @@ Before Fulcio is called, three SubjectAccessReviews are performed against the `s
 
 | Proof | Resource | Verb | Meaning |
 |-------|----------|------|---------|
-| ScopeProof | `supplychains` | `get` | SA can access the chain definition it claims to execute against |
-| IntentProof | `imagebuilds` | `create` | SA is authorized to initiate a build execution |
+| ScopeProof | `supplychains` | `get` | SA can see the chain it claims to execute against |
+| IntentProof | `imagebuilds` | `create` | SA is authorized to initiate a build |
 | OutputProof | `imagesignatures` | `create` | SA is authorized to produce signing records |
 
 All three proofs are embedded in the attestation predicate that Fulcio signs over. This makes the ephemeral cert meaningful — it signs over a complete, API-server-verified authorization story, not just an identity claim.
 
-After all three SARs pass, a short-lived OIDC token is minted from the ServiceAccount and exchanged with Fulcio for an ephemeral signing certificate. The private key is discarded after the pipeline completes.
+After all three SARs pass, a short-lived OIDC token is minted from the ServiceAccount and exchanged with Fulcio for an ephemeral signing certificate. The principal and cert PEM are stored on `ImageBuild.Status` for the terminal block to read back after the PipelineRun completes.
 
 **Gate 3 — PipelineRun**
 
-Builds and creates the Tekton `PipelineRun` with the signing context injected. PipelineRun names are a SHA256-derived short hash of the `ImageBuild` name — always under 63 characters. The full `ImageBuild` name is stored in the `blanketops.dev/image-build` label for traceability.
-
-### Tasks
-
-**Controller-managed (reconciled automatically by `SupplyChainReconciler`):**
-- `sonarqube-scanner` — static analysis quality gate
-- `cosign-sign` — keyless image signing via Cosign + Fulcio + Rekor
-- `tekton-chains-attest` — SLSA provenance attestation via Tekton Chains
-- `grafeas-publish` — artifact metadata publishing to Grafeas
-
-**Prerequisites (installed separately):**
-- `git-clone`, `buildah`, `skopeo`, `trivy-scanner`
+Builds and creates the Tekton `PipelineRun` with the signing context injected. The `ImageSignature` CR is created at `Phase=Pending` before the PipelineRun starts.
 
 ---
 
-## RBAC
+### Terminal Actions
 
-### Controller manager
+When a PipelineRun reaches a terminal state (Succeeded or Failed), the reconciler runs three best-effort actions:
 
-The controller manager ClusterRole is generated from kubebuilder markers and covers: `supplychain.blanketops.dev` resources, Tekton Tasks and PipelineRuns, Tekton Triggers resources, ExternalSecrets, core resources (ServiceAccounts, Secrets), TokenRequest, and SubjectAccessReviews.
-
-### Pipeline runner
-
-The `supply-chain-runner` ServiceAccount requires:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: secure-software-supplychain-image-signer
-rules:
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["supplychains"]
-  verbs: ["get"]
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["imagebuilds"]
-  verbs: ["create"]
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["imagesignatures"]
-  verbs: ["create"]
-```
-
-### EventListener pod
-
-The EventListener deployment runs as `supply-chain-runner` and requires additional permissions to watch Tekton Triggers resources:
-
-```bash
-kubectl apply -f config/rbac/eventlistener_role.yaml
-```
-
----
-
-## Prerequisites
-
-### Cluster dependencies
-
-```bash
-# Tekton Pipelines
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
-
-# Tekton Triggers
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/interceptors.yaml
-
-# Tekton Chains
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/chains/latest/release.yaml
-
-# Sigstore (Fulcio + Rekor + ctlog)
-# see dependencies/sigstore/
-
-# External Secrets Operator
-# see dependencies/eso/
-```
+1. **Recorder** — creates or updates an `ImageBuildResult` CR with the full pipeline step results
+2. **Signature** — marks the `ImageSignature` as `Signed` (with digest) or `Failed`
+3. **Pruner** — deletes old PipelineRuns beyond the retention window (keeps last 3 succeeded, 1 failed)
 
 ---
 
 ## Install
 
-### Deploy into cluster
+### 1. Install dependencies
 
 ```bash
-# build the controller image
-docker build -t blanketops/supply-chain-controller:latest .
+supplychain install
+```
 
-# load into kind
+This applies all platform dependencies in order:
+- MetalLB (LoadBalancer support for kind)
+- Tekton Pipelines, Triggers, Interceptors, Chains, Dashboard, Tasks, Results
+- Sigstore (Fulcio, Rekor)
+- Grafeas
+- NGINX Ingress Controller
+- SonarQube
+
+### 2. Bootstrap SonarQube
+
+After `supplychain install` completes and SonarQube is ready:
+
+```bash
+supplychain init-sonarqube --new-password <your-password>
+```
+
+This automatically:
+- Waits for SonarQube to be ready
+- Changes the default admin password
+- Generates a `supply-chain` user token
+- Patches the `ClusterSecretStore` with the token at `/supplychain/sonarqube/token`
+
+### 3. Deploy the operator
+
+```bash
+# Build and load into kind
+docker build -t blanketops/supply-chain-controller:latest .
 kind load docker-image blanketops/supply-chain-controller:latest --name blanketops
 
-# install CRDs
+# Install CRDs
 make install
 
-# apply RBAC
+# Apply RBAC
 kubectl apply -f config/rbac/signing_role.yaml
 kubectl apply -f config/rbac/eventlistener_role.yaml
 
-# deploy the controller
+# Deploy
 make deploy IMG=blanketops/supply-chain-controller:latest
 ```
 
-Verify:
+### 4. Apply samples
 
 ```bash
-kubectl get pods -n secure-software-supply-chain-system
-kubectl get crds | grep blanketops
+kubectl apply -k config/samples
 ```
 
-### Local development (out-of-cluster)
+This applies:
+- `ClusterSecretStore` (ESO fake provider with credentials)
+- `SupplyChain` CR
+- `GitHubWebhook` CR
+
+---
+
+## Webhook Setup (Tailscale Funnel)
+
+The `GitHubWebhook` controller auto-registers the webhook with GitHub. The `hookURL` must be publicly reachable. We use Tailscale Funnel to expose the in-cluster EventListener without a cloud load balancer.
+
+### Setup
 
 ```bash
-make install
-make run
+# Expose the nginx ingress via Tailscale Funnel
+tailscale serve --bg --https=443 http://<metallb-ingress-ip>
+tailscale funnel --bg 443
 ```
 
-> Note: `make run` runs the controller on your local machine. Cluster-internal DNS (`*.svc.cluster.local`) will not resolve from outside the cluster. Deploy the controller into the cluster with `make deploy` for full end-to-end operation.
+Set `spec.webhookHost` in the `SupplyChain` CR to your Tailscale hostname:
+
+```yaml
+spec:
+  webhookHost: your-machine.tailf8145.ts.net
+```
+
+The controller automatically updates the EventListener Ingress host and the `GitHubWebhook` CR uses the same URL for webhook registration.
+
+### Persistence (systemd)
+
+To survive reboots, create a systemd service that bridges the MetalLB IP to localhost:
+
+```bash
+sudo tee /etc/systemd/system/kind-ingress-bridge.service <<EOF
+[Unit]
+Description=Bridge localhost to kind ingress-nginx
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:8888,fork,reuseaddr TCP:<metallb-ip>:80
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable --now kind-ingress-bridge
+tailscale funnel --bg 8888
+```
 
 ---
 
 ## Usage
 
-### 1. Apply a SupplyChain
+### SupplyChain CR
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -207,16 +224,16 @@ metadata:
   name: for-kaniko-app
   namespace: default
 spec:
-  repository: <owner>/<repo>
+  repository: ntlaletsi70/for-kaniko-app
   serviceAccountName: supply-chain-runner
+  webhookHost: your-machine.tailf8145.ts.net
   image:
-    registry: <registry>
-    name: <registryOwner>/repository
+    registry: docker.io
+    name: nkanyezisolutions/for-kaniko-app
     tagStrategy: git-sha
     cloneSecretRef: github-ssh-credentials
     registrySecretRef: registry-credentials
   steps:
-    buildpacks: true
     trivy: true
     sign: true
     attest: true
@@ -225,45 +242,36 @@ spec:
       tokenSecretRef: sonarqube-token
       projectKey: ntlaletsi70_for-kaniko-app
     grafeas:
-      serverURL: http://grafeas.default.svc.cluster.local:8080
+      serverURL: http://grafeas.grafeas.svc.cluster.local:8080
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local
 ```
 
-```bash
-kubectl apply -f config/samples/supplychain_v1alpha1_supplychain.yaml
-kubectl get supplychain
+### GitHubWebhook CR
+
+```yaml
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: GitHubWebhook
+metadata:
+  name: for-kaniko-app-webhook
+  namespace: default
+spec:
+  repository: ntlaletsi70/for-kaniko-app
+  supplyChainRef: for-kaniko-app
+  hookURL: https://your-machine.tailf8145.ts.net
+  secretRef: github-app-credentials
 ```
 
-Once `Ready`, the controller has provisioned Tasks, TriggerBinding, TriggerTemplate, EventListener, and the `supply-chain-runner` ServiceAccount.
-
-### 2. Wire the GitHub webhook
-
-```bash
-# terminal 1 — expose EventListener
-kubectl port-forward svc/el-secure-software-supplychain-listener 8080:8080 -n default
-
-# terminal 2 — proxy GitHub events into the cluster
-smee --url https://smee.io/<your-channel> --target http://localhost:8080
-```
-
-In GitHub → your repo → Settings → Webhooks:
-- Payload URL: your smee.io channel URL
-- Content type: `application/json`
-- Events: Push events only
-
-### 3. Push a commit — builds fire automatically
+### Push a commit — builds fire automatically
 
 ```bash
 kubectl get imagebuilds -n default -w
 ```
 
-`ImageBuild` names are deterministic: `<supplychain>-<branch>-<full-sha>`
-
 Phase transitions: `Pending` → `Running` → `Succeeded`
 
-### 4. Manually trigger a build
+### Manually trigger a build
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -280,36 +288,53 @@ spec:
   imageTag: manual-001
 ```
 
-```bash
-kubectl apply -f imagebuild.yaml
-kubectl get imagebuild -w
-```
-
-### 5. Inspect status
+### Inspect results
 
 ```bash
+# Build status
+kubectl get imagebuilds -n default
 kubectl describe imagebuild <name>
-kubectl get pipelineruns
-kubectl get imagesignatures
+
+# Signing audit record
+kubectl get imagesignatures -n default
+
+# Durable build result (survives PipelineRun pruning)
+kubectl get imagebuildresults -n default
+
+# PipelineRun logs
+kubectl get pipelineruns -n default
+tkn pipelinerun logs <name> -f
 ```
 
-### 6. Observe via CLI
-
-```bash
-# supply chain dashboard
-go run ./cmd/cli supplychain observe
-
-# RBAC audit dashboard
-go run ./cmd/cli supplychain observe rbac
-```
-
-### 7. Verify the signed image
+### Verify the signed image
 
 ```bash
 cosign verify \
   --certificate-identity-regexp=".*" \
   --certificate-oidc-issuer="https://kubernetes.default.svc.cluster.local" \
   docker.io/nkanyezisolutions/for-kaniko-app:<sha>
+```
+
+### CLI commands
+
+```bash
+# Install all dependencies
+supplychain install
+
+# Bootstrap SonarQube (run once after install)
+supplychain init-sonarqube --new-password <password>
+
+# Check dependency status
+supplychain status
+
+# Remove all dependencies
+supplychain uninstall
+
+# Open supply chain dashboard
+supplychain observe
+
+# Open RBAC audit dashboard
+supplychain observe rbac
 ```
 
 ---
@@ -319,6 +344,7 @@ cosign verify \
 ```bash
 make undeploy
 make uninstall
+supplychain uninstall
 ```
 
 ---
@@ -327,7 +353,7 @@ make uninstall
 
 `supplychain.blanketops.dev/v1alpha1`
 
-**Resources:** `SupplyChain`, `ImageBuild`, `ImageSignature`, `ImageBuildResult`
+**Resources:** `SupplyChain`, `GitHubWebhook`, `ImageBuild`, `ImageSignature`, `ImageBuildResult`
 
 ---
 
@@ -349,16 +375,18 @@ This operator is one component of the BlanketOps platform:
 - [Cosign / Sigstore](https://sigstore.dev)
 - [Fulcio](https://github.com/sigstore/fulcio)
 - [Rekor](https://github.com/sigstore/rekor)
+- [Buildah](https://buildah.io)
+- [Skopeo](https://github.com/containers/skopeo)
 - [Trivy](https://aquasecurity.github.io/trivy)
+- [SonarQube](https://www.sonarqube.org)
 - [Grafeas](https://grafeas.io)
 - [Kubebuilder](https://book.kubebuilder.io)
 - [External Secrets Operator](https://external-secrets.io)
+- [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
 
 ---
 
 ## Demo
-
-> 🎬 Video demos are recorded using [vhs](https://github.com/charmbracelet/vhs) and auto-generated from tape scripts in [`demo/scripts/`](demo/scripts/).
 
 | Demo | Description |
 |------|-------------|
@@ -367,4 +395,4 @@ This operator is one component of the BlanketOps platform:
 | Webhook Automation | GitHubWebhook CR: auto-register → push → pipeline fires |
 | Signing Verification | Verify signed image with cosign + Rekor transparency log |
 
-*Videos coming soon — see [`demo/`](demo/) for scripts and tape files.*
+*See [`demo/`](demo/) for scripts and tape files.*

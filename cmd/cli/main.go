@@ -37,6 +37,7 @@ func main() {
 	root.AddCommand(uninstallCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(observeCmd())
+	root.AddCommand(initSonarQubeCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -137,5 +138,45 @@ func observeCmd() *cobra.Command {
 		},
 	}
 
+	return cmd
+}
+
+// initSonarQubeCmd bootstraps SonarQube after a fresh install.
+// Connects to SonarQube, changes the default password, generates a token,
+// and patches the ClusterSecretStore so pipelines can authenticate.
+func initSonarQubeCmd() *cobra.Command {
+	var kubeconfig string
+	var newPassword string
+
+	cmd := &cobra.Command{
+		Use:   "init-sonarqube",
+		Short: "Bootstrap SonarQube after install",
+		Long: `Bootstraps SonarQube after a fresh install:
+
+  1. Waits for SonarQube to be ready
+  2. Changes the default admin password
+  3. Generates a user token named "supply-chain"
+  4. Patches the ClusterSecretStore with the token at /supplychain/sonarqube/token
+
+Run this once after 'supplychain install' completes.
+
+Example:
+  supplychain init-sonarqube --new-password MySecurePass123`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if newPassword == "" {
+				return fmt.Errorf("--new-password is required")
+			}
+			ctx := context.Background()
+			i, err := installer.New(kubeconfig, false)
+			if err != nil {
+				return fmt.Errorf("failed to create installer: %w", err)
+			}
+			return i.InitSonarQube(ctx, newPassword)
+		},
+	}
+
+	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
+	cmd.Flags().StringVar(&newPassword, "new-password", "", "New admin password for SonarQube (required)")
+	_ = cmd.MarkFlagRequired("new-password")
 	return cmd
 }
