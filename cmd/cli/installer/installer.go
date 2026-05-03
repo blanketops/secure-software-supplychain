@@ -445,7 +445,20 @@ func (i *Installer) waitForDeployment(ctx context.Context, namespace, name strin
 //   - fulcio-root.pem: fulcio-pub-key secret in fulcio-system (key: "cert")
 //   - ctfe.pub:        ctlog-public-key secret in ctlog-system (key: "public")
 //   - rekor.pub:       fetched via a short-lived Job (Rekor exposes no secret)
+//
+// ensureSigstoreRoots collects the three in-cluster sigstore trust anchors
+// and creates the blanketops-sigstore-roots ConfigMap in all required namespaces.
 func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
+	// ctlog-public-key is created by a post-install Job after ctlog starts.
+	// Wait for it to exist before reading — it may not be ready yet.
+	ctlogSp := newSpinner("Waiting for ctlog-public-key secret...")
+	ctlogSp.start()
+	if err := i.waitForSecret(ctx, ctfePublicKeyNS, ctfePublicKeySecret, 3*time.Minute); err != nil {
+		ctlogSp.fail("ctlog-public-key secret not found")
+		return err
+	}
+	ctlogSp.succeed("ctlog-public-key secret ready")
+
 	fulcioRoot, err := i.readSecretKey(ctx, "fulcio-system", "fulcio-pub-key", "cert")
 	if err != nil {
 		return fmt.Errorf("failed to read Fulcio root cert: %w", err)
@@ -1013,4 +1026,18 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("could not determine home directory: %w", err)
 	}
 	return clientcmd.BuildConfigFromFlags("", filepath.Join(home, ".kube", "config"))
+}
+
+// waitForSecret polls until the named secret exists or the timeout is exceeded.
+func (i *Installer) waitForSecret(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		_, err := i.dynamic.Resource(secretGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return nil
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return fmt.Errorf("secret %s/%s not found after %s", namespace, name, timeout)
 }
