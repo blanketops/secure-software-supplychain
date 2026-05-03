@@ -4,7 +4,7 @@ metadata:
   name: trivy-scanner
   namespace: default
   labels:
-    app.kubernetes.io/version: "0.2"
+    app.kubernetes.io/version: "0.3"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/categories: Security
@@ -13,20 +13,26 @@ metadata:
     tekton.dev/platforms: "linux/amd64,linux/arm64,linux/ppc64le,linux/390x"
 spec:
   description: >-
-    Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption. Supports a persistent cache workspace to avoid re-downloading the Trivy DB (91MB) on every run.
+    Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption.
+
+    The default TRIVY_IMAGE is a custom image with the vulnerability DB pre-baked at build time (docker.io/nkanyezisolutions/trivy-db:latest). This eliminates the 91MB + 861MB DB downloads on every pipeline run. Set TRIVY_IMAGE to the upstream trivy image if you want live DB updates.
+
+    To rebuild the baked image:
+      docker build -t docker.io/nkanyezisolutions/trivy-db:latest \
+        dependencies/tekton/task/trivy-db/
+      docker push docker.io/nkanyezisolutions/trivy-db:latest
   workspaces:
   - name: manifest-dir
     description: Workspace for source and SARIF report output.
-  - name: cache
-    description: |
-      Persistent cache for the Trivy vulnerability database.
-      Mount a PVC here to avoid downloading 91MB on every run.
-      If not bound, Trivy uses its default cache location.
-    optional: true
   params:
   - name: TRIVY_IMAGE
-    default: docker.io/aquasec/trivy@sha256:944a044451791617cc0ed2ee4d1942a4f66b790d527fcd0575a6b399ccbc05a1
-    description: Trivy scanner image to be used.
+    # Custom image with vulnerability DB pre-baked — no download on first run.
+    # Rebuild periodically to refresh the DB (weekly or monthly).
+    # See dependencies/tekton/task/trivy-db/Dockerfile
+    default: docker.io/nkanyezisolutions/trivy-db:latest
+    description: |
+      Trivy scanner image to use. Default is a custom image with the
+      vulnerability DB pre-baked to avoid downloading 91MB on every run.
     type: string
   - name: IMAGE_PATH
     description: Image or path to be scanned by trivy.
@@ -34,10 +40,6 @@ spec:
   - name: SEVERITY
     default: "HIGH,CRITICAL"
     description: Severities to scan for.
-    type: string
-  - name: AIR_GAPPED_ENABLED
-    default: "false"
-    description: Enable air-gapped mode (pre-download DB, skip update).
     type: string
   results:
   - name: TRIVY_SCAN_SUMMARY
@@ -65,39 +67,25 @@ spec:
 
       SARIF_OUTPUT="$(workspaces.manifest-dir.path)/trivy-report.sarif"
 
-      #! ── Cache directory ────────────────────────────────────────────────
-      #! Use the mounted PVC cache if available — avoids downloading 91MB
-      #! of vulnerability DB on every run. Falls back to default location.
-      CACHE_DIR="$HOME/.cache/trivy"
-      if [ "$(workspaces.cache.bound)" = "true" ]; then
-        CACHE_DIR="$(workspaces.cache.path)"
-        echo "Using persistent Trivy cache at: $CACHE_DIR"
-      else
-        echo "No cache workspace bound — using default cache: $CACHE_DIR"
-      fi
-
-      SKIP_UPDATE=""
-
-      #! ── Air-gapped setup ───────────────────────────────────────────────
-      if [ "$(params.AIR_GAPPED_ENABLED)" = "true" ]; then
-        echo "Air-Gapped mode enabled"
-        TRIVY_TEMP_DIR=$(mktemp -d)
-        trivy --cache-dir "$CACHE_DIR" image --download-db-only
-        tar -cf ./db.tar.gz -C "$TRIVY_TEMP_DIR/db" metadata.json trivy.db
-        rm -rf "$TRIVY_TEMP_DIR"
-        mkdir -p "$CACHE_DIR/db"
-        tar xvf ./db.tar.gz -C "$CACHE_DIR/db"
-        SKIP_UPDATE="--skip-update"
-      fi
+      # ── DB cache ───────────────────────────────────────────────────────
+      # TRIVY_CACHE_DIR is set in the baked image to /trivy-db where the
+      # DB was pre-downloaded at image build time. --skip-db-update and
+      # --skip-java-db-update prevent any network calls during the scan.
+      # If using the upstream trivy image, remove these flags.
+      CACHE_DIR="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy}"
+      echo "Trivy cache dir: $CACHE_DIR"
 
       echo "Running trivy scan on $(params.IMAGE_PATH)"
 
-      #! ── SARIF scan ─────────────────────────────────────────────────────
-      #! --scanners vuln          : vulnerability scanning only
-      #! --cache-dir              : use persistent cache to avoid re-download
+      # ── SARIF scan ─────────────────────────────────────────────────────
+      # --scanners vuln          : vulnerability scanning only (no secrets/misconfig)
+      # --skip-db-update         : use pre-baked DB, no download
+      # --skip-java-db-update    : skip 861MB Java DB entirely
+      # --timeout 10m            : generous timeout for large images
       trivy image \
         --cache-dir "$CACHE_DIR" \
-        $SKIP_UPDATE \
+        --skip-db-update \
+        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
@@ -106,18 +94,19 @@ spec:
         --output "$SARIF_OUTPUT" \
         $(params.IMAGE_PATH)
 
-      #! ── Table scan (human-readable log output) ─────────────────────────
+      # ── Table scan (human-readable log output) ─────────────────────────
       trivy image \
         --cache-dir "$CACHE_DIR" \
-        $SKIP_UPDATE \
+        --skip-db-update \
+        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
         --timeout 10m \
         $(params.IMAGE_PATH)
 
-      #! ── Extract counts from SARIF ──────────────────────────────────────
-      #! SARIF severity mapping: error=CRITICAL, warning=HIGH
+      # ── Extract counts from SARIF ──────────────────────────────────────
+      # SARIF severity mapping: error=CRITICAL, warning=HIGH
       critical=$(grep -o '"level":"error"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       high=$(grep -o '"level":"warning"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       total=$((critical + high))
@@ -127,7 +116,7 @@ spec:
       echo "TOTAL:    $total"
       echo "SARIF:    $SARIF_OUTPUT"
 
-      #! ── Write results ──────────────────────────────────────────────────
+      # ── Write results ──────────────────────────────────────────────────
       if [ "$total" -eq 0 ]; then
         printf 'PASS' > $(results.TRIVY_SCAN_SUMMARY.path)
       else
