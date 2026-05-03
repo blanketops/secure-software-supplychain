@@ -150,6 +150,9 @@ func BuildPipelineRun(
 	}
 }
 
+// ── buildResults update ────────────────────────────────────────────────────
+// Replace the REKOR_LOG_INDEX entry in buildResults:
+
 func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
 	results := []tektonv1.PipelineResult{
 		{Name: "commit", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"}},
@@ -157,6 +160,15 @@ func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
 		{Name: "url", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"}},
 		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
 		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"}},
+	}
+
+	if sc.Spec.Steps.Sign {
+		results = append(results,
+			tektonv1.PipelineResult{
+				Name:  "REKOR_LOG_INDEX",
+				Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSign + ".results.REKOR_LOG_INDEX)"},
+			},
+		)
 	}
 
 	if sc.Spec.Steps.Trivy {
@@ -434,6 +446,8 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 	}
 }
 
+// ── signTask update ────────────────────────────────────────────────────────
+// Full replacement for signTask in builder.go
 func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
 	fulcio := "https://fulcio.sigstore.dev"
 	rekor := "https://rekor.sigstore.dev"
@@ -461,6 +475,14 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 				},
 				Workspaces: []tektonv1.WorkspaceDeclaration{
 					{Name: "dockerconfig"},
+				},
+				// REKOR_LOG_INDEX — extracted from cosign stderr output.
+				// Cosign prints "tlog entry created with index: N" when it
+				// submits the signature to the Rekor transparency log.
+				// This result is consumed by buildResults and stored on
+				// ImageSignature.status.rekorLogIndex by the recorder.
+				Results: []tektonv1.TaskResult{
+					{Name: "REKOR_LOG_INDEX", Type: tektonv1.ResultsTypeString, Description: "Rekor transparency log index for this signature"},
 				},
 				Volumes: []corev1.Volume{
 					{
@@ -495,15 +517,37 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
 						},
-						Args: []string{
-							"sign",
-							"--fulcio-url=$(params.FULCIO_URL)",
-							"--rekor-url=$(params.REKOR_URL)",
-							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
-							"--insecure-skip-verify",
-							"--yes",
-							"$(params.IMAGE)",
-						},
+						Script: `#!/bin/sh
+set -e
+ 
+echo "Signing image: $(params.IMAGE)"
+echo "Fulcio: $(params.FULCIO_URL)"
+echo "Rekor:  $(params.REKOR_URL)"
+ 
+# Capture cosign output — the Rekor log index is printed to stderr.
+# Redirect stderr to stdout so we can capture it.
+COSIGN_OUT=$(cosign sign \
+  --fulcio-url=$(params.FULCIO_URL) \
+  --rekor-url=$(params.REKOR_URL) \
+  --oidc-issuer=https://kubernetes.default.svc.cluster.local \
+  --insecure-skip-verify \
+  --yes \
+  $(params.IMAGE) 2>&1) || { echo "$COSIGN_OUT"; exit 1; }
+ 
+echo "$COSIGN_OUT"
+ 
+# Extract Rekor log index from cosign output.
+# cosign prints: "tlog entry created with index: 42"
+LOG_INDEX=$(echo "$COSIGN_OUT" | grep -oE 'tlog entry created with index: [0-9]+' | grep -oE '[0-9]+$' || echo "")
+ 
+if [ -z "$LOG_INDEX" ]; then
+  echo "WARNING: could not extract Rekor log index from cosign output"
+  printf '0' > $(results.REKOR_LOG_INDEX.path)
+else
+  echo "Rekor log index: $LOG_INDEX"
+  printf '%s' "$LOG_INDEX" > $(results.REKOR_LOG_INDEX.path)
+fi
+`,
 					},
 				},
 			},

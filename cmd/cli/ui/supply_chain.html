@@ -1,760 +1,1597 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BlanketOps — Supply Chain</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlanketOps — Supply Chain Observer</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
 
-  :root {
-    --bg:     #06070a;
-    --bg2:    #0c0e14;
-    --bg3:    #11141d;
-    --bg4:    #161a26;
-    --neon-g: #00ffb2;
-    --neon-p: #bf7fff;
-    --neon-b: #00c8ff;
-    --neon-y: #ffe24d;
-    --neon-r: #ff4d6a;
-    --dim-g:  rgba(0,255,178,0.08);
-    --dim-p:  rgba(191,127,255,0.08);
-    --dim-b:  rgba(0,200,255,0.08);
-    --dim-y:  rgba(255,226,77,0.08);
-    --dim-r:  rgba(255,77,106,0.08);
-    --border: rgba(255,255,255,0.05);
-    --border2:rgba(255,255,255,0.10);
-    --text:   #e0e6f0;
-    --mid:    #6b758f;
-    --muted:  #363d52;
-    --mono:   'JetBrains Mono', monospace;
-    --display:'Syne', sans-serif;
-  }
+    :root {
+      --bg: #06070a;
+      --bg2: #0c0e14;
+      --bg3: #11141d;
+      --bg4: #161a26;
+      --g: #00ffb2;
+      --p: #bf7fff;
+      --b: #00c8ff;
+      --y: #ffe24d;
+      --r: #ff4d6a;
+      --o: #ff8c42;
+      --dg: rgba(0, 255, 178, 0.08);
+      --dp: rgba(191, 127, 255, 0.08);
+      --db: rgba(0, 200, 255, 0.08);
+      --dy: rgba(255, 226, 77, 0.08);
+      --dr: rgba(255, 77, 106, 0.08);
+      --do: rgba(255, 140, 66, 0.08);
+      --brd: rgba(255, 255, 255, 0.05);
+      --brd2: rgba(255, 255, 255, 0.10);
+      --tx: #e0e6f0;
+      --mid: #6b758f;
+      --mut: #363d52;
+      --mono: 'JetBrains Mono', monospace;
+      --disp: 'Syne', sans-serif;
+    }
 
-  html { scroll-behavior: smooth; }
+    html {
+      scroll-behavior: smooth
+    }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 12px;
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
+    body {
+      background: var(--bg);
+      color: var(--tx);
+      font-family: var(--mono);
+      font-size: 12px;
+      min-height: 100vh;
+      overflow-x: hidden
+    }
 
-  body::before {
-    content: '';
-    position: fixed; inset: 0;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.14) 2px, rgba(0,0,0,0.14) 4px);
-    pointer-events: none; z-index: 9999;
-  }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.14) 2px, rgba(0, 0, 0, 0.14) 4px);
+      pointer-events: none;
+      z-index: 9999
+    }
 
-  body::after {
-    content: '';
-    position: fixed; inset: 0;
-    background-image: radial-gradient(circle, rgba(0,255,178,0.055) 1px, transparent 1px);
-    background-size: 28px 28px;
-    pointer-events: none; z-index: 0;
-    animation: gridshift 40s linear infinite;
-  }
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(0, 255, 178, 0.04) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+      z-index: 0;
+      animation: gs 40s linear infinite
+    }
 
-  @keyframes gridshift { from{background-position:0 0} to{background-position:28px 28px} }
-  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.35)} }
-  @keyframes logobreath {
-    0%,100%{box-shadow:0 0 14px rgba(0,255,178,0.25),inset 0 0 10px rgba(0,255,178,0.06)}
-    50%{box-shadow:0 0 28px rgba(0,255,178,0.45),inset 0 0 16px rgba(0,255,178,0.12)}
-  }
-  @keyframes fadein { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
-  @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes gs {
+      from {
+        background-position: 0 0
+      }
 
-  /* ── header ── */
-  header {
-    position: sticky; top: 0; z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 28px;
-    background: rgba(6,7,10,0.94);
-    border-bottom: 1px solid rgba(0,255,178,0.1);
-    backdrop-filter: blur(14px);
-  }
+      to {
+        background-position: 28px 28px
+      }
+    }
 
-  .logo { display: flex; align-items: center; gap: 12px; }
-  .logo-mark {
-    width: 32px; height: 32px; border: 1.5px solid var(--neon-g); border-radius: 7px;
-    display: flex; align-items: center; justify-content: center;
-    animation: logobreath 3s ease-in-out infinite;
-  }
-  .logo-mark span { font-family: var(--display); font-size: 12px; font-weight: 800; color: var(--neon-g); }
-  .logo-name { font-family: var(--display); font-size: 15px; font-weight: 800; color: var(--text); }
-  .logo-sub  { font-size: 9px; color: var(--neon-g); letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.65; margin-top: 1px; }
+    @keyframes pulse {
 
-  .hdr-right { display: flex; align-items: center; gap: 16px; }
-  .proxy-pill {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 10px; color: var(--muted); letter-spacing: 0.06em;
-    background: var(--bg3); border: 1px solid var(--border);
-    padding: 4px 10px; border-radius: 20px;
-  }
-  .proxy-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
-  .proxy-dot.ok  { background: var(--neon-g); box-shadow: 0 0 6px var(--neon-g); animation: pulse 2.5s infinite; }
-  .proxy-dot.err { background: var(--neon-r); box-shadow: 0 0 6px var(--neon-r); }
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1)
+      }
 
-  .ns-select {
-    font-family: var(--mono); font-size: 10px; color: var(--mid);
-    background: var(--bg3); border: 1px solid var(--border2);
-    padding: 4px 8px; border-radius: 6px; cursor: pointer;
-    letter-spacing: 0.04em;
-  }
+      50% {
+        opacity: .5;
+        transform: scale(1.35)
+      }
+    }
 
-  .refresh-btn {
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-    padding: 6px 14px; border-radius: 6px;
-    border: 1px solid rgba(0,255,178,0.3); background: rgba(0,255,178,0.05);
-    color: var(--neon-g); cursor: pointer; transition: all 0.2s;
-  }
-  .refresh-btn:hover { background: rgba(0,255,178,0.12); border-color: var(--neon-g); box-shadow: 0 0 14px rgba(0,255,178,0.2); }
-  .refresh-btn.spinning { opacity: 0.6; pointer-events: none; }
+    @keyframes lb {
 
-  /* ── layout ── */
-  .page { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 360px; gap: 0; min-height: calc(100vh - 57px); }
+      0%,
+      100% {
+        box-shadow: 0 0 14px rgba(0, 255, 178, .25), inset 0 0 10px rgba(0, 255, 178, .06)
+      }
 
-  /* left column */
-  .col-main { padding: 24px 24px 60px; border-right: 1px solid var(--border); overflow-y: auto; }
+      50% {
+        box-shadow: 0 0 28px rgba(0, 255, 178, .45), inset 0 0 16px rgba(0, 255, 178, .12)
+      }
+    }
 
-  /* right sidebar */
-  .col-side { padding: 24px 20px 60px; background: var(--bg2); overflow-y: auto; }
+    @keyframes fi {
+      from {
+        opacity: 0;
+        transform: translateY(-4px)
+      }
 
-  /* ── section headers ── */
-  .sh { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; margin-top: 28px; }
-  .sh:first-child { margin-top: 0; }
-  .sh-title { font-family: var(--display); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; color: var(--neon-g); }
-  .sh-count { font-size: 9px; color: var(--neon-g); background: var(--dim-g); border: 1px solid rgba(0,255,178,0.18); padding: 1px 7px; border-radius: 20px; }
-  .sh-line  { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(0,255,178,0.18), transparent); }
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
 
-  /* ── supply chain cards ── */
-  .sc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+    /* ── header ── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 28px;
+      background: rgba(6, 7, 10, .94);
+      border-bottom: 1px solid rgba(0, 255, 178, .1);
+      backdrop-filter: blur(14px)
+    }
 
-  .sc-card {
-    background: var(--bg3); border: 1px solid var(--border); border-radius: 12px;
-    overflow: hidden; cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-  }
-  .sc-card:hover { border-color: rgba(0,255,178,0.22); transform: translateY(-1px); box-shadow: 0 0 18px rgba(0,255,178,0.06); }
-  .sc-card.selected { border-color: var(--neon-g); box-shadow: 0 0 24px rgba(0,255,178,0.12); }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px
+    }
 
-  .sc-head { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .sc-name { font-family: var(--display); font-size: 12px; font-weight: 700; color: var(--text); }
-  .sc-ns   { font-size: 9px; color: var(--muted); margin-top: 2px; }
+    .logo-mark {
+      width: 32px;
+      height: 32px;
+      border: 1.5px solid var(--g);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: lb 3s ease-in-out infinite
+    }
 
-  .badge { font-size: 8px; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
-  .badge-ready   { background: var(--dim-g); color: var(--neon-g); border: 1px solid rgba(0,255,178,0.22); }
-  .badge-pending { background: var(--dim-y); color: var(--neon-y); border: 1px solid rgba(255,226,77,0.22); }
-  .badge-failed  { background: var(--dim-r); color: var(--neon-r); border: 1px solid rgba(255,77,106,0.22); box-shadow: 0 0 8px rgba(255,77,106,0.1); }
-  .badge-unknown { background: var(--bg4);   color: var(--muted);  border: 1px solid var(--border); }
-  .badge-running { background: var(--dim-b); color: var(--neon-b); border: 1px solid rgba(0,200,255,0.22); animation: pulse 1.2s infinite; }
+    .logo-mark span {
+      font-family: var(--disp);
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--g)
+    }
 
-  .sc-body { padding: 12px 14px; }
-  .sc-repo { font-size: 10px; color: var(--neon-b); margin-bottom: 10px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .logo-name {
+      font-family: var(--disp);
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--tx)
+    }
 
-  /* task name pips with labels */
-  .sc-tasks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-  .task-row { display: flex; align-items: center; gap: 7px; }
-  .task-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--border2); flex-shrink: 0; }
-  .task-dot.ok      { background: var(--neon-g); box-shadow: 0 0 5px rgba(0,255,178,0.4); }
-  .task-dot.fail    { background: var(--neon-r); box-shadow: 0 0 5px rgba(255,77,106,0.4); }
-  .task-dot.running { background: var(--neon-y); animation: pulse 0.8s infinite; }
-  .task-name { font-size: 10px; color: var(--mid); }
-  .task-result { font-size: 9px; color: var(--muted); margin-left: auto; }
+    .logo-sub {
+      font-size: 9px;
+      color: var(--g);
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      opacity: .65;
+      margin-top: 1px
+    }
 
-  .sc-foot { display: flex; gap: 12px; flex-wrap: wrap; }
-  .sc-kv { font-size: 9px; color: var(--muted); }
-  .sc-kv span { color: var(--mid); }
+    .hdr-right {
+      display: flex;
+      align-items: center;
+      gap: 16px
+    }
 
-  /* ── imagebuilds ── */
-  .ib-list { display: flex; flex-direction: column; gap: 8px; }
+    .proxy-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: var(--mut);
+      letter-spacing: .06em;
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      padding: 4px 10px;
+      border-radius: 20px
+    }
 
-  .ib-card {
-    background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
-    overflow: hidden; cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .ib-card:hover { border-color: rgba(191,127,255,0.22); box-shadow: 0 0 14px rgba(191,127,255,0.05); }
-  .ib-card.open  { border-color: rgba(191,127,255,0.35); }
+    .pdot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--mut);
+      flex-shrink: 0
+    }
 
-  .ib-row { padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; }
-  .ib-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .ib-name { font-family: var(--display); font-size: 12px; font-weight: 700; color: var(--text); }
-  .ib-ns   { font-size: 9px; color: var(--muted); }
+    .pdot.ok {
+      background: var(--g);
+      box-shadow: 0 0 6px var(--g);
+      animation: pulse 2.5s infinite
+    }
 
-  /* mediator pipeline — horizontal with labels below */
-  .med-pipe { display: flex; align-items: center; }
-  .med-step { display: flex; align-items: center; }
-  .med-dot {
-    width: 18px; height: 18px; border-radius: 50%;
-    border: 1.5px solid var(--border2); background: var(--bg);
-    display: flex; align-items: center; justify-content: center;
-    position: relative; cursor: default; flex-shrink: 0;
-  }
-  .med-dot.done   { border-color: var(--neon-g); background: var(--dim-g); box-shadow: 0 0 6px rgba(0,255,178,0.3); }
-  .med-dot.active { border-color: var(--neon-y); background: var(--dim-y); animation: pulse 0.9s infinite; box-shadow: 0 0 10px rgba(255,226,77,0.4); }
-  .med-dot.failed { border-color: var(--neon-r); background: var(--dim-r); box-shadow: 0 0 6px rgba(255,77,106,0.3); }
-  .med-dot-inner  { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
-  .med-dot.done   .med-dot-inner { background: var(--neon-g); }
-  .med-dot.active .med-dot-inner { background: var(--neon-y); }
-  .med-dot.failed .med-dot-inner { background: var(--neon-r); }
-  .med-line { width: 12px; height: 1px; background: var(--border2); }
-  .med-line.done { background: var(--neon-g); }
-  .med-tip {
-    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
-    font-size: 8px; white-space: nowrap;
-    background: var(--bg3); border: 1px solid var(--border2);
-    padding: 2px 5px; border-radius: 3px; color: var(--mid);
-    pointer-events: none; opacity: 0; transition: opacity 0.15s;
-  }
-  .med-dot:hover .med-tip { opacity: 1; }
+    .pdot.err {
+      background: var(--r);
+      box-shadow: 0 0 6px var(--r)
+    }
 
-  .ib-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-  .ib-age { font-size: 9px; color: var(--muted); }
+    .ns-sel {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--mid);
+      background: var(--bg3);
+      border: 1px solid var(--brd2);
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: .04em
+    }
 
-  /* expanded imagebuild detail */
-  .ib-detail { border-top: 1px solid var(--border); padding: 14px 16px; display: none; animation: fadein 0.15s ease; }
-  .ib-card.open .ib-detail { display: block; }
+    .ref-btn {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 255, 178, .3);
+      background: rgba(0, 255, 178, .05);
+      color: var(--g);
+      cursor: pointer;
+      transition: all .2s
+    }
 
-  .ib-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
-  .kv-block label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); display: block; margin-bottom: 3px; }
-  .kv-block value { font-size: 10px; color: var(--text); word-break: break-all; }
+    .ref-btn:hover {
+      background: rgba(0, 255, 178, .12);
+      border-color: var(--g);
+      box-shadow: 0 0 14px rgba(0, 255, 178, .2)
+    }
 
-  /* pipelinerun section */
-  .pr-section { margin-top: 12px; }
-  .pr-header { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--neon-p); margin-bottom: 8px; }
-  .pr-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; background: var(--bg4); margin-bottom: 4px; }
-  .pr-name { font-size: 10px; color: var(--mid); flex: 1; }
-  .pr-status { font-size: 9px; }
-  .pr-dur { font-size: 9px; color: var(--muted); }
+    .ref-btn.spin {
+      opacity: .6;
+      pointer-events: none
+    }
 
-  /* conditions */
-  .cond-section { margin-top: 12px; }
-  .cond-header { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--neon-p); margin-bottom: 8px; }
-  .cond-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; border-radius: 6px; background: var(--bg4); border: 1px solid var(--border); margin-bottom: 4px; font-size: 10px; }
-  .cond-type { color: var(--mid); min-width: 110px; flex-shrink: 0; }
-  .cond-t { color: var(--neon-g); }
-  .cond-f { color: var(--neon-r); }
-  .cond-msg { color: var(--muted); font-size: 9px; margin-top: 2px; }
+    /* ── layout ── */
+    .page {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 0;
+      min-height: calc(100vh - 57px)
+    }
 
-  /* events */
-  .ev-section { margin-top: 12px; }
-  .ev-header { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--neon-p); margin-bottom: 8px; }
-  .ev-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 8px; border-radius: 5px; margin-bottom: 3px; font-size: 9px; }
-  .ev-row.Normal  { background: var(--bg4); }
-  .ev-row.Warning { background: var(--dim-r); border: 1px solid rgba(255,77,106,0.12); }
-  .ev-time   { color: var(--muted); flex-shrink: 0; min-width: 34px; }
-  .ev-reason { color: var(--mid); flex-shrink: 0; min-width: 140px; }
-  .ev-msg    { color: var(--text); opacity: 0.75; }
-  .ev-count  { color: var(--muted); flex-shrink: 0; }
+    .col-main {
+      padding: 24px 24px 80px;
+      border-right: 1px solid var(--brd);
+      overflow-y: auto
+    }
 
-  /* ── sidebar ── */
-  .side-sh { font-family: var(--display); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; color: var(--neon-p); margin-bottom: 12px; margin-top: 24px; }
-  .side-sh:first-child { margin-top: 0; }
+    .col-side {
+      padding: 24px 20px 80px;
+      background: var(--bg2);
+      overflow-y: auto
+    }
 
-  /* external secrets */
-  .es-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
-  .es-row {
-    background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 12px;
-  }
-  .es-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-  .es-name { font-size: 10px; color: var(--text); font-weight: 500; }
-  .es-store { font-size: 9px; color: var(--muted); margin-top: 2px; }
-  .es-sync-time { font-size: 9px; color: var(--muted); }
+    /* ── section headers ── */
+    .sh {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      margin-top: 28px
+    }
 
-  /* signatures */
-  .sig-list2 { display: flex; flex-direction: column; gap: 6px; }
-  .sig-row2 {
-    background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 12px;
-  }
-  .sig-img  { font-size: 10px; color: var(--neon-b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 6px; }
-  .sig-dig  { font-size: 9px; color: var(--muted); margin-bottom: 6px; font-family: var(--mono); }
-  .sig-pills { display: flex; gap: 5px; flex-wrap: wrap; }
-  .s-pill { padding: 2px 8px; border-radius: 20px; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
-  .s-pill.ok { background: var(--dim-g); color: var(--neon-g); border: 1px solid rgba(0,255,178,0.18); }
-  .s-pill.no { background: var(--bg4);   color: var(--muted);  border: 1px solid var(--border); }
+    .sh:first-child {
+      margin-top: 0
+    }
 
-  /* rbac / SAR */
-  .rbac-table { width: 100%; border-collapse: collapse; }
-  .rbac-table tr { border-bottom: 1px solid var(--border); }
-  .rbac-table tr:last-child { border-bottom: none; }
-  .rbac-table td { padding: 6px 8px; font-size: 9px; }
-  .rbac-table td:first-child { color: var(--mid); width: 120px; }
-  .rbac-table td:last-child  { color: var(--text); }
-  .sar-ok  { color: var(--neon-g); }
-  .sar-no  { color: var(--neon-r); }
-  .sar-unk { color: var(--muted); }
+    .sh-title {
+      font-family: var(--disp);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .2em;
+      color: var(--g)
+    }
 
-  /* cluster events sidebar */
-  .cev-list { display: flex; flex-direction: column; gap: 4px; }
-  .cev-row { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
-  .cev-top { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-  .cev-reason { font-size: 9px; color: var(--mid); }
-  .cev-obj    { font-size: 9px; color: var(--muted); }
-  .cev-time   { font-size: 9px; color: var(--muted); margin-left: auto; }
-  .cev-msg    { font-size: 9px; color: var(--text); opacity: 0.7; }
-  .cev-row.Warning .cev-reason { color: var(--neon-r); }
-  .cev-row.Warning { border-color: rgba(255,77,106,0.15); }
+    .sh-count {
+      font-size: 9px;
+      color: var(--g);
+      background: var(--dg);
+      border: 1px solid rgba(0, 255, 178, .18);
+      padding: 1px 7px;
+      border-radius: 20px
+    }
 
-  /* empty / error */
-  .empty { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 10px; border: 1px dashed var(--border); border-radius: 8px; }
-  .err-bar { background: var(--dim-r); border: 1px solid rgba(255,77,106,0.25); border-radius: 8px; padding: 10px 14px; font-size: 10px; color: var(--neon-r); margin-bottom: 20px; }
+    .sh-line {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(0, 255, 178, .18), transparent)
+    }
 
-  /* footer */
-  footer {
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-    padding: 8px 28px;
-    border-top: 1px solid rgba(0,255,178,0.07);
-    background: rgba(6,7,10,0.95);
-    display: flex; justify-content: space-between;
-    font-size: 9px; color: var(--muted); letter-spacing: 0.07em;
-    backdrop-filter: blur(12px);
-  }
-  footer .hi { color: var(--neon-g); opacity: 0.45; }
-</style>
+    .side-sh {
+      font-family: var(--disp);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      color: var(--p);
+      margin-bottom: 12px;
+      margin-top: 24px
+    }
+
+    .side-sh:first-child {
+      margin-top: 0
+    }
+
+    /* ── supply chain cards ── */
+    .sc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 4px
+    }
+
+    .sc-card {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .2s, box-shadow .2s, transform .15s
+    }
+
+    .sc-card:hover {
+      border-color: rgba(0, 255, 178, .22);
+      transform: translateY(-1px);
+      box-shadow: 0 0 18px rgba(0, 255, 178, .06)
+    }
+
+    .sc-card.sel {
+      border-color: var(--g);
+      box-shadow: 0 0 24px rgba(0, 255, 178, .12)
+    }
+
+    .sc-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--brd);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px
+    }
+
+    .sc-name {
+      font-family: var(--disp);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--tx)
+    }
+
+    .sc-ns {
+      font-size: 9px;
+      color: var(--mut);
+      margin-top: 2px
+    }
+
+    .badge {
+      font-size: 8px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0
+    }
+
+    .b-ready {
+      background: var(--dg);
+      color: var(--g);
+      border: 1px solid rgba(0, 255, 178, .22)
+    }
+
+    .b-pending {
+      background: var(--dy);
+      color: var(--y);
+      border: 1px solid rgba(255, 226, 77, .22)
+    }
+
+    .b-failed {
+      background: var(--dr);
+      color: var(--r);
+      border: 1px solid rgba(255, 77, 106, .22);
+      box-shadow: 0 0 8px rgba(255, 77, 106, .1)
+    }
+
+    .b-running {
+      background: var(--db);
+      color: var(--b);
+      border: 1px solid rgba(0, 200, 255, .22);
+      animation: pulse 1.2s infinite
+    }
+
+    .b-signed {
+      background: var(--dp);
+      color: var(--p);
+      border: 1px solid rgba(191, 127, 255, .22)
+    }
+
+    .b-unknown {
+      background: var(--bg4);
+      color: var(--mut);
+      border: 1px solid var(--brd)
+    }
+
+    .sc-body {
+      padding: 12px 14px
+    }
+
+    .sc-repo {
+      font-size: 10px;
+      color: var(--b);
+      margin-bottom: 10px;
+      opacity: .8;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .sc-foot {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap
+    }
+
+    .sc-kv {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    .sc-kv span {
+      color: var(--mid)
+    }
+
+    /* ── imagebuilds ── */
+    .ib-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .ib-card {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .2s, box-shadow .2s
+    }
+
+    .ib-card:hover {
+      border-color: rgba(191, 127, 255, .22);
+      box-shadow: 0 0 14px rgba(191, 127, 255, .05)
+    }
+
+    .ib-card.open {
+      border-color: rgba(191, 127, 255, .35)
+    }
+
+    .ib-row {
+      padding: 12px 16px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 16px
+    }
+
+    .ib-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0
+    }
+
+    .ib-name {
+      font-family: var(--disp);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--tx);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 280px
+    }
+
+    .ib-ns {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    .ib-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0
+    }
+
+    .ib-age {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    /* pipeline step dots */
+    .pipe {
+      display: flex;
+      align-items: center
+    }
+
+    .ps {
+      display: flex;
+      align-items: center
+    }
+
+    .pd {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1.5px solid var(--brd2);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      cursor: default;
+      flex-shrink: 0
+    }
+
+    .pd.done {
+      border-color: var(--g);
+      background: var(--dg);
+      box-shadow: 0 0 5px rgba(0, 255, 178, .3)
+    }
+
+    .pd.active {
+      border-color: var(--y);
+      background: var(--dy);
+      animation: pulse .9s infinite;
+      box-shadow: 0 0 10px rgba(255, 226, 77, .4)
+    }
+
+    .pd.fail {
+      border-color: var(--r);
+      background: var(--dr);
+      box-shadow: 0 0 5px rgba(255, 77, 106, .3)
+    }
+
+    .pd.signed {
+      border-color: var(--p);
+      background: var(--dp)
+    }
+
+    .pdi {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--mut)
+    }
+
+    .pd.done .pdi {
+      background: var(--g)
+    }
+
+    .pd.active .pdi {
+      background: var(--y)
+    }
+
+    .pd.fail .pdi {
+      background: var(--r)
+    }
+
+    .pd.signed .pdi {
+      background: var(--p)
+    }
+
+    .pl {
+      width: 10px;
+      height: 1px;
+      background: var(--brd2)
+    }
+
+    .pl.done {
+      background: var(--g)
+    }
+
+    .tip {
+      position: absolute;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 8px;
+      white-space: nowrap;
+      background: var(--bg3);
+      border: 1px solid var(--brd2);
+      padding: 2px 5px;
+      border-radius: 3px;
+      color: var(--mid);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .15s;
+      z-index: 10
+    }
+
+    .pd:hover .tip {
+      opacity: 1
+    }
+
+    /* expanded imagebuild */
+    .ib-detail {
+      border-top: 1px solid var(--brd);
+      padding: 14px 16px;
+      display: none;
+      animation: fi .15s ease
+    }
+
+    .ib-card.open .ib-detail {
+      display: block
+    }
+
+    .ib-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px
+    }
+
+    .kv label {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--mut);
+      display: block;
+      margin-bottom: 3px
+    }
+
+    .kv value {
+      font-size: 10px;
+      color: var(--tx);
+      word-break: break-all
+    }
+
+    /* pipeline run section */
+    .sec-hdr {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--p);
+      margin-bottom: 8px;
+      margin-top: 12px
+    }
+
+    .pr-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: var(--bg4);
+      margin-bottom: 4px
+    }
+
+    .pr-name {
+      font-size: 10px;
+      color: var(--mid);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .pr-dur {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    /* result grid */
+    .res-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 12px
+    }
+
+    .res-card {
+      background: var(--bg4);
+      border: 1px solid var(--brd);
+      border-radius: 8px;
+      padding: 8px 10px
+    }
+
+    .res-label {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--mut);
+      margin-bottom: 4px
+    }
+
+    .res-val {
+      font-size: 11px;
+      font-weight: 700
+    }
+
+    .res-val.ok {
+      color: var(--g)
+    }
+
+    .res-val.fail {
+      color: var(--r)
+    }
+
+    .res-val.info {
+      color: var(--b)
+    }
+
+    .res-val.warn {
+      color: var(--y)
+    }
+
+    .res-val.purple {
+      color: var(--p)
+    }
+
+    /* conditions */
+    .cond-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: var(--bg4);
+      border: 1px solid var(--brd);
+      margin-bottom: 4px;
+      font-size: 10px
+    }
+
+    .cond-type {
+      color: var(--mid);
+      min-width: 110px;
+      flex-shrink: 0
+    }
+
+    .ct {
+      color: var(--g)
+    }
+
+    .cf {
+      color: var(--r)
+    }
+
+    .cond-msg {
+      color: var(--mut);
+      font-size: 9px;
+      margin-top: 2px
+    }
+
+    /* ── sidebar ── */
+    .es-row {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px
+    }
+
+    .es-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px
+    }
+
+    .es-name {
+      font-size: 10px;
+      color: var(--tx);
+      font-weight: 500
+    }
+
+    .es-store {
+      font-size: 9px;
+      color: var(--mut);
+      margin-top: 2px
+    }
+
+    .es-time {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    /* signatures */
+    .sig-row {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px
+    }
+
+    .sig-phase {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      font-weight: 700;
+      margin-bottom: 6px
+    }
+
+    .sig-phase.signed {
+      color: var(--g)
+    }
+
+    .sig-phase.failed {
+      color: var(--r)
+    }
+
+    .sig-phase.pending {
+      color: var(--y)
+    }
+
+    .sig-img {
+      font-size: 10px;
+      color: var(--b);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-bottom: 4px
+    }
+
+    .sig-principal {
+      font-size: 9px;
+      color: var(--mid);
+      margin-bottom: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .sig-pills {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap
+    }
+
+    .sp {
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 8px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      font-weight: 700
+    }
+
+    .sp.ok {
+      background: var(--dg);
+      color: var(--g);
+      border: 1px solid rgba(0, 255, 178, .18)
+    }
+
+    .sp.no {
+      background: var(--bg4);
+      color: var(--mut);
+      border: 1px solid var(--brd)
+    }
+
+    /* image build results */
+    .ibr-row {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px
+    }
+
+    .ibr-name {
+      font-size: 10px;
+      color: var(--tx);
+      font-weight: 500;
+      margin-bottom: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .ibr-results {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px
+    }
+
+    .ibr-kv {
+      font-size: 9px
+    }
+
+    .ibr-kv .k {
+      color: var(--mut)
+    }
+
+    .ibr-kv .v {
+      color: var(--tx)
+    }
+
+    .ibr-kv .v.ok {
+      color: var(--g)
+    }
+
+    .ibr-kv .v.fail {
+      color: var(--r)
+    }
+
+    /* rbac */
+    .rbac-tbl {
+      width: 100%;
+      border-collapse: collapse
+    }
+
+    .rbac-tbl tr {
+      border-bottom: 1px solid var(--brd)
+    }
+
+    .rbac-tbl tr:last-child {
+      border-bottom: none
+    }
+
+    .rbac-tbl td {
+      padding: 6px 8px;
+      font-size: 9px
+    }
+
+    .rbac-tbl td:first-child {
+      color: var(--mid);
+      width: 130px
+    }
+
+    .rbac-tbl td:last-child {
+      color: var(--tx)
+    }
+
+    .rok {
+      color: var(--g)
+    }
+
+    .rno {
+      color: var(--r)
+    }
+
+    .runk {
+      color: var(--mut)
+    }
+
+    /* events */
+    .cev-row {
+      background: var(--bg3);
+      border: 1px solid var(--brd);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 4px
+    }
+
+    .cev-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 3px
+    }
+
+    .cev-reason {
+      font-size: 9px;
+      color: var(--mid)
+    }
+
+    .cev-obj {
+      font-size: 9px;
+      color: var(--mut)
+    }
+
+    .cev-time {
+      font-size: 9px;
+      color: var(--mut);
+      margin-left: auto
+    }
+
+    .cev-msg {
+      font-size: 9px;
+      color: var(--tx);
+      opacity: .7
+    }
+
+    .cev-row.Warning .cev-reason {
+      color: var(--r)
+    }
+
+    .cev-row.Warning {
+      border-color: rgba(255, 77, 106, .15)
+    }
+
+    /* misc */
+    .empty {
+      padding: 24px 12px;
+      text-align: center;
+      color: var(--mut);
+      font-size: 10px;
+      border: 1px dashed var(--brd);
+      border-radius: 8px
+    }
+
+    .err-bar {
+      background: var(--dr);
+      border: 1px solid rgba(255, 77, 106, .25);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 10px;
+      color: var(--r);
+      margin-bottom: 20px
+    }
+
+    .tok {
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: var(--mono)
+    }
+
+    .tok.g {
+      background: var(--dg);
+      color: var(--g);
+      border: 1px solid rgba(0, 255, 178, .15)
+    }
+
+    .tok.r {
+      background: var(--dr);
+      color: var(--r);
+      border: 1px solid rgba(255, 77, 106, .15)
+    }
+
+    .tok.y {
+      background: var(--dy);
+      color: var(--y);
+      border: 1px solid rgba(255, 226, 77, .15)
+    }
+
+    .tok.b {
+      background: var(--db);
+      color: var(--b);
+      border: 1px solid rgba(0, 200, 255, .15)
+    }
+
+    .tok.p {
+      background: var(--dp);
+      color: var(--p);
+      border: 1px solid rgba(191, 127, 255, .15)
+    }
+
+    footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 8px 28px;
+      border-top: 1px solid rgba(0, 255, 178, .07);
+      background: rgba(6, 7, 10, .95);
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--mut);
+      letter-spacing: .07em;
+      backdrop-filter: blur(12px)
+    }
+
+    footer .hi {
+      color: var(--g);
+      opacity: .45
+    }
+  </style>
 </head>
+
 <body>
+  <header>
+    <div class="logo">
+      <div class="logo-mark"><span>BO</span></div>
+      <div>
+        <div class="logo-name">blanketops</div>
+        <div class="logo-sub">supply chain observer</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <select class="ns-sel" id="ns-sel" onchange="loadAll()">
+        <option value="">all namespaces</option>
+        <option value="default" selected>default</option>
+        <option value="tekton-pipelines">tekton-pipelines</option>
+      </select>
+      <div class="proxy-pill">
+        <div class="pdot" id="pdot"></div>
+        <span id="plabel">connecting...</span>
+      </div>
+      <button class="ref-btn" id="ref-btn" onclick="loadAll()">↻ refresh</button>
+    </div>
+  </header>
 
-<header>
-  <div class="logo">
-    <div class="logo-mark"><span>BO</span></div>
-    <div>
-      <div class="logo-name">blanketops</div>
-      <div class="logo-sub">supply chain observer</div>
+  <div class="page">
+    <div class="col-main">
+      <div id="err-bar" class="err-bar" style="display:none"></div>
+
+      <div class="sh">
+        <div class="sh-title">SupplyChains</div>
+        <div class="sh-count" id="sc-count">—</div>
+        <div class="sh-line"></div>
+      </div>
+      <div class="sc-grid" id="sc-grid">
+        <div class="empty" style="grid-column:1/-1">loading...</div>
+      </div>
+
+      <div class="sh">
+        <div class="sh-title">ImageBuilds</div>
+        <div class="sh-count" id="ib-count">—</div>
+        <div class="sh-line"></div>
+      </div>
+      <div class="ib-list" id="ib-list">
+        <div class="empty">loading...</div>
+      </div>
+    </div>
+
+    <div class="col-side">
+      <div class="side-sh">ImageBuildResults</div>
+      <div id="ibr-list">
+        <div class="empty">loading...</div>
+      </div>
+
+      <div class="side-sh">ImageSignatures</div>
+      <div id="sig-list">
+        <div class="empty">loading...</div>
+      </div>
+
+      <div class="side-sh">ExternalSecrets</div>
+      <div id="es-list">
+        <div class="empty">loading...</div>
+      </div>
+
+      <div class="side-sh">RBAC — supply-chain-runner</div>
+      <div style="background:var(--bg3);border:1px solid var(--brd);border-radius:8px;overflow:hidden">
+        <table class="rbac-tbl" id="rbac-tbl">
+          <tr>
+            <td>SA exists</td>
+            <td class="runk" id="sa-exists">—</td>
+          </tr>
+          <tr>
+            <td>create imagebuilds</td>
+            <td class="runk" id="sar-ib">—</td>
+          </tr>
+          <tr>
+            <td>create imagesignatures</td>
+            <td class="runk" id="sar-ims">—</td>
+          </tr>
+          <tr>
+            <td>get supplychains</td>
+            <td class="runk" id="sar-sc">—</td>
+          </tr>
+          <tr>
+            <td>ClusterRoleBinding</td>
+            <td class="runk" id="crb-status">—</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="side-sh">Recent Events</div>
+      <div id="cev-list">
+        <div class="empty">loading...</div>
+      </div>
     </div>
   </div>
-  <div class="hdr-right">
-    <select class="ns-select" id="ns-select" onchange="loadAll()">
-      <option value="">all namespaces</option>
-      <option value="default" selected>default</option>
-      <option value="tekton-pipelines">tekton-pipelines</option>
-    </select>
-    <div class="proxy-pill">
-      <div class="proxy-dot" id="proxy-dot"></div>
-      <span id="proxy-label">connecting...</span>
-    </div>
-    <button class="refresh-btn" id="refresh-btn" onclick="loadAll()">↻ refresh</button>
-  </div>
-</header>
 
-<div class="page">
+  <footer>
+    <span class="hi">supplychain.blanketops.dev/v1alpha1 · tekton.dev/v1 · sigstore</span>
+    <span id="last-ref">—</span>
+  </footer>
 
-  <!-- ── LEFT COLUMN ── -->
-  <div class="col-main">
-    <div id="err-bar" class="err-bar" style="display:none"></div>
+  <script>
+    const BASE = 'http://localhost:8002';
+    const GRP = 'supplychain.blanketops.dev';
+    const V = 'v1alpha1';
 
-    <!-- SupplyChains -->
-    <div class="sh">
-      <div class="sh-title">SupplyChains</div>
-      <div class="sh-count" id="sc-count">—</div>
-      <div class="sh-line"></div>
-    </div>
-    <div class="sc-grid" id="sc-grid"><div class="empty" style="grid-column:1/-1">loading...</div></div>
+    function ns() { return document.getElementById('ns-sel').value || null; }
 
-    <!-- ImageBuilds -->
-    <div class="sh">
-      <div class="sh-title">ImageBuilds</div>
-      <div class="sh-count" id="ib-count">—</div>
-      <div class="sh-line"></div>
-    </div>
-    <div class="ib-list" id="ib-list"><div class="empty">loading...</div></div>
-  </div>
+    function nsPath(r) {
+      const n = ns();
+      if (!n) return `/apis/${GRP}/${V}/${r}`;
+      return `/apis/${GRP}/${V}/namespaces/${n}/${r}`;
+    }
+    function tkPath(r) {
+      const n = ns() || 'default';
+      return `/apis/tekton.dev/v1/namespaces/${n}/${r}`;
+    }
+    function corePath(r) {
+      const n = ns() || 'default';
+      return `/api/v1/namespaces/${n}/${r}`;
+    }
+    function esPath() {
+      const n = ns() || 'default';
+      return `/apis/external-secrets.io/v1beta1/namespaces/${n}/externalsecrets`;
+    }
 
-  <!-- ── RIGHT SIDEBAR ── -->
-  <div class="col-side">
+    async function kget(path) {
+      const r = await fetch(BASE + path, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error(`${r.status} ${path}`);
+      return r.json();
+    }
+    async function safe(path) {
+      try { return await kget(path); } catch { return { items: [] }; }
+    }
 
-    <!-- ExternalSecrets -->
-    <div class="side-sh">ExternalSecrets</div>
-    <div class="es-list" id="es-list"><div class="empty">loading...</div></div>
+    function setProxy(ok, msg) {
+      document.getElementById('pdot').className = 'pdot ' + (ok ? 'ok' : 'err');
+      document.getElementById('plabel').textContent = msg;
+    }
 
-    <!-- ImageSignatures -->
-    <div class="side-sh">ImageSignatures</div>
-    <div class="sig-list2" id="sig-list"><div class="empty">loading...</div></div>
+    function age(ts) {
+      if (!ts) return '—';
+      const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s / 60) + 'm';
+      if (s < 86400) return Math.floor(s / 3600) + 'h';
+      return Math.floor(s / 86400) + 'd';
+    }
+    function dur(a, b) {
+      if (!a) return '—';
+      const s = Math.floor((new Date(b || Date.now()) - new Date(a)) / 1000);
+      if (s < 60) return s + 's';
+      return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+    }
+    function phaseBadge(phase, conds) {
+      const ready = conds?.find(c => c.type === 'Ready');
+      if (ready?.status === 'True') return '<span class="badge b-ready">ready</span>';
+      if (ready?.status === 'False') return '<span class="badge b-failed">failed</span>';
+      const p = (phase || '').toLowerCase();
+      if (p === 'succeeded' || p === 'signed') return '<span class="badge b-signed">signed</span>';
+      if (p === 'running') return '<span class="badge b-running">running</span>';
+      if (p === 'failed') return '<span class="badge b-failed">failed</span>';
+      if (p === 'pending') return '<span class="badge b-pending">pending</span>';
+      if (p) return `<span class="badge b-pending">${p}</span>`;
+      return '<span class="badge b-unknown">unknown</span>';
+    }
+    function prBadge(pr) {
+      const s = pr.status?.conditions?.find(c => c.type === 'Succeeded');
+      if (!s) return '<span class="tok b">pending</span>';
+      if (s.status === 'True') return '<span class="tok g">succeeded</span>';
+      if (s.status === 'False') return '<span class="tok r">failed</span>';
+      if (s.reason === 'Running') return '<span class="tok b">running</span>';
+      return `<span class="tok y">${s.reason || 'unknown'}</span>`;
+    }
 
-    <!-- RBAC / SAR -->
-    <div class="side-sh">RBAC — supply-chain-runner</div>
-    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-      <table class="rbac-table" id="rbac-table">
-        <tr><td>SA exists</td><td class="sar-unk" id="sa-exists">—</td></tr>
-        <tr><td>create imagebuildruns</td><td class="sar-unk" id="sar-ibr">—</td></tr>
-        <tr><td>create imagesignatures</td><td class="sar-unk" id="sar-ims">—</td></tr>
-        <tr><td>ClusterRoleBinding</td><td class="sar-unk" id="crb-status">—</td></tr>
-      </table>
-    </div>
+    // ── Pipeline step dots ──
+    // Maps ImageBuild phase to step index
+    const STEPS = [
+      { k: 'secrets', l: 'secrets' },
+      { k: 'serviceaccount', l: 'sa' },
+      { k: 'sar', l: 'sar' },
+      { k: 'signing', l: 'sign-ctx' },
+      { k: 'pending', l: 'pending' },
+      { k: 'running', l: 'running' },
+      { k: 'succeeded', l: 'done' },
+      { k: 'failed', l: 'failed' },
+    ];
+    const PIPE_STEPS = [
+      'git-clone', 'auth-fulcio', 'sonarqube', 'buildah', 'skopeo', 'trivy', 'cosign', 'attest', 'grafeas'
+    ];
 
-    <!-- Recent cluster events -->
-    <div class="side-sh">Recent Events</div>
-    <div class="cev-list" id="cev-list"><div class="empty">loading...</div></div>
+    function pipelineDots(phase) {
+      const p = (phase || '').toLowerCase();
+      const idx = p === 'succeeded' || p === 'signed' ? 9 : p === 'running' ? 5 : p === 'failed' ? -1 : p === 'pending' ? 4 : 0;
+      return PIPE_STEPS.map((s, i) => {
+        let state = i < idx ? 'done' : i === idx ? 'active' : '';
+        if (p === 'failed' && i === idx) state = 'fail';
+        if (p === 'succeeded' || p === 'signed') state = 'done';
+        const line = i < PIPE_STEPS.length - 1 ? `<div class="pl ${i < idx ? 'done' : ''}"></div>` : '';
+        return `<div class="ps"><div class="pd ${state}"><div class="pdi"></div><div class="tip">${s}</div></div>${line}</div>`;
+      }).join('');
+    }
 
-  </div>
-</div>
-
-<footer>
-  <span class="hi">supplychain.blanketops.dev/v1alpha1 · tekton.dev/v1</span>
-  <span id="last-refresh">—</span>
-</footer>
-
-<script>
-const BASE  = 'http://localhost:8002';
-const GROUP = 'supplychain.blanketops.dev';
-const V     = 'v1alpha1';
-const PHASES       = ['secrets','serviceaccount','sar','signing','pipeline','signed','attested','published'];
-const PHASE_LABELS = ['secrets','sa','sar','sign','run','signed','attest','grafeas'];
-
-function ns() { return document.getElementById('ns-select').value || null; }
-function nsPath(resource, allNs) {
-  const n = ns();
-  if (!n || allNs) return `/apis/${GROUP}/${V}/${resource}`;
-  return `/apis/${GROUP}/${V}/namespaces/${n}/${resource}`;
-}
-function tkPath(resource) {
-  const n = ns();
-  if (!n) return `/apis/tekton.dev/v1/pipelineruns`;
-  return `/apis/tekton.dev/v1/namespaces/${n}/${resource}`;
-}
-function corePath(resource) {
-  const n = ns();
-  if (!n) return `/api/v1/${resource}`;
-  return `/api/v1/namespaces/${n}/${resource}`;
-}
-
-async function kget(path) {
-  const r = await fetch(BASE + path);
-  if (!r.ok) throw new Error(`${r.status} — ${path}`);
-  return r.json();
-}
-
-async function kgetSafe(path) {
-  try { return await kget(path); } catch { return { items: [] }; }
-}
-
-function setProxy(ok, msg) {
-  document.getElementById('proxy-dot').className = 'proxy-dot ' + (ok ? 'ok' : 'err');
-  document.getElementById('proxy-label').textContent = msg;
-}
-
-function badge(phase, conditions) {
-  const ready = conditions?.find(c => c.type === 'Ready');
-  if (ready?.status === 'True')  return '<span class="badge badge-ready">ready</span>';
-  if (ready?.status === 'False') return '<span class="badge badge-failed">failed</span>';
-  if (phase === 'Running' || phase === 'running') return '<span class="badge badge-running">running</span>';
-  if (phase) return `<span class="badge badge-pending">${phase}</span>`;
-  return '<span class="badge badge-unknown">unknown</span>';
-}
-
-function age(ts) {
-  if (!ts) return '—';
-  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
-  if (s < 60) return s + 's';
-  if (s < 3600) return Math.floor(s/60) + 'm';
-  if (s < 86400) return Math.floor(s/3600) + 'h';
-  return Math.floor(s/86400) + 'd';
-}
-
-function dur(start, end) {
-  if (!start) return '—';
-  const s = Math.floor((new Date(end||Date.now()) - new Date(start)) / 1000);
-  if (s < 60) return s + 's';
-  return Math.floor(s/60) + 'm' + (s%60) + 's';
-}
-
-function taskState(t) {
-  if (!t.result) return 'pending';
-  if (t.result === 'updated' || t.result === 'unchanged') return 'ok';
-  return 'fail';
-}
-
-function prStatus(pr) {
-  const conds = pr.status?.conditions || [];
-  const suc = conds.find(c => c.type === 'Succeeded');
-  if (!suc) return { label: 'pending', cls: 'sar-unk' };
-  if (suc.status === 'True')    return { label: 'succeeded', cls: 'sar-ok' };
-  if (suc.status === 'False')   return { label: 'failed',    cls: 'sar-no' };
-  if (suc.reason === 'Running') return { label: 'running',   cls: '' };
-  return { label: suc.reason || 'unknown', cls: 'sar-unk' };
-}
-
-// ── SupplyChains ──
-function renderSC(items) {
-  document.getElementById('sc-count').textContent = items.length;
-  const g = document.getElementById('sc-grid');
-  if (!items.length) { g.innerHTML = '<div class="empty" style="grid-column:1/-1">no SupplyChains found</div>'; return; }
-  g.innerHTML = items.map(item => {
-    const { metadata: m, spec = {}, status = {} } = item;
-    const tasks = status.tasks || [];
-    const taskRows = tasks.map(t => `
-      <div class="task-row">
-        <div class="task-dot ${taskState(t)}"></div>
-        <div class="task-name">${t.task || '—'}</div>
-        <div class="task-result">${t.result || ''}</div>
-      </div>`).join('');
-    return `<div class="sc-card" id="sc-${m.name}" onclick='toggleSCDetail("${m.name}", ${JSON.stringify(item).replace(/'/g,"&#39;")})'>
+    // ── SupplyChains ──
+    function renderSC(items) {
+      document.getElementById('sc-count').textContent = items.length;
+      const g = document.getElementById('sc-grid');
+      if (!items.length) { g.innerHTML = '<div class="empty" style="grid-column:1/-1">no SupplyChains found</div>'; return; }
+      g.innerHTML = items.map(item => {
+        const { metadata: m, spec = {}, status = {} } = item;
+        return `<div class="sc-card" onclick="this.classList.toggle('sel')">
       <div class="sc-head">
         <div><div class="sc-name">${m.name}</div><div class="sc-ns">${m.namespace}</div></div>
-        ${badge(status.phase, status.conditions)}
+        ${phaseBadge(status.phase, status.conditions)}
       </div>
       <div class="sc-body">
         <div class="sc-repo">${spec.repository || '—'}</div>
-        <div class="sc-tasks">${taskRows || '<span style="font-size:9px;color:var(--muted)">no tasks reconciled</span>'}</div>
         <div class="sc-foot">
+          <div class="sc-kv">webhook <span>${spec.webhookHost || '—'}</span></div>
           <div class="sc-kv">age <span>${age(m.creationTimestamp)}</span></div>
-          <div class="sc-kv">rv <span>${m.resourceVersion || '—'}</span></div>
-          ${status.phase ? `<div class="sc-kv">phase <span>${status.phase}</span></div>` : ''}
+          ${spec.steps?.trivy ? '<span class="tok g">trivy</span>' : ''}
+          ${spec.steps?.sonarQube ? '<span class="tok b">sonar</span>' : ''}
+          ${spec.steps?.sign ? '<span class="tok p">sign</span>' : ''}
         </div>
       </div>
     </div>`;
-  }).join('');
-}
+      }).join('');
+    }
 
-function toggleSCDetail(name, item) {
-  document.querySelectorAll('.sc-card').forEach(c => {
-    if (c.id !== 'sc-' + name) c.classList.remove('selected');
-  });
-  document.getElementById('sc-' + name)?.classList.toggle('selected');
-}
+    // ── ImageBuilds ──
+    async function renderIB(items, prs) {
+      document.getElementById('ib-count').textContent = items.length;
+      const list = document.getElementById('ib-list');
+      if (!items.length) { list.innerHTML = '<div class="empty">no ImageBuilds found</div>'; return; }
 
-// ── ImageBuilds ──
-let openIB = null;
-async function renderIB(items, pipelineRuns) {
-  document.getElementById('ib-count').textContent = items.length;
-  const list = document.getElementById('ib-list');
-  if (!items.length) { list.innerHTML = '<div class="empty">no ImageBuilds found</div>'; return; }
+      const prMap = {};
+      (prs || []).forEach(pr => {
+        const ref = pr.metadata?.labels?.['supplychain.blanketops.dev/image-build'] || pr.metadata?.name;
+        if (!prMap[ref]) prMap[ref] = [];
+        prMap[ref].push(pr);
+      });
 
-  const prByLabel = {};
-  (pipelineRuns || []).forEach(pr => {
-    const ref = pr.metadata?.labels?.['supplychain.blanketops.dev/image-build'];
-    if (ref) { if (!prByLabel[ref]) prByLabel[ref] = []; prByLabel[ref].push(pr); }
-  });
+      list.innerHTML = items.map(item => {
+        const { metadata: m, spec = {}, status = {} } = item;
+        const myPRs = prMap[m.name] || [];
+        const conds = status.conditions || [];
 
-  list.innerHTML = items.map(item => {
-    const { metadata: m, spec = {}, status = {} } = item;
-    const phase = (status.phase || '').toLowerCase();
-    const cur = PHASES.indexOf(phase);
-    const prs = prByLabel[m.name] || [];
-    const conds = status.conditions || [];
+        const prRows = myPRs.length
+          ? myPRs.map(pr => `<div class="pr-row">
+          <div class="pr-name">${pr.metadata.name}</div>
+          ${prBadge(pr)}
+          <div class="pr-dur">${dur(pr.status?.startTime, pr.status?.completionTime)}</div>
+        </div>`).join('')
+          : `<div style="font-size:9px;color:var(--mut);padding:4px">no PipelineRuns linked</div>`;
 
-    const pipeline = PHASES.map((p, i) => {
-      const state = i < cur ? 'done' : i === cur ? 'active' : 'pending';
-      const line = i < PHASES.length-1 ? `<div class="med-line ${i<cur?'done':''}"></div>` : '';
-      return `<div class="med-step"><div class="med-dot ${state}"><div class="med-dot-inner"></div><div class="med-tip">${PHASE_LABELS[i]}</div></div>${line}</div>`;
-    }).join('');
-
-    const prRows = prs.map(pr => {
-      const s = prStatus(pr);
-      return `<div class="pr-row">
-        <div class="pr-name">${pr.metadata.name}</div>
-        <div class="pr-status ${s.cls}">${s.label}</div>
-        <div class="pr-dur">${dur(pr.status?.startTime, pr.status?.completionTime)}</div>
-      </div>`;
-    }).join('') || '<div style="font-size:9px;color:var(--muted);padding:4px">no PipelineRuns linked</div>';
-
-    const condRows = conds.map(c => `<div class="cond-row">
+        const condRows = conds.map(c => `<div class="cond-row">
       <div class="cond-type">${c.type}</div>
-      <div class="${c.status==='True'?'cond-t':'cond-f'}">${c.status}</div>
-      <div><div style="font-size:9px;color:var(--mid)">${c.reason||''}</div><div class="cond-msg">${c.message||''}</div></div>
-    </div>`).join('') || '<div style="font-size:9px;color:var(--muted);padding:4px">no conditions</div>';
+      <div class="${c.status === 'True' ? 'ct' : 'cf'}">${c.status}</div>
+      <div><div style="font-size:9px;color:var(--mid)">${c.reason || ''}</div><div class="cond-msg">${c.message || ''}</div></div>
+    </div>`).join('') || `<div style="font-size:9px;color:var(--mut);padding:4px">no conditions</div>`;
 
-    return `<div class="ib-card" id="ib-${m.name}" onclick="toggleIB('${m.name}')">
+        // result pills from status
+        const digest = status.imageDigest || '—';
+        const shortDigest = digest.length > 19 ? digest.slice(0, 19) + '…' : digest;
+
+        return `<div class="ib-card" id="ib-${m.name}" onclick="toggleIB('${m.name}')">
       <div class="ib-row">
         <div class="ib-left">
-          <div><div class="ib-name">${m.name}</div><div class="ib-ns">${m.namespace}</div></div>
-          <div class="med-pipe">${pipeline}</div>
+          <div style="min-width:0"><div class="ib-name" title="${m.name}">${m.name}</div><div class="ib-ns">${m.namespace}</div></div>
+          <div class="pipe">${pipelineDots(status.phase)}</div>
         </div>
         <div class="ib-right">
-          ${badge(status.phase, status.conditions)}
+          ${phaseBadge(status.phase, status.conditions)}
           <div class="ib-age">${age(m.creationTimestamp)}</div>
         </div>
       </div>
       <div class="ib-detail">
-        <div class="ib-detail-grid">
-          <div class="kv-block"><label>phase</label><value>${status.phase||'—'}</value></div>
-          <div class="kv-block"><label>supply chain</label><value>${spec.supplyChainRef?.name||'—'}</value></div>
-          <div class="kv-block"><label>namespace</label><value>${m.namespace}</value></div>
-          <div class="kv-block"><label>uid</label><value>${(m.uid||'—').slice(0,16)}…</value></div>
-          <div class="kv-block"><label>resource version</label><value>${m.resourceVersion||'—'}</value></div>
-          <div class="kv-block"><label>age</label><value>${age(m.creationTimestamp)}</value></div>
+        <div class="ib-grid">
+          <div class="kv"><label>phase</label><value>${status.phase || '—'}</value></div>
+          <div class="kv"><label>supply chain</label><value>${spec.supplyChainRef?.name || '—'}</value></div>
+          <div class="kv"><label>revision</label><value>${spec.gitRef?.revision?.slice(0, 12) || '—'}</value></div>
+          <div class="kv"><label>pipeline run</label><value>${status.pipelineRun || '—'}</value></div>
+          <div class="kv"><label>image digest</label><value title="${digest}">${shortDigest}</value></div>
+          <div class="kv"><label>age</label><value>${age(m.creationTimestamp)}</value></div>
         </div>
-        <div class="pr-section">
-          <div class="pr-header">PipelineRuns</div>
-          ${prRows}
-        </div>
-        <div class="cond-section">
-          <div class="cond-header">Conditions</div>
-          ${condRows}
-        </div>
+        ${status.signedBy ? `<div style="margin-bottom:10px">
+          <div class="sec-hdr">Signing Context</div>
+          <div style="font-size:9px;color:var(--mid);margin-bottom:3px">principal: <span style="color:var(--p)">${status.signedBy}</span></div>
+          ${status.certExpiry ? `<div style="font-size:9px;color:var(--mut)">cert expiry: ${status.certExpiry}</div>` : ''}
+        </div>` : ''}
+        <div class="sec-hdr">PipelineRuns</div>
+        ${prRows}
+        <div class="sec-hdr">Conditions</div>
+        ${condRows}
       </div>
     </div>`;
-  }).join('');
-}
-
-function toggleIB(name) {
-  const card = document.getElementById('ib-' + name);
-  card?.classList.toggle('open');
-}
-
-// ── ExternalSecrets ──
-function renderES(items) {
-  const list = document.getElementById('es-list');
-  if (!items.length) { list.innerHTML = '<div class="empty">no ExternalSecrets found</div>'; return; }
-  list.innerHTML = items.map(item => {
-    const { metadata: m, spec = {}, status = {} } = item;
-    const cond = status.conditions?.find(c => c.type === 'Ready');
-    const synced = cond?.status === 'True';
-    return `<div class="es-row">
-      <div class="es-top">
-        <div>
-          <div class="es-name">${m.name}</div>
-          <div class="es-store">${spec.secretStoreRef?.name || '—'} · ${spec.secretStoreRef?.kind || ''}</div>
-        </div>
-        <span class="badge ${synced ? 'badge-ready' : 'badge-pending'}">${synced ? 'synced' : cond?.reason || 'pending'}</span>
-      </div>
-      <div class="es-sync-time">last sync: ${cond?.lastTransitionTime ? age(cond.lastTransitionTime) + ' ago' : '—'}</div>
-    </div>`;
-  }).join('');
-}
-
-// ── ImageSignatures ──
-function renderSig(items) {
-  const list = document.getElementById('sig-list');
-  if (!items.length) { list.innerHTML = '<div class="empty">no ImageSignatures found</div>'; return; }
-  list.innerHTML = items.map(item => {
-    const { metadata: m, spec = {}, status = {} } = item;
-    const img    = spec.image || spec.imageRef || '—';
-    const digest = spec.digest || spec.imageDigest || '';
-    const cosign  = (spec.signaturePayload || status.signed) ? 'ok' : 'no';
-    const rekor   = (spec.rekorURL || status.rekorLogIndex)  ? 'ok' : 'no';
-    const grafeas = (spec.grafeasResourceURL || status.grafeasOccurrence) ? 'ok' : 'no';
-    const attest  = (spec.attestationPayload || status.attested) ? 'ok' : 'no';
-    return `<div class="sig-row2">
-      <div class="sig-img" title="${img}">${img}</div>
-      ${digest ? `<div class="sig-dig">${digest.slice(0,28)}…</div>` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div class="sig-pills">
-          <span class="s-pill ${cosign}">cosign</span>
-          <span class="s-pill ${rekor}">rekor</span>
-          <span class="s-pill ${attest}">attest</span>
-          <span class="s-pill ${grafeas}">grafeas</span>
-        </div>
-        <span style="font-size:9px;color:var(--muted)">${age(m.creationTimestamp)}</span>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-// ── RBAC checks ──
-async function checkRBAC() {
-  const n = ns() || 'default';
-  // check SA exists
-  try {
-    await kget(`/api/v1/namespaces/${n}/serviceaccounts/supply-chain-runner`);
-    setRBAC('sa-exists', true, 'found');
-  } catch {
-    setRBAC('sa-exists', false, 'not found');
-  }
-  // SAR checks
-  const checks = [
-    { id: 'sar-ibr', resource: 'imagebuildruns',   group: GROUP },
-    { id: 'sar-ims', resource: 'imagesignatures',  group: GROUP },
-  ];
-  for (const c of checks) {
-    try {
-      const r = await fetch(BASE + '/apis/authorization.k8s.io/v1/subjectaccessreviews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiVersion: 'authorization.k8s.io/v1',
-          kind: 'SubjectAccessReview',
-          spec: {
-            user: `system:serviceaccount:${n}:supply-chain-runner`,
-            resourceAttributes: { namespace: n, verb: 'create', resource: c.resource, group: c.group }
-          }
-        })
-      });
-      const data = await r.json();
-      setRBAC(c.id, data.status?.allowed, data.status?.allowed ? 'allowed' : 'denied');
-    } catch {
-      document.getElementById(c.id).textContent = 'error';
+      }).join('');
     }
-  }
-  // CRB check
-  try {
-    await kget('/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/secure-software-supplychainimage-signer');
-    setRBAC('crb-status', true, 'bound');
-  } catch {
-    setRBAC('crb-status', false, 'missing');
-  }
-}
 
-function setRBAC(id, ok, label) {
-  const el = document.getElementById(id);
-  el.textContent = label;
-  el.className = ok ? 'sar-ok' : 'sar-no';
-}
+    function toggleIB(name) {
+      document.getElementById('ib-' + name)?.classList.toggle('open');
+    }
 
-// ── Cluster events ──
-function renderEvents(items) {
-  const list = document.getElementById('cev-list');
-  const relevant = items
-    .filter(e => ['SupplyChain','ImageBuild','ImageSignature'].includes(e.involvedObject?.kind))
-    .sort((a,b) => new Date(b.lastTimestamp||b.eventTime) - new Date(a.lastTimestamp||a.eventTime))
-    .slice(0, 20);
-  if (!relevant.length) { list.innerHTML = '<div class="empty">no supply chain events</div>'; return; }
-  list.innerHTML = relevant.map(e => `
-    <div class="cev-row ${e.type||'Normal'}">
-      <div class="cev-top">
-        <div class="cev-reason">${e.reason||'—'}</div>
-        <div class="cev-obj">${e.involvedObject?.kind}/${e.involvedObject?.name}</div>
-        <div class="cev-time">${age(e.lastTimestamp||e.eventTime)}</div>
+    // ── ImageBuildResults ──
+    function renderIBR(items) {
+      const list = document.getElementById('ibr-list');
+      if (!items.length) { list.innerHTML = '<div class="empty">no ImageBuildResults yet</div>'; return; }
+      const sorted = [...items].sort((a, b) => new Date(b.metadata.creationTimestamp) - new Date(a.metadata.creationTimestamp)).slice(0, 5);
+      list.innerHTML = sorted.map(item => {
+        const { metadata: m, status = {} } = item;
+        const r = status.buildResults || {};
+        const trivySummary = r.trivyScanSummary || status.trivyScanSummary || '—';
+        const sonarGate = r.sonarGateStatus || status.sonarGateStatus || '—';
+        const digest = (r.imageDigest || status.imageDigest || '—');
+        const shortDig = digest.length > 22 ? digest.slice(0, 22) + '…' : digest;
+        const commit = (r.commit || status.commit || '—').slice(0, 12);
+        const rekor = r.rekorLogIndex || status.rekorLogIndex || '—';
+        const phase = status.phase || '—';
+
+        return `<div class="ibr-row">
+      <div class="ibr-name" title="${m.name}">${m.name.slice(0, 40)}${m.name.length > 40 ? '…' : ''}</div>
+      <div class="res-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:8px">
+        <div class="res-card">
+          <div class="res-label">phase</div>
+          <div class="res-val ${phase === 'Succeeded' || phase === 'Signed' ? 'ok' : phase === 'Failed' ? 'fail' : 'info'}">${phase}</div>
+        </div>
+        <div class="res-card">
+          <div class="res-label">trivy</div>
+          <div class="res-val ${trivySummary === 'PASS' ? 'ok' : trivySummary === 'FAIL' ? 'fail' : 'info'}">${trivySummary}</div>
+        </div>
+        <div class="res-card">
+          <div class="res-label">sonar gate</div>
+          <div class="res-val ${sonarGate === 'OK' ? 'ok' : sonarGate === 'ERROR' ? 'fail' : 'info'}">${sonarGate}</div>
+        </div>
+        <div class="res-card">
+          <div class="res-label">rekor idx</div>
+          <div class="res-val purple">${rekor}</div>
+        </div>
       </div>
-      <div class="cev-msg">${e.message||'—'}</div>
+      <div class="ibr-results">
+        <div class="ibr-kv"><span class="k">digest </span><span class="v" title="${digest}">${shortDig}</span></div>
+        <div class="ibr-kv"><span class="k">commit </span><span class="v">${commit}</span></div>
+        ${r.trivyCriticalCount !== undefined ? `<div class="ibr-kv"><span class="k">crit </span><span class="v ${r.trivyCriticalCount > 0 ? 'fail' : 'ok'}">${r.trivyCriticalCount}</span></div>` : ''}
+        ${r.trivyHighCount !== undefined ? `<div class="ibr-kv"><span class="k">high </span><span class="v ${r.trivyHighCount > 0 ? 'warn' : 'ok'}">${r.trivyHighCount}</span></div>` : ''}
+      </div>
+      <div style="margin-top:6px;font-size:9px;color:var(--mut)">age ${age(m.creationTimestamp)}</div>
+    </div>`;
+      }).join('');
+    }
+
+    // ── ImageSignatures ──
+    function renderSig(items) {
+      const list = document.getElementById('sig-list');
+      if (!items.length) { list.innerHTML = '<div class="empty">no ImageSignatures found</div>'; return; }
+      list.innerHTML = items.map(item => {
+        const { metadata: m, spec = {}, status = {} } = item;
+        const phase = status.phase || spec.phase || '—';
+        const img = spec.image || spec.imageRef || status.image || '—';
+        const principal = status.principalIdentity || spec.principal || '';
+        const rekorIdx = status.rekorLogIndex || spec.rekorLogIndex || '';
+        const grafeas = status.grafeasOccurrence || spec.grafeasResourceURL || '';
+        const certPEM = status.signingCertPEM || spec.signingCertPEM || '';
+        const phaseClass = phase.toLowerCase() === 'signed' ? 'signed' : phase.toLowerCase() === 'failed' ? 'failed' : 'pending';
+
+        return `<div class="sig-row">
+      <div class="sig-phase ${phaseClass}">${phase}</div>
+      <div class="sig-img" title="${img}">${img}</div>
+      ${principal ? `<div class="sig-principal" title="${principal}">${principal}</div>` : ''}
+      <div class="sig-pills">
+        <span class="sp ${certPEM ? 'ok' : 'no'}">fulcio cert</span>
+        <span class="sp ${rekorIdx ? 'ok' : 'no'}">rekor ${rekorIdx ? '#' + rekorIdx : ''}</span>
+        <span class="sp ${grafeas ? 'ok' : 'no'}">grafeas</span>
+      </div>
+      <div style="margin-top:6px;font-size:9px;color:var(--mut)">age ${age(m.creationTimestamp)}</div>
+    </div>`;
+      }).join('');
+    }
+
+    // ── ExternalSecrets ──
+    function renderES(items) {
+      const list = document.getElementById('es-list');
+      if (!items.length) { list.innerHTML = '<div class="empty">no ExternalSecrets found</div>'; return; }
+      list.innerHTML = items.map(item => {
+        const { metadata: m, spec = {}, status = {} } = item;
+        const cond = status.conditions?.find(c => c.type === 'Ready');
+        const synced = cond?.status === 'True';
+        return `<div class="es-row">
+      <div class="es-top">
+        <div><div class="es-name">${m.name}</div><div class="es-store">${spec.secretStoreRef?.name || '—'} · ${spec.secretStoreRef?.kind || ''}</div></div>
+        <span class="badge ${synced ? 'b-ready' : 'b-pending'}">${synced ? 'synced' : cond?.reason || 'pending'}</span>
+      </div>
+      <div class="es-time">last sync: ${cond?.lastTransitionTime ? age(cond.lastTransitionTime) + ' ago' : '—'}</div>
+    </div>`;
+      }).join('');
+    }
+
+    // ── RBAC ──
+    async function checkRBAC() {
+      const n = ns() || 'default';
+      try {
+        await kget(`/api/v1/namespaces/${n}/serviceaccounts/supply-chain-runner`);
+        setR('sa-exists', true, 'found');
+      } catch { setR('sa-exists', false, 'not found'); }
+
+      const checks = [
+        { id: 'sar-ib', resource: 'imagebuilds', group: GRP },
+        { id: 'sar-ims', resource: 'imagesignatures', group: GRP },
+        { id: 'sar-sc', resource: 'supplychains', group: GRP, verb: 'get' },
+      ];
+      for (const c of checks) {
+        try {
+          const r = await fetch(BASE + '/apis/authorization.k8s.io/v1/subjectaccessreviews', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+              apiVersion: 'authorization.k8s.io/v1', kind: 'SubjectAccessReview',
+              spec: {
+                user: `system:serviceaccount:${n}:supply-chain-runner`,
+                resourceAttributes: { namespace: n, verb: c.verb || 'create', resource: c.resource, group: c.group }
+              }
+            })
+          });
+          const d = await r.json();
+          setR(c.id, d.status?.allowed, d.status?.allowed ? 'allowed' : 'denied');
+        } catch { document.getElementById(c.id).textContent = 'error'; }
+      }
+      try {
+        await kget('/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/secure-software-supplychainimage-signer');
+        setR('crb-status', true, 'bound');
+      } catch { setR('crb-status', false, 'missing'); }
+    }
+
+    function setR(id, ok, label) {
+      const el = document.getElementById(id);
+      el.textContent = label;
+      el.className = ok ? 'rok' : 'rno';
+    }
+
+    // ── Events ──
+    function renderEvents(items) {
+      const list = document.getElementById('cev-list');
+      const rel = items
+        .filter(e => ['SupplyChain', 'ImageBuild', 'ImageSignature', 'ImageBuildResult', 'GitHubWebhook'].includes(e.involvedObject?.kind))
+        .sort((a, b) => new Date(b.lastTimestamp || b.eventTime) - new Date(a.lastTimestamp || a.eventTime))
+        .slice(0, 15);
+      if (!rel.length) { list.innerHTML = '<div class="empty">no supply chain events</div>'; return; }
+      list.innerHTML = rel.map(e => `
+    <div class="cev-row ${e.type || 'Normal'}">
+      <div class="cev-top">
+        <div class="cev-reason">${e.reason || '—'}</div>
+        <div class="cev-obj">${e.involvedObject?.kind}/${(e.involvedObject?.name || '').slice(0, 24)}</div>
+        <div class="cev-time">${age(e.lastTimestamp || e.eventTime)}</div>
+      </div>
+      <div class="cev-msg">${(e.message || '—').slice(0, 120)}</div>
     </div>`).join('');
-}
+    }
 
-// ── Main load ──
-async function loadAll() {
-  const btn = document.getElementById('refresh-btn');
-  btn.textContent = '↻ loading...';
-  btn.classList.add('spinning');
-  document.getElementById('err-bar').style.display = 'none';
+    // ── Main ──
+    async function loadAll() {
+      const btn = document.getElementById('ref-btn');
+      btn.textContent = '↻ loading...';
+      btn.classList.add('spin');
+      document.getElementById('err-bar').style.display = 'none';
 
-  try {
-    const [sc, ib, es, sig, prs, evts] = await Promise.all([
-      kgetSafe(nsPath('supplychains')),
-      kgetSafe(nsPath('imagebuilds')),
-      kgetSafe(corePath('externalsecrets').replace('/api/v1/', '/apis/external-secrets.io/v1beta1/')),
-      kgetSafe(nsPath('imagesignatures')),
-      kgetSafe(tkPath('pipelineruns')),
-      kgetSafe(corePath('events')),
-    ]);
+      try {
+        const [sc, ib, ibr, sig, es, prs, evts] = await Promise.all([
+          safe(nsPath('supplychains')),
+          safe(nsPath('imagebuilds')),
+          safe(nsPath('imagebuildresults')),
+          safe(nsPath('imagesignatures')),
+          safe(esPath()),
+          safe(tkPath('pipelineruns')),
+          safe(corePath('events')),
+        ]);
 
-    setProxy(true, 'localhost:8001');
-    renderSC(sc.items || []);
-    await renderIB(ib.items || [], prs.items || []);
-    renderES(es.items || []);
-    renderSig(sig.items || []);
-    renderEvents(evts.items || []);
-    checkRBAC();
-    document.getElementById('last-refresh').textContent = 'refreshed ' + new Date().toLocaleTimeString();
-  } catch (e) {
-    setProxy(false, 'proxy unreachable');
-    const bar = document.getElementById('err-bar');
-    bar.style.display = 'block';
-    bar.textContent = e.message + '  —  run: kubectl proxy';
-  }
+        setProxy(true, 'localhost:8001');
+        renderSC(sc.items || []);
+        await renderIB(ib.items || [], prs.items || []);
+        renderIBR(ibr.items || []);
+        renderSig(sig.items || []);
+        renderES(es.items || []);
+        renderEvents(evts.items || []);
+        checkRBAC();
+        document.getElementById('last-ref').textContent = 'refreshed ' + new Date().toLocaleTimeString();
+      } catch (e) {
+        setProxy(false, 'proxy unreachable');
+        const bar = document.getElementById('err-bar');
+        bar.style.display = 'block';
+        bar.textContent = e.message + '  —  run: kubectl proxy --port=8001';
+      }
 
-  btn.textContent = '↻ refresh';
-  btn.classList.remove('spinning');
-}
+      btn.textContent = '↻ refresh';
+      btn.classList.remove('spin');
+    }
 
-loadAll();
-setInterval(loadAll, 30000);
-</script>
+    loadAll();
+    setInterval(loadAll, 30000);
+  </script>
 </body>
+
 </html>
