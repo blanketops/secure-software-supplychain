@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -449,8 +450,26 @@ func (i *Installer) waitForDeployment(ctx context.Context, namespace, name strin
 // ensureSigstoreRoots collects the three in-cluster sigstore trust anchors
 // and creates the blanketops-sigstore-roots ConfigMap in all required namespaces.
 func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
+	// Wait for Rekor to be ready — it's installed before Chains but may
+	// still be starting when this PostHook fires.
+	rekorSp := newSpinner("Waiting for Rekor to be ready...")
+	rekorSp.start()
+	if err := i.waitForDeployment(ctx, "rekor-system", "rekor-server", 3*time.Minute); err != nil {
+		rekorSp.fail("Rekor not ready")
+		return err
+	}
+	rekorSp.succeed("Rekor ready")
+
+	// Wait for Fulcio to be ready too.
+	fulcioSp := newSpinner("Waiting for Fulcio to be ready...")
+	fulcioSp.start()
+	if err := i.waitForDeployment(ctx, "fulcio-system", "fulcio-server", 3*time.Minute); err != nil {
+		fulcioSp.fail("Fulcio not ready")
+		return err
+	}
+	fulcioSp.succeed("Fulcio ready")
+
 	// ctlog-public-key is created by a post-install Job after ctlog starts.
-	// Wait for it to exist before reading — it may not be ready yet.
 	ctlogSp := newSpinner("Waiting for ctlog-public-key secret...")
 	ctlogSp.start()
 	if err := i.waitForSecret(ctx, ctfePublicKeyNS, ctfePublicKeySecret, 3*time.Minute); err != nil {
@@ -459,7 +478,17 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	}
 	ctlogSp.succeed("ctlog-public-key secret ready")
 
+	// Also wait for fulcio-pub-key — created by a Job after Fulcio starts.
+	fulcioPubSp := newSpinner("Waiting for fulcio-pub-key secret...")
+	fulcioPubSp.start()
+	if err := i.waitForSecret(ctx, "fulcio-system", "fulcio-pub-key", 3*time.Minute); err != nil {
+		fulcioPubSp.fail("fulcio-pub-key secret not found")
+		return err
+	}
+	fulcioPubSp.succeed("fulcio-pub-key secret ready")
+
 	fulcioRoot, err := i.readSecretKey(ctx, "fulcio-system", "fulcio-pub-key", "cert")
+	// ... rest unchanged
 	if err != nil {
 		return fmt.Errorf("failed to read Fulcio root cert: %w", err)
 	}
@@ -544,12 +573,10 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 	jobGVR := schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}
 	podGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 
-	// Clean up any leftover job from a previous run.
 	propagation := metav1.DeletePropagationBackground
 	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagation,
 	})
-	// Brief pause to let the old job's pods terminate.
 	time.Sleep(2 * time.Second)
 
 	job := &unstructured.Unstructured{
@@ -559,12 +586,9 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 			"metadata": map[string]interface{}{
 				"name":      jobName,
 				"namespace": jobNS,
-				"labels": map[string]interface{}{
-					"blanketops.dev/managed": "true",
-				},
+				"labels":    map[string]interface{}{"blanketops.dev/managed": "true"},
 			},
 			"spec": map[string]interface{}{
-				// Auto-delete 30s after completion so we don't litter.
 				"ttlSecondsAfterFinished": int64(30),
 				"template": map[string]interface{}{
 					"spec": map[string]interface{}{
@@ -589,7 +613,7 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create rekor fetch job: %w", err)
 	}
 
-	// Poll until the job pod reaches a terminal phase.
+	// Poll until pod reaches terminal phase.
 	deadline := time.Now().Add(2 * time.Minute)
 	var logPodName string
 	for time.Now().Before(deadline) {
@@ -611,33 +635,29 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("rekor fetch job timed out waiting for pod")
 	}
 
-	// Read pod logs. The dynamic client has no log support — use a raw REST
-	// client built from the config we already hold.
-	rc, err := rest.RESTClientFor(&rest.Config{
-		Host:    i.restConfig.Host,
-		APIPath: "/api",
-		ContentConfig: rest.ContentConfig{
-			GroupVersion: &schema.GroupVersion{Version: "v1"},
-		},
-		TLSClientConfig: i.restConfig.TLSClientConfig,
-		BearerToken:     i.restConfig.BearerToken,
-		BearerTokenFile: i.restConfig.BearerTokenFile,
-	})
+	// Use the raw REST request directly — avoids the NegotiatedSerializer
+	// requirement of RESTClientFor by using the config's transport directly.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/log", i.restConfig.Host, jobNS, logPodName),
+		nil,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create REST client for pod logs: %w", err)
+		return nil, fmt.Errorf("failed to build log request: %w", err)
 	}
-	raw, err := rc.Get().
-		Namespace(jobNS).
-		Resource("pods").
-		Name(logPodName).
-		SubResource("log").
-		Do(ctx).
-		Raw()
+	transport, err := rest.TransportFor(i.restConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read pod logs: %w", err)
+		return nil, fmt.Errorf("failed to build transport: %w", err)
+	}
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch pod logs: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read pod log response: %w", err)
 	}
 
-	// Best-effort cleanup — TTL will handle it anyway.
 	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagation,
 	})
