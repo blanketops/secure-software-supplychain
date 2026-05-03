@@ -1,6 +1,5 @@
 /*
 Copyright 2026 The BlanketOps Authors.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,6 +23,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -55,7 +55,22 @@ const (
 	// webhookHostPlaceholder is replaced in ingress manifests at apply time
 	// with the actual public hostname (e.g. Tailscale Funnel URL).
 	webhookHostPlaceholder = "WEBHOOK_HOST"
+
+	// sigstore trust anchor configmap — mounted by signTask and any verifier.
+	sigstoreRootsName = "blanketops-sigstore-roots"
+
+	// ctlog secret coords.
+	ctfePublicKeySecret = "ctlog-public-key"
+	ctfePublicKeyNS     = "ctlog-system"
 )
+
+// sigstoreRootsNamespaces lists every namespace that needs the trust anchor
+// configmap mounted by pipeline tasks and Chains.
+var sigstoreRootsNamespaces = []string{"default", "tekton-chains"}
+
+// ---------------------------------------------------------------------------
+// step / installOrder
+// ---------------------------------------------------------------------------
 
 // step represents a named installation phase with a set of manifest paths.
 type step struct {
@@ -94,6 +109,38 @@ var installOrder = []step{
 	{
 		Name:  "Tekton Chains",
 		Paths: []string{"dependencies/tekton/chains"},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			// 1. Wait for Chains controller before touching its config.
+			waitSp := newSpinner("Waiting for Tekton Chains to be ready...")
+			waitSp.start()
+			if err := i.waitForDeployment(ctx, "tekton-chains", "tekton-chains-controller", 3*time.Minute); err != nil {
+				waitSp.fail("Tekton Chains not ready")
+				return err
+			}
+			waitSp.succeed("Tekton Chains ready")
+
+			// 2. Overwrite the default chains-config with our BlanketOps config.
+			cfgSp := newSpinner("Applying BlanketOps chains-config...")
+			cfgSp.start()
+			if err := i.applyChainsConfig(ctx); err != nil {
+				cfgSp.fail("Failed to apply chains-config")
+				return err
+			}
+			cfgSp.succeed("chains-config applied")
+
+			// 3. Collect the three in-cluster sigstore trust anchors and
+			//    create blanketops-sigstore-roots in all required namespaces.
+			//    This must run after Fulcio, Rekor, and ctlog are up, which
+			//    they are — they were installed before Chains in this order.
+			rootsSp := newSpinner("Fetching sigstore trust anchors...")
+			rootsSp.start()
+			if err := i.ensureSigstoreRoots(ctx); err != nil {
+				rootsSp.fail("Failed to fetch sigstore trust anchors")
+				return err
+			}
+			rootsSp.succeed("blanketops-sigstore-roots created")
+			return nil
+		},
 	},
 	{
 		Name:  "Tekton Dashboard",
@@ -147,7 +194,10 @@ var installOrder = []step{
 	},
 }
 
-// statusChecks are the namespaces and deployments to verify after install.
+// ---------------------------------------------------------------------------
+// statusChecks
+// ---------------------------------------------------------------------------
+
 var statusChecks = []struct {
 	Namespace  string
 	Deployment string
@@ -168,6 +218,10 @@ var statusChecks = []struct {
 	{Namespace: "ingress-nginx", Deployment: "ingress-nginx-controller", Label: "NGINX Ingress"},
 }
 
+// ---------------------------------------------------------------------------
+// Installer
+// ---------------------------------------------------------------------------
+
 // Installer applies embedded supply chain manifests to a Kubernetes cluster.
 type Installer struct {
 	dynamic     dynamic.Interface
@@ -175,6 +229,9 @@ type Installer struct {
 	mapper      meta.RESTMapper
 	dryRun      bool
 	webhookHost string
+	// restConfig is kept for operations that need a raw REST client
+	// (e.g. reading pod logs), where the dynamic client is insufficient.
+	restConfig *rest.Config
 }
 
 // New creates an Installer from a kubeconfig path.
@@ -188,32 +245,32 @@ func NewWithOptions(kubeconfig string, dryRun bool, webhookHost string) (*Instal
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
-
 	dynClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
-
 	disc, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
-
 	groupResources, err := restmapper.GetAPIGroupResources(disc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get API group resources: %w", err)
 	}
-
 	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
-
 	return &Installer{
 		dynamic:     dynClient,
 		discovery:   disc,
 		mapper:      mapper,
 		dryRun:      dryRun,
 		webhookHost: webhookHost,
+		restConfig:  config,
 	}, nil
 }
+
+// ---------------------------------------------------------------------------
+// Install / Uninstall / Status
+// ---------------------------------------------------------------------------
 
 // Install applies all supply chain dependencies in order.
 func (i *Installer) Install(ctx context.Context) error {
@@ -248,7 +305,6 @@ func (i *Installer) Install(ctx context.Context) error {
 				break
 			}
 		}
-
 		if applyErr != nil {
 			if !i.dryRun {
 				sp.fail(applyErr.Error())
@@ -307,7 +363,6 @@ func (i *Installer) Install(ctx context.Context) error {
 func (i *Installer) Uninstall(ctx context.Context) error {
 	fmt.Println("🗑  Removing Secure Software Supply Chain dependencies...")
 	fmt.Println()
-
 	for idx := len(installOrder) - 1; idx >= 0; idx-- {
 		s := installOrder[idx]
 		fmt.Printf("[%d/%d] Removing %s\n", len(installOrder)-idx, len(installOrder), s.Name)
@@ -322,7 +377,6 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 		}
 		fmt.Printf("  ✓ %s removed\n", s.Name)
 	}
-
 	fmt.Println()
 	fmt.Println("✅ Supply chain dependencies removed.")
 	return nil
@@ -332,7 +386,6 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 func (i *Installer) Status(ctx context.Context) error {
 	fmt.Println("📋 Supply Chain Dependency Status")
 	fmt.Println()
-
 	for _, check := range statusChecks {
 		deploy, err := i.dynamic.Resource(
 			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
@@ -345,7 +398,6 @@ func (i *Installer) Status(ctx context.Context) error {
 			}
 			continue
 		}
-
 		replicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
 		desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
 		if replicas >= desired && desired > 0 {
@@ -354,7 +406,6 @@ func (i *Installer) Status(ctx context.Context) error {
 			fmt.Printf("  ⏳ %-30s  starting (%d/%d)\n", check.Label, replicas, desired)
 		}
 	}
-
 	fmt.Println()
 	return nil
 }
@@ -384,6 +435,266 @@ func (i *Installer) waitForDeployment(ctx context.Context, namespace, name strin
 }
 
 // ---------------------------------------------------------------------------
+// Sigstore trust anchors
+// ---------------------------------------------------------------------------
+
+// ensureSigstoreRoots collects the three in-cluster sigstore trust anchors
+// and creates the blanketops-sigstore-roots ConfigMap in all required namespaces.
+//
+// Sources:
+//   - fulcio-root.pem: fulcio-pub-key secret in fulcio-system (key: "cert")
+//   - ctfe.pub:        ctlog-public-key secret in ctlog-system (key: "public")
+//   - rekor.pub:       fetched via a short-lived Job (Rekor exposes no secret)
+func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
+	fulcioRoot, err := i.readSecretKey(ctx, "fulcio-system", "fulcio-pub-key", "cert")
+	if err != nil {
+		return fmt.Errorf("failed to read Fulcio root cert: %w", err)
+	}
+
+	ctfePub, err := i.readSecretKey(ctx, ctfePublicKeyNS, ctfePublicKeySecret, "public")
+	if err != nil {
+		return fmt.Errorf("failed to read CTFE public key: %w", err)
+	}
+
+	rekorPub, err := i.fetchRekorPublicKey(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch Rekor public key: %w", err)
+	}
+
+	cmData := map[string]interface{}{
+		"fulcio-root.pem": string(fulcioRoot),
+		"ctfe.pub":        string(ctfePub),
+		"rekor.pub":       string(rekorPub),
+	}
+
+	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	for _, ns := range sigstoreRootsNamespaces {
+		cm := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]interface{}{
+					"name":      sigstoreRootsName,
+					"namespace": ns,
+					"labels": map[string]interface{}{
+						"blanketops.dev/managed": "true",
+					},
+				},
+				"data": cmData,
+			},
+		}
+		existing, err := i.dynamic.Resource(cmGVR).Namespace(ns).Get(ctx, sigstoreRootsName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			if _, err := i.dynamic.Resource(cmGVR).Namespace(ns).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+				return fmt.Errorf("failed to create %s in %s: %w", sigstoreRootsName, ns, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check %s in %s: %w", sigstoreRootsName, ns, err)
+		} else {
+			cm.SetResourceVersion(existing.GetResourceVersion())
+			if _, err := i.dynamic.Resource(cmGVR).Namespace(ns).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+				return fmt.Errorf("failed to update %s in %s: %w", sigstoreRootsName, ns, err)
+			}
+		}
+	}
+	return nil
+}
+
+// readSecretKey reads and base64-decodes a single key from a Kubernetes secret.
+// Kubernetes stores secret data as base64 in the API response.
+func (i *Installer) readSecretKey(ctx context.Context, namespace, secretName, key string) ([]byte, error) {
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	secret, err := i.dynamic.Resource(secretGVR).Namespace(namespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret %s/%s: %w", namespace, secretName, err)
+	}
+	data, _, _ := unstructured.NestedStringMap(secret.Object, "data")
+	encoded, ok := data[key]
+	if !ok {
+		return nil, fmt.Errorf("secret %s/%s missing key %q", namespace, secretName, key)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode %s/%s[%s]: %w", namespace, secretName, key, err)
+	}
+	return decoded, nil
+}
+
+// fetchRekorPublicKey spawns a short-lived Job that curls the Rekor public key
+// endpoint from inside the cluster, reads stdout via the pod log API, then
+// cleans up. Rekor exposes no Kubernetes secret for its signing key.
+func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
+	const (
+		jobName = "blanketops-fetch-rekor-pub"
+		jobNS   = "default"
+	)
+	jobGVR := schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}
+	podGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+
+	// Clean up any leftover job from a previous run.
+	propagation := metav1.DeletePropagationBackground
+	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
+	// Brief pause to let the old job's pods terminate.
+	time.Sleep(2 * time.Second)
+
+	job := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "batch/v1",
+			"kind":       "Job",
+			"metadata": map[string]interface{}{
+				"name":      jobName,
+				"namespace": jobNS,
+				"labels": map[string]interface{}{
+					"blanketops.dev/managed": "true",
+				},
+			},
+			"spec": map[string]interface{}{
+				// Auto-delete 30s after completion so we don't litter.
+				"ttlSecondsAfterFinished": int64(30),
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"restartPolicy": "Never",
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "fetch",
+								"image": "curlimages/curl:latest",
+								"command": []interface{}{
+									"curl", "-sf",
+									"http://rekor-server.rekor-system.svc.cluster.local/api/v1/log/publicKey",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := i.dynamic.Resource(jobGVR).Namespace(jobNS).Create(ctx, job, metav1.CreateOptions{}); err != nil {
+		return nil, fmt.Errorf("failed to create rekor fetch job: %w", err)
+	}
+
+	// Poll until the job pod reaches a terminal phase.
+	deadline := time.Now().Add(2 * time.Minute)
+	var logPodName string
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		pods, err := i.dynamic.Resource(podGVR).Namespace(jobNS).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("job-name=%s", jobName),
+		})
+		if err != nil || len(pods.Items) == 0 {
+			continue
+		}
+		pod := pods.Items[0]
+		phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase")
+		if phase == "Succeeded" || phase == "Failed" {
+			logPodName = pod.GetName()
+			break
+		}
+	}
+	if logPodName == "" {
+		return nil, fmt.Errorf("rekor fetch job timed out waiting for pod")
+	}
+
+	// Read pod logs. The dynamic client has no log support — use a raw REST
+	// client built from the config we already hold.
+	rc, err := rest.RESTClientFor(&rest.Config{
+		Host:    i.restConfig.Host,
+		APIPath: "/api",
+		ContentConfig: rest.ContentConfig{
+			GroupVersion: &schema.GroupVersion{Version: "v1"},
+		},
+		TLSClientConfig: i.restConfig.TLSClientConfig,
+		BearerToken:     i.restConfig.BearerToken,
+		BearerTokenFile: i.restConfig.BearerTokenFile,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create REST client for pod logs: %w", err)
+	}
+	raw, err := rc.Get().
+		Namespace(jobNS).
+		Resource("pods").
+		Name(logPodName).
+		SubResource("log").
+		Do(ctx).
+		Raw()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read pod logs: %w", err)
+	}
+
+	// Best-effort cleanup — TTL will handle it anyway.
+	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
+
+	pub := bytes.TrimSpace(raw)
+	if len(pub) == 0 {
+		return nil, fmt.Errorf("rekor public key fetch returned empty response")
+	}
+	return pub, nil
+}
+
+// ---------------------------------------------------------------------------
+// Chains config
+// ---------------------------------------------------------------------------
+
+// applyChainsConfig overwrites the default chains-config ConfigMap with the
+// BlanketOps configuration: in-cluster Fulcio/Rekor, OCI storage, x509/keyless.
+func (i *Installer) applyChainsConfig(ctx context.Context) error {
+	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	cm := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "chains-config",
+				"namespace": "tekton-chains",
+				"labels": map[string]interface{}{
+					"app.kubernetes.io/instance": "default",
+					"app.kubernetes.io/part-of":  "tekton-chains",
+				},
+			},
+			"data": map[string]interface{}{
+				"artifacts.taskrun.format":                     "in-toto",
+				"artifacts.taskrun.storage":                    "oci",
+				"artifacts.taskrun.signer":                     "x509",
+				"artifacts.oci.storage":                        "oci",
+				"artifacts.oci.format":                         "simplesigning",
+				"artifacts.oci.signer":                         "x509",
+				"artifacts.pipelinerun.format":                 "in-toto",
+				"artifacts.pipelinerun.storage":                "oci",
+				"artifacts.pipelinerun.signer":                 "x509",
+				"artifacts.pipelinerun.enable-deep-inspection": "true",
+				"storage.oci.repository":                       "docker.io/nkanyezisolutions/blanketops-environments-min",
+				"storage.oci.repository.insecure":              "false",
+				"builder.id":                                   "https://tekton.dev/chains/v2",
+				"builddefinition.buildtype":                    "https://tekton.dev/chains/v2/slsa",
+				"signers.x509.fulcio.enabled":                  "true",
+				"signers.x509.fulcio.address":                  "http://fulcio-server.fulcio-system.svc.cluster.local",
+				"signers.x509.fulcio.issuer":                   "https://kubernetes.default.svc.cluster.local",
+				"signers.x509.fulcio.provider":                 "spiffe",
+				"signers.x509.rekor.address":                   "http://rekor-server.rekor-system.svc.cluster.local",
+				"transparency.enabled":                         "true",
+				"transparency.url":                             "http://rekor-server.rekor-system.svc.cluster.local",
+			},
+		},
+	}
+	existing, err := i.dynamic.Resource(cmGVR).Namespace("tekton-chains").Get(ctx, "chains-config", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = i.dynamic.Resource(cmGVR).Namespace("tekton-chains").Create(ctx, cm, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	cm.SetResourceVersion(existing.GetResourceVersion())
+	_, err = i.dynamic.Resource(cmGVR).Namespace("tekton-chains").Update(ctx, cm, metav1.UpdateOptions{})
+	return err
+}
+
+// ---------------------------------------------------------------------------
 // Tekton Results TLS
 // ---------------------------------------------------------------------------
 
@@ -399,17 +710,14 @@ func (i *Installer) ensureResultsTLS(ctx context.Context) error {
 	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to check for existing TLS secret: %w", err)
 	}
-
 	fmt.Println("  🔐 Generating self-signed TLS certificate for Results API...")
 	certPEM, keyPEM, err := generateSelfSignedCert()
 	if err != nil {
 		return fmt.Errorf("failed to generate TLS cert: %w", err)
 	}
-
 	if err := i.ensureNamespace(ctx, resultsTLSNamespace); err != nil {
 		return err
 	}
-
 	secret := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -425,14 +733,12 @@ func (i *Installer) ensureResultsTLS(ctx context.Context) error {
 			},
 		},
 	}
-
 	_, err = i.dynamic.Resource(secretGVR).
 		Namespace(resultsTLSNamespace).
 		Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create TLS secret: %w", err)
 	}
-
 	fmt.Println("  ✓ TLS secret created")
 	return nil
 }
@@ -457,7 +763,6 @@ func (i *Installer) ensureNamespace(ctx context.Context, name string) error {
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-
 	ns := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -476,12 +781,10 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
 	}
-
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate serial number: %w", err)
 	}
-
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
@@ -499,27 +802,22 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
 	}
-
 	certBuf := &bytes.Buffer{}
 	if err := pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
 		return nil, nil, fmt.Errorf("failed to encode cert PEM: %w", err)
 	}
-
 	keyDER, err := x509.MarshalECPrivateKey(privateKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
-
 	keyBuf := &bytes.Buffer{}
 	if err := pem.Encode(keyBuf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
 		return nil, nil, fmt.Errorf("failed to encode key PEM: %w", err)
 	}
-
 	return certBuf.Bytes(), keyBuf.Bytes(), nil
 }
 
@@ -541,7 +839,6 @@ func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read embedded directory %q: %w", dir, err)
 	}
-
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -549,15 +846,12 @@ func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 		if !strings.HasSuffix(entry.Name(), ".yaml") && !strings.HasSuffix(entry.Name(), ".yml") {
 			continue
 		}
-
 		path := filepath.Join(dir, entry.Name())
 		data, err := manifests.Dependencies.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read %q: %w", path, err)
 		}
-
 		data = i.substituteManifest(data)
-
 		if err := i.applyManifest(ctx, data, path); err != nil {
 			return fmt.Errorf("failed to apply %q: %w", path, err)
 		}
@@ -570,7 +864,6 @@ func (i *Installer) deleteDirectory(ctx context.Context, dir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read embedded directory %q: %w", dir, err)
 	}
-
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -578,13 +871,11 @@ func (i *Installer) deleteDirectory(ctx context.Context, dir string) error {
 		if !strings.HasSuffix(entry.Name(), ".yaml") && !strings.HasSuffix(entry.Name(), ".yml") {
 			continue
 		}
-
 		path := filepath.Join(dir, entry.Name())
 		data, err := manifests.Dependencies.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read %q: %w", path, err)
 		}
-
 		if err := i.deleteManifest(ctx, data); err != nil {
 			return err
 		}
@@ -595,7 +886,6 @@ func (i *Installer) deleteDirectory(ctx context.Context, dir string) error {
 func (i *Installer) applyManifest(ctx context.Context, data []byte, source string) error {
 	reader := yaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 	docIndex := 0
-
 	for {
 		doc, err := reader.Read()
 		if err == io.EOF {
@@ -604,12 +894,10 @@ func (i *Installer) applyManifest(ctx context.Context, data []byte, source strin
 		if err != nil {
 			return fmt.Errorf("failed to read YAML document %d: %w", docIndex, err)
 		}
-
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
 			continue
 		}
-
 		obj := &unstructured.Unstructured{}
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
@@ -617,13 +905,11 @@ func (i *Installer) applyManifest(ctx context.Context, data []byte, source strin
 		if obj.GetKind() == "" {
 			continue
 		}
-
 		if i.dryRun {
 			fmt.Printf("  → [dry-run] %s/%s (%s)\n", obj.GetKind(), obj.GetName(), obj.GetNamespace())
 			docIndex++
 			continue
 		}
-
 		if err := i.applyObject(ctx, obj); err != nil {
 			return fmt.Errorf("failed to apply %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
@@ -634,7 +920,6 @@ func (i *Installer) applyManifest(ctx context.Context, data []byte, source strin
 
 func (i *Installer) deleteManifest(ctx context.Context, data []byte) error {
 	reader := yaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
-
 	for {
 		doc, err := reader.Read()
 		if err == io.EOF {
@@ -643,12 +928,10 @@ func (i *Installer) deleteManifest(ctx context.Context, data []byte) error {
 		if err != nil {
 			continue
 		}
-
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
 			continue
 		}
-
 		obj := &unstructured.Unstructured{}
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
@@ -656,7 +939,6 @@ func (i *Installer) deleteManifest(ctx context.Context, data []byte) error {
 		if obj.GetKind() == "" {
 			continue
 		}
-
 		_ = i.deleteObject(ctx, obj)
 	}
 	return nil
@@ -668,7 +950,6 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	if err != nil {
 		return fmt.Errorf("no mapping for %s: %w", gvk, err)
 	}
-
 	var dr dynamic.ResourceInterface
 	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
 		ns := obj.GetNamespace()
@@ -679,7 +960,6 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	} else {
 		dr = i.dynamic.Resource(mapping.Resource)
 	}
-
 	existing, err := dr.Get(ctx, obj.GetName(), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
@@ -688,7 +968,6 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	if err != nil {
 		return err
 	}
-
 	obj.SetResourceVersion(existing.GetResourceVersion())
 	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
 	return err
@@ -700,7 +979,6 @@ func (i *Installer) deleteObject(ctx context.Context, obj *unstructured.Unstruct
 	if err != nil {
 		return nil
 	}
-
 	var dr dynamic.ResourceInterface
 	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
 		ns := obj.GetNamespace()
@@ -711,7 +989,6 @@ func (i *Installer) deleteObject(ctx context.Context, obj *unstructured.Unstruct
 	} else {
 		dr = i.dynamic.Resource(mapping.Resource)
 	}
-
 	return dr.Delete(ctx, obj.GetName(), metav1.DeleteOptions{})
 }
 

@@ -29,19 +29,20 @@ import (
 )
 
 const (
-	stepGitClone   = "git-clone"
-	stepAuthFulcio = "authentication-fulcio"
-	stepSonarQube  = "code-scan-sonarqube"
-	stepBuildImage = "build-image-buildah"
-	stepPushImage  = "push-image-docker"
-	stepTrivy      = "vulnerability-scan-trivy"
-	stepSign       = "sign-image-cosign"
-	stepAttest     = "attest-image-rekor-fulcio"
-	stepGrafeas    = "publish-metadata-grafeas"
-
-	workspaceShared       = "shared-data"
-	workspaceSSHCreds     = "ssh-creds"
-	workspaceDockerConfig = "dockerconfig"
+	stepGitClone           = "git-clone"
+	stepAuthFulcio         = "authentication-fulcio"
+	stepSonarQube          = "code-scan-sonarqube"
+	stepBuildImage         = "build-image-buildah"
+	stepPushImage          = "push-image-docker"
+	stepTrivy              = "vulnerability-scan-trivy"
+	stepSign               = "sign-image-cosign"
+	stepAttest             = "attest-image-rekor-fulcio"
+	stepGrafeas            = "publish-metadata-grafeas"
+	sigstoreRootsConfigMap = "blanketops-sigstore-roots"
+	sigstoreRootsMountPath = "/etc/sigstore"
+	workspaceShared        = "shared-data"
+	workspaceSSHCreds      = "ssh-creds"
+	workspaceDockerConfig  = "dockerconfig"
 	// workspaceTrivyCache removed — Trivy DB is now baked into the scanner image.
 	// See dependencies/tekton/task/trivy-db/Dockerfile.
 )
@@ -436,6 +437,7 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 		},
 	}
 }
+
 func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
 	fulcio := "https://fulcio.sigstore.dev"
 	rekor := "https://rekor.sigstore.dev"
@@ -482,6 +484,22 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 							},
 						},
 					},
+					{
+						// blanketops-sigstore-roots holds the three trust anchors
+						// for the in-cluster sigstore stack:
+						//   fulcio-root.pem — Fulcio CA root
+						//   rekor.pub       — Rekor transparency log public key
+						//   ctfe.pub        — CT log public key
+						// Created by the installer before any pipeline runs.
+						Name: "sigstore-roots",
+						VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: sigstoreRootsConfigMap,
+								},
+							},
+						},
+					},
 				},
 				Steps: []tektonv1.Step{
 					{
@@ -493,18 +511,21 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 						Image: "gcr.io/projectsigstore/cosign:v2.2.3",
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "oidc-info", MountPath: "/var/run/sigstore/cosign"},
+							{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath},
 						},
 						Env: []corev1.EnvVar{
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
 							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+							{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/fulcio-root.pem"},
+							{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/rekor.pub"},
+							{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/ctfe.pub"},
 						},
 						Args: []string{
 							"sign",
 							"--fulcio-url=$(params.FULCIO_URL)",
 							"--rekor-url=$(params.REKOR_URL)",
 							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
-							"--insecure-skip-verify",
 							"--yes",
 							"$(params.IMAGE)@$(params.DIGEST)",
 						},
