@@ -85,7 +85,6 @@ spec:
       trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
-        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
@@ -98,7 +97,6 @@ spec:
       trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
-        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
