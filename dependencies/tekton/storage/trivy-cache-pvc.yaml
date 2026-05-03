@@ -1,0 +1,19 @@
+# PersistentVolumeClaim for Trivy vulnerability database cache.
+# Mounted by the trivy-scanner task to avoid downloading 91MB on every run.
+# The DB is downloaded once on first scan and reused across all PipelineRuns.
+#
+# Applied by the installer as part of the Tekton Tasks step.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trivy-db-cache
+  namespace: default
+  labels:
+    blanketops.dev/managed: "true"
+    blanketops.dev/component: "supply-chain-tasks"
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

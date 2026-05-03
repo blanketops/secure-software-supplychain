@@ -2,6 +2,7 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: trivy-scanner
+  namespace: default
   labels:
     app.kubernetes.io/version: "0.2"
   annotations:
@@ -12,39 +13,47 @@ metadata:
     tekton.dev/platforms: "linux/amd64,linux/arm64,linux/ppc64le,linux/390x"
 spec:
   description: >-
-    Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption.
+    Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption. Supports a persistent cache workspace to avoid re-downloading the Trivy DB (91MB) on every run.
   workspaces:
   - name: manifest-dir
+    description: Workspace for source and SARIF report output.
+  - name: cache
+    description: |
+      Persistent cache for the Trivy vulnerability database.
+      Mount a PVC here to avoid downloading 91MB on every run.
+      If not bound, Trivy uses its default cache location.
+    optional: true
   params:
   - name: TRIVY_IMAGE
     default: docker.io/aquasec/trivy@sha256:944a044451791617cc0ed2ee4d1942a4f66b790d527fcd0575a6b399ccbc05a1
-    description: Trivy scanner image to be used
+    description: Trivy scanner image to be used.
+    type: string
   - name: IMAGE_PATH
-    description: Image or Path to be scanned by trivy.
+    description: Image or path to be scanned by trivy.
     type: string
   - name: SEVERITY
     default: "HIGH,CRITICAL"
-    description: Severities to scan for
+    description: Severities to scan for.
     type: string
   - name: AIR_GAPPED_ENABLED
     default: "false"
-    description: Enable Air-Gapped mode
+    description: Enable air-gapped mode (pre-download DB, skip update).
     type: string
   results:
   - name: TRIVY_SCAN_SUMMARY
-    description: PASS if no HIGH/CRITICAL vulns, FAIL otherwise
+    description: PASS if no HIGH/CRITICAL vulns, FAIL otherwise.
     type: string
   - name: TRIVY_CRITICAL_COUNT
-    description: Number of CRITICAL vulnerabilities found
+    description: Number of CRITICAL vulnerabilities found.
     type: string
   - name: TRIVY_HIGH_COUNT
-    description: Number of HIGH vulnerabilities found
+    description: Number of HIGH vulnerabilities found.
     type: string
   - name: TRIVY_TOTAL_COUNT
-    description: Total HIGH + CRITICAL vulnerabilities found
+    description: Total HIGH + CRITICAL vulnerabilities found.
     type: string
   - name: TRIVY_SARIF_PATH
-    description: Path to the SARIF report file in the workspace
+    description: Path to the SARIF report file in the workspace.
     type: string
   steps:
   - name: trivy-scan
@@ -56,53 +65,72 @@ spec:
 
       SARIF_OUTPUT="$(workspaces.manifest-dir.path)/trivy-report.sarif"
 
-      #! Air-gapped setup — preserve as-is
+      #! ── Cache directory ────────────────────────────────────────────────
+      #! Use the mounted PVC cache if available — avoids downloading 91MB
+      #! of vulnerability DB on every run. Falls back to default location.
+      CACHE_DIR="$HOME/.cache/trivy"
+      if [ "$(workspaces.cache.bound)" = "true" ]; then
+        CACHE_DIR="$(workspaces.cache.path)"
+        echo "Using persistent Trivy cache at: $CACHE_DIR"
+      else
+        echo "No cache workspace bound — using default cache: $CACHE_DIR"
+      fi
+
+      SKIP_UPDATE=""
+
+      #! ── Air-gapped setup ───────────────────────────────────────────────
       if [ "$(params.AIR_GAPPED_ENABLED)" = "true" ]; then
         echo "Air-Gapped mode enabled"
         TRIVY_TEMP_DIR=$(mktemp -d)
-        trivy --cache-dir "$TRIVY_TEMP_DIR" image --download-db-only
+        trivy --cache-dir "$CACHE_DIR" image --download-db-only
         tar -cf ./db.tar.gz -C "$TRIVY_TEMP_DIR/db" metadata.json trivy.db
         rm -rf "$TRIVY_TEMP_DIR"
-        mkdir -p "$HOME"/.cache/trivy/db
-        tar xvf ./db.tar.gz -C "$HOME"/.cache/trivy/db
+        mkdir -p "$CACHE_DIR/db"
+        tar xvf ./db.tar.gz -C "$CACHE_DIR/db"
         SKIP_UPDATE="--skip-update"
       fi
 
-      #! Run scan — SARIF output for rich structured report.
-      #! --scanners vuln     : vulnerability scanning only, skip secret scanning
-      #! --skip-java-db-update : skip the 860MB Java DB download every run
-      #! --timeout 10m       : give Trivy enough time to complete
       echo "Running trivy scan on $(params.IMAGE_PATH)"
+
+      #! ── SARIF scan ─────────────────────────────────────────────────────
+      #! --scanners vuln          : vulnerability scanning only
+      #! --skip-java-db-update    : skip the 860MB Java DB download
+      #! --cache-dir              : use persistent cache to avoid re-download
       trivy image \
+        --cache-dir "$CACHE_DIR" \
         $SKIP_UPDATE \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
+        --skip-java-db-update \
         --timeout 10m \
         --format sarif \
         --output "$SARIF_OUTPUT" \
         $(params.IMAGE_PATH)
 
+      #! ── Table scan (human-readable log output) ─────────────────────────
       trivy image \
+        --cache-dir "$CACHE_DIR" \
         $SKIP_UPDATE \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
+        --skip-java-db-update \
         --timeout 10m \
         $(params.IMAGE_PATH)
 
-      #! Extract counts from SARIF
-      #! SARIF rules map 1:1 to findings — count by severity level
+      #! ── Extract counts from SARIF ──────────────────────────────────────
+      #! SARIF severity mapping: error=CRITICAL, warning=HIGH
       critical=$(grep -o '"level":"error"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       high=$(grep -o '"level":"warning"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
       total=$((critical + high))
 
       echo "CRITICAL: $critical"
-      echo "HIGH: $high"
-      echo "TOTAL: $total"
-      echo "SARIF report: $SARIF_OUTPUT"
+      echo "HIGH:     $high"
+      echo "TOTAL:    $total"
+      echo "SARIF:    $SARIF_OUTPUT"
 
-      #! Write results
+      #! ── Write results ──────────────────────────────────────────────────
       if [ "$total" -eq 0 ]; then
         printf 'PASS' > $(results.TRIVY_SCAN_SUMMARY.path)
       else

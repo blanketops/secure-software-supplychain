@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -166,21 +167,35 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 // pipelineRunName generates a deterministic PipelineRun name from the
 // ImageBuild name that always fits within Kubernetes' 63-char limit.
 func pipelineRunName(ib *supplychainv1alpha1.ImageBuild) string {
-	// ImageBuild name format: <supplychain>-<branch>-<sha>
-	// PipelineRun format:     pr-<supplychain>-<short-sha>
-	// e.g. pr-for-kaniko-app-408e8fce
-	sha := ib.Spec.GitRef.Revision
-	if len(sha) > 8 {
-		sha = sha[:8]
+	// ImageBuild name format: <supplychain>-<branch>-<fullsha>
+	// Strip the supplychain prefix to get <branch>-<fullsha>
+	ibName := ib.Name
+	sc := ib.Spec.SupplyChainRef.Name
+	remainder := strings.TrimPrefix(ibName, sc+"-")
+
+	// remainder is now "<branch>-<fullsha>"
+	// split on last "-" to separate branch from sha
+	lastDash := strings.LastIndex(remainder, "-")
+	branch := remainder
+	sha := ""
+	if lastDash != -1 {
+		branch = remainder[:lastDash]
+		fullSHA := remainder[lastDash+1:]
+		if len(fullSHA) > 8 {
+			sha = fullSHA[:8]
+		} else {
+			sha = fullSHA
+		}
 	}
-	name := fmt.Sprintf("pr-%s-%s", ib.Spec.SupplyChainRef.Name, sha)
-	// Kubernetes name limit is 63 chars
+
+	// pr-<supplychain>-<branch>-<short-sha>
+	// e.g. pr-for-kaniko-app-master-5728a219
+	name := fmt.Sprintf("run-%s-%s-%s", sc, branch, sha)
 	if len(name) > 63 {
 		name = name[:63]
 	}
 	return name
 }
-
 func (r *ImageBuildReconciler) reconcilePipelineRun(
 	ctx context.Context,
 	ib *supplychainv1alpha1.ImageBuild,

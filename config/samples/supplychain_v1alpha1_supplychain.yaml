@@ -16,7 +16,7 @@ spec:
     registrySecret: registry-credentials
   steps:
     buildpacks: true
-    trivy: true
+    trivy: false
     sign: true
     attest: true
     sonarQube:
