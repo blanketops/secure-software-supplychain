@@ -4,7 +4,7 @@ metadata:
   name: trivy-scanner
   namespace: default
   labels:
-    app.kubernetes.io/version: "0.3"
+    app.kubernetes.io/version: "0.4"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/categories: Security
@@ -15,20 +15,14 @@ spec:
   description: >-
     Trivy scanner with SARIF output and rich result extraction. Scans container images for vulnerabilities and emits structured results and a SARIF report for downstream consumption.
 
-    The default TRIVY_IMAGE is a custom image with the vulnerability DB pre-baked at build time (docker.io/nkanyezisolutions/trivy-db:latest). This eliminates the 91MB + 861MB DB downloads on every pipeline run. Set TRIVY_IMAGE to the upstream trivy image if you want live DB updates.
+    The default TRIVY_IMAGE is a custom image with the vulnerability DB pre-baked at build time (docker.io/nkanyezisolutions/trivy-db:latest). This eliminates the 91MB + 861MB DB downloads on every pipeline run.
 
-    To rebuild the baked image:
-      docker build -t docker.io/nkanyezisolutions/trivy-db:latest \
-        dependencies/tekton/task/trivy-db/
-      docker push docker.io/nkanyezisolutions/trivy-db:latest
+    Counts are extracted from the Trivy table output (Total: N (HIGH: N, CRITICAL: N)) rather than SARIF level fields, which vary across Trivy versions.
   workspaces:
   - name: manifest-dir
     description: Workspace for source and SARIF report output.
   params:
   - name: TRIVY_IMAGE
-    # Custom image with vulnerability DB pre-baked — no download on first run.
-    # Rebuild periodically to refresh the DB (weekly or monthly).
-    # See dependencies/tekton/task/trivy-db/Dockerfile
     default: docker.io/nkanyezisolutions/trivy-db:latest
     description: |
       Trivy scanner image to use. Default is a custom image with the
@@ -68,23 +62,17 @@ spec:
       SARIF_OUTPUT="$(workspaces.manifest-dir.path)/trivy-report.sarif"
 
       # ── DB cache ───────────────────────────────────────────────────────
-      # TRIVY_CACHE_DIR is set in the baked image to /trivy-db where the
-      # DB was pre-downloaded at image build time. --skip-db-update and
-      # --skip-java-db-update prevent any network calls during the scan.
-      # If using the upstream trivy image, remove these flags.
+      # TRIVY_CACHE_DIR is set in the baked image to /trivy-db.
+      # --skip-db-update prevents any network calls during the scan.
       CACHE_DIR="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy}"
       echo "Trivy cache dir: $CACHE_DIR"
-
       echo "Running trivy scan on $(params.IMAGE_PATH)"
 
-      # ── SARIF scan ─────────────────────────────────────────────────────
-      # --scanners vuln          : vulnerability scanning only (no secrets/misconfig)
-      # --skip-db-update         : use pre-baked DB, no download
-      # --skip-java-db-update    : skip 861MB Java DB entirely
-      # --timeout 10m            : generous timeout for large images
+      # ── SARIF scan — for structured report output ──────────────────────
       trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
+        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
@@ -93,20 +81,30 @@ spec:
         --output "$SARIF_OUTPUT" \
         $(params.IMAGE_PATH)
 
-      # ── Table scan (human-readable log output) ─────────────────────────
-      trivy image \
+      # ── Table scan — capture output for count extraction ───────────────
+      # Trivy table output includes a summary line:
+      #   Total: 175 (HIGH: 149, CRITICAL: 26)
+      # Extract counts from this line — more reliable than SARIF level
+      # fields which vary across Trivy versions.
+      SCAN_OUTPUT=$(trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
+        --skip-java-db-update \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
         --timeout 10m \
-        $(params.IMAGE_PATH)
+        $(params.IMAGE_PATH) 2>&1)
 
-      # ── Extract counts from SARIF ──────────────────────────────────────
-      # SARIF severity mapping: error=CRITICAL, warning=HIGH
-      critical=$(grep -o '"level":"error"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
-      high=$(grep -o '"level":"warning"' "$SARIF_OUTPUT" | wc -l | tr -d ' ')
+      echo "$SCAN_OUTPUT"
+
+      # ── Extract counts from table summary line ─────────────────────────
+      critical=$(echo "$SCAN_OUTPUT" | grep -oE 'CRITICAL: [0-9]+' | grep -oE '[0-9]+$' | tail -1)
+      high=$(echo "$SCAN_OUTPUT" | grep -oE 'HIGH: [0-9]+' | grep -oE '[0-9]+$' | tail -1)
+
+      # Default to 0 if not found (clean image with no findings)
+      critical=${critical:-0}
+      high=${high:-0}
       total=$((critical + high))
 
       echo "CRITICAL: $critical"

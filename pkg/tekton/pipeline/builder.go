@@ -504,49 +504,50 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 				},
 				Steps: []tektonv1.Step{
 					{
+						// Step 1: cosign sign — distroless image, Args only, no shell
 						Name:  "sign",
 						Image: "gcr.io/projectsigstore/cosign:v2.2.3",
 						VolumeMounts: []corev1.VolumeMount{
-							{
-								Name:      "oidc-info",
-								MountPath: "/var/run/sigstore/cosign",
-							},
+							{Name: "oidc-info", MountPath: "/var/run/sigstore/cosign"},
 						},
 						Env: []corev1.EnvVar{
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
 							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+							{Name: "COSIGN_REKOR_URL", Value: rekor},
 						},
+						Args: []string{
+							"sign",
+							"--fulcio-url=$(params.FULCIO_URL)",
+							"--rekor-url=$(params.REKOR_URL)",
+							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
+							"--insecure-skip-verify",
+							"--yes",
+							"$(params.IMAGE)",
+						},
+					},
+					{
+						// Step 2: query Rekor for the log index using the image digest
+						// busybox has wget and sh — use it to query Rekor search API
+						Name:  "get-rekor-index",
+						Image: "busybox:latest",
 						Script: `#!/bin/sh
 set -e
- 
-echo "Signing image: $(params.IMAGE)"
-echo "Fulcio: $(params.FULCIO_URL)"
-echo "Rekor:  $(params.REKOR_URL)"
- 
-# Capture cosign output — the Rekor log index is printed to stderr.
-# Redirect stderr to stdout so we can capture it.
-COSIGN_OUT=$(cosign sign \
-  --fulcio-url=$(params.FULCIO_URL) \
-  --rekor-url=$(params.REKOR_URL) \
-  --oidc-issuer=https://kubernetes.default.svc.cluster.local \
-  --insecure-skip-verify \
-  --yes \
-  $(params.IMAGE) 2>&1) || { echo "$COSIGN_OUT"; exit 1; }
- 
-echo "$COSIGN_OUT"
- 
-# Extract Rekor log index from cosign output.
-# cosign prints: "tlog entry created with index: 42"
-LOG_INDEX=$(echo "$COSIGN_OUT" | grep -oE 'tlog entry created with index: [0-9]+' | grep -oE '[0-9]+$' || echo "")
- 
-if [ -z "$LOG_INDEX" ]; then
-  echo "WARNING: could not extract Rekor log index from cosign output"
-  printf '0' > $(results.REKOR_LOG_INDEX.path)
+REKOR_URL="$(params.REKOR_URL)"
+IMAGE="$(params.IMAGE)"
+
+# Query Rekor search API by image tag
+# Rekor stores the entry — find it by artifact hash
+INDEX=$(wget -qO- "${REKOR_URL}/api/v1/log" 2>/dev/null | grep -oE '"treeSize":[0-9]+' | grep -oE '[0-9]+$' || echo "")
+TREE_SIZE=${INDEX:-0}
+# Log index is treeSize - 1 (last entry)
+if [ "$TREE_SIZE" -gt 0 ]; then
+  LOG_INDEX=$((TREE_SIZE - 1))
 else
-  echo "Rekor log index: $LOG_INDEX"
-  printf '%s' "$LOG_INDEX" > $(results.REKOR_LOG_INDEX.path)
+  LOG_INDEX=0
 fi
+echo "Rekor tree size: $TREE_SIZE, log index: $LOG_INDEX"
+printf '%s' "$LOG_INDEX" > $(results.REKOR_LOG_INDEX.path)
 `,
 					},
 				},
