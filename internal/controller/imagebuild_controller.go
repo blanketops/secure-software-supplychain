@@ -22,6 +22,7 @@ import (
 	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -378,5 +379,11 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&supplychainv1alpha1.ImageBuild{}).
 		Owns(&tektonv1.PipelineRun{}).
+		Owns(&tektonv1.Task{}).
+		Owns(&tektonv1.TaskRun{}).
+		Owns(&tektonv1.Pipeline{}).
+		Owns(&triggersv1beta1.EventListener{}).
+		Owns(&triggersv1beta1.TriggerBinding{}).
+		Owns(&triggersv1beta1.TriggerTemplate{}).
 		Complete(r)
 }
