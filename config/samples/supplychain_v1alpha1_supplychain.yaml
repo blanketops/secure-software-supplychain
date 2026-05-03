@@ -21,7 +21,7 @@ spec:
     attest: true
     sonarQube:
       #serverURL: http://sonarqube-sonarqube.secure-software-supply-chain-supply-chain.svc.cluster.local:9000 #deployed
-      serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000
+      serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token
       projectKey: ntlaletsi70_for-kaniko-app
 
