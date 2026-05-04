@@ -395,4 +395,4 @@ This operator is one component of the BlanketOps platform:
 | Webhook Automation | GitHubWebhook CR: auto-register → push → pipeline fires |
 | Signing Verification | Verify signed image with cosign + Rekor transparency log |
 
-*See [`demo/`](demo/) for scripts and tape files.*
+*See [`demo/`](demo/) for scripts and tape files.*# secure-software-supplychain
