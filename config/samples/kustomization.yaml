@@ -1,6 +1,5 @@
 ## Append samples of your project ##
 resources:
-- supplychain_v1alpha1_secretsstore.yaml
 - supplychain_v1alpha1_supplychain.yaml
 #- supplychain_v1alpha1_imagebuild.yaml
 - supplychain_v1alpha1_signingrole.yaml

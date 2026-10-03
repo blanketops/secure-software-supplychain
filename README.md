@@ -156,11 +156,16 @@ make deploy IMG=blanketops/supply-chain-controller:latest
 ### 4. Apply samples
 
 ```bash
+# The ClusterSecretStore holds real credentials, so it is kept outside the repo.
+kubectl apply -f ~/supplychain_v1alpha1_secretsstore.yaml
+
 kubectl apply -k config/samples
 ```
 
-This applies:
-- `ClusterSecretStore` (ESO fake provider with credentials)
+The `ClusterSecretStore` must be named `secure-software-supply-chain-store` (ESO fake provider, keys under
+`/supplychain/...`).
+
+`config/samples` applies:
 - `SupplyChain` CR
 - `GitHubWebhook` CR
 - `SupplyChainPolicy` CR, and the role its `supply-chain-policy-runner` ServiceAccount needs
