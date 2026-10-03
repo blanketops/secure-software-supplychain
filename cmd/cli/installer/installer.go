@@ -144,6 +144,23 @@ var installOrder = []step{
 		},
 	},
 	{
+		// Admission side of signing: serves the ClusterImagePolicy and
+		// TrustRoot CRDs that SupplyChainPolicy renders. It only enforces in
+		// namespaces labelled policy.sigstore.dev/include=true.
+		Name:  "Policy Controller",
+		Paths: []string{"dependencies/sigstore/policy-controller"},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for Policy Controller to be ready...")
+			waitSp.start()
+			if err := i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", 3*time.Minute); err != nil {
+				waitSp.fail("Policy Controller not ready")
+				return err
+			}
+			waitSp.succeed("Policy Controller ready")
+			return nil
+		},
+	},
+	{
 		Name:  "Tekton Dashboard",
 		Paths: []string{"dependencies/tekton/dashboard"},
 	},
@@ -212,6 +229,7 @@ var statusChecks = []struct {
 	{Namespace: "fulcio-system", Deployment: "fulcio-server", Label: "Fulcio"},
 	{Namespace: "rekor-system", Deployment: "rekor-server", Label: "Rekor"},
 	{Namespace: "tekton-chains", Deployment: "tekton-chains-controller", Label: "Tekton Chains"},
+	{Namespace: "cosign-system", Deployment: "policy-controller-webhook", Label: "Policy Controller"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-dashboard", Label: "Tekton Dashboard"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},

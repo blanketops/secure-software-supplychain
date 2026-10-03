@@ -1,0 +1,13 @@
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChainPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: secure-software-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: for-kaniko-app
+spec:
+  # Image, signer identity, sigstore endpoints and trust anchors all come from
+  # the SupplyChain and the blanketops-sigstore-roots ConfigMap.
+  supplyChainRef:
+    name: for-kaniko-app
+  mode: enforce

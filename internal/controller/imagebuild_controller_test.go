@@ -36,9 +36,9 @@ func newImageBuild(name, supplyChainName, revision, sha string) *supplychainv1al
 			Labels: map[string]string{
 				"blanketops.dev/supply-chain": supplyChainName,
 				"blanketops.dev/triggered-by": "github-push",
-				"blanketops.dev/repo":         "ntlaletsi70/for-kaniko-app",
 			},
 			Annotations: map[string]string{
+				"blanketops.dev/repo-full-name": "ntlaletsi70/for-kaniko-app",
 				"blanketops.dev/git-commit-sha": sha,
 				"blanketops.dev/git-repo-url":   "git@github.com:ntlaletsi70/for-kaniko-app.git",
 			},
@@ -182,7 +182,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 			Expect(found.Labels["blanketops.dev/triggered-by"]).To(Equal("github-push"))
 			Expect(found.Labels["blanketops.dev/supply-chain"]).To(Equal("for-kaniko-app"))
-			Expect(found.Labels["blanketops.dev/repo"]).To(Equal("ntlaletsi70/for-kaniko-app"))
+			Expect(found.Annotations["blanketops.dev/repo-full-name"]).To(Equal("ntlaletsi70/for-kaniko-app"))
 			Expect(found.Annotations["blanketops.dev/git-commit-sha"]).To(Equal("abc1234567890"))
 			Expect(found.Annotations["blanketops.dev/git-repo-url"]).To(Equal("git@github.com:ntlaletsi70/for-kaniko-app.git"))
 			Expect(found.Spec.ImageTag).To(Equal("abc1234567890"))

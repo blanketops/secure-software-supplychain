@@ -38,7 +38,6 @@ const (
 	stepSign               = "sign-image-cosign"
 	stepAttest             = "attest-image-rekor-fulcio"
 	stepGrafeas            = "publish-metadata-grafeas"
-	sigstoreRootsConfigMap = "blanketops-sigstore-roots"
 	sigstoreRootsMountPath = "/etc/sigstore"
 	workspaceShared        = "shared-data"
 	workspaceSSHCreds      = "ssh-creds"
@@ -274,10 +273,7 @@ func gitCloneTask() tektonv1.PipelineTask {
 }
 
 func authFulcioTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
-	fulcio := "https://fulcio.sigstore.dev"
-	if sc.Spec.Signing != nil && sc.Spec.Signing.FulcioURL != "" {
-		fulcio = sc.Spec.Signing.FulcioURL
-	}
+	fulcio := signing.EndpointsFor(sc).FulcioURL
 
 	return tektonv1.PipelineTask{
 		Name:     stepAuthFulcio,
@@ -439,16 +435,7 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 }
 
 func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
-	fulcio := "https://fulcio.sigstore.dev"
-	rekor := "https://rekor.sigstore.dev"
-	if sc.Spec.Signing != nil {
-		if sc.Spec.Signing.FulcioURL != "" {
-			fulcio = sc.Spec.Signing.FulcioURL
-		}
-		if sc.Spec.Signing.RekorURL != "" {
-			rekor = sc.Spec.Signing.RekorURL
-		}
-	}
+	endpoints := signing.EndpointsFor(sc)
 
 	return tektonv1.PipelineTask{
 		Name:     stepSign,
@@ -495,7 +482,7 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 						VolumeSource: corev1.VolumeSource{
 							ConfigMap: &corev1.ConfigMapVolumeSource{
 								LocalObjectReference: corev1.LocalObjectReference{
-									Name: sigstoreRootsConfigMap,
+									Name: signing.RootsConfigMap,
 								},
 							},
 						},
@@ -517,15 +504,15 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
 							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
-							{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/fulcio-root.pem"},
-							{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/rekor.pub"},
-							{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/ctfe.pub"},
+							{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsFulcioKey},
+							{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/" + signing.RootsRekorKey},
+							{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsCTLogKey},
 						},
 						Args: []string{
 							"sign",
 							"--fulcio-url=$(params.FULCIO_URL)",
 							"--rekor-url=$(params.REKOR_URL)",
-							"--oidc-issuer=https://kubernetes.default.svc.cluster.local",
+							"--oidc-issuer=" + signing.KubernetesOIDCIssuer,
 							"--yes",
 							"$(params.IMAGE)@$(params.DIGEST)",
 						},
@@ -536,8 +523,8 @@ func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
 			{Name: "DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
-			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: fulcio}},
-			{Name: "REKOR_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: rekor}},
+			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.FulcioURL}},
+			{Name: "REKOR_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.RekorURL}},
 		},
 	}
 }

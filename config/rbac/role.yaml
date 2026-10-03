@@ -1,26 +1,140 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: manager-role
 rules:
-- apiGroups: ["supplychain.blanketops.dev"]
-  resources: ["supplychains","supplychains/status","supplychains/finalizers","imagebuilds","imagebuilds/status","imagebuilds/finalizers","imagebuildresults","imagebuildresults/status","imagebuildresults/finalizers","imagesignatures","imagesignatures/status","imagesignatures/finalizers","githubwebhooks","githubwebhooks/status","githubwebhooks/finalizers"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: ["tekton.dev"]
-  resources: ["tasks","pipelineruns","pipelines","taskruns"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: ["triggers.tekton.dev"]
-  resources: ["eventlisteners","triggerbindings","triggertemplates"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: ["external-secrets.io"]
-  resources: ["externalsecrets"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: ["networking.k8s.io"]
-  resources: ["ingresses"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: [""]
-  resources: ["serviceaccounts","serviceaccounts/token","secrets","events","configmaps"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: ["authorization.k8s.io"]
-  resources: ["subjectaccessreviews"]
-  verbs: ["create"]
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - events
+  - secrets
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy.sigstore.dev
+  resources:
+  - clusterimagepolicies
+  - trustroots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - supplychain.blanketops.dev
+  resources:
+  - githubwebhooks
+  - imagebuildresults
+  - imagebuilds
+  - imagesignatures
+  - supplychainpolicies
+  - supplychains
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - supplychain.blanketops.dev
+  resources:
+  - githubwebhooks/finalizers
+  - imagebuildresults/finalizers
+  - imagebuilds/finalizers
+  - imagesignatures/finalizers
+  - supplychainpolicies/finalizers
+  - supplychains/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - supplychain.blanketops.dev
+  resources:
+  - githubwebhooks/status
+  - imagebuildresults/status
+  - imagebuilds/status
+  - imagesignatures/status
+  - supplychainpolicies/status
+  - supplychains/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - tekton.dev
+  resources:
+  - pipelineruns
+  - pipelines
+  - taskruns
+  - tasks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - eventlisteners
+  - triggerbindings
+  - triggertemplates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

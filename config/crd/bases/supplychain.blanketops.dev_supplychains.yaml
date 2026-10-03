@@ -109,6 +109,11 @@ spec:
               signing:
                 description: Signing defines Sigstore signing configuration
                 properties:
+                  ctLogURL:
+                    default: https://ctfe.sigstore.dev
+                    description: CTLogURL is the certificate transparency log Fulcio
+                      writes to
+                    type: string
                   fulcioURL:
                     default: https://fulcio.sigstore.dev
                     description: FulcioURL is the Fulcio OIDC certificate authority

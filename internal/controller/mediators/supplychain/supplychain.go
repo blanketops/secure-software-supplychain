@@ -151,10 +151,7 @@ func (m *Mediator) EstablishSigningContext(
 		saName = "default"
 	}
 
-	fulcioURL := "https://fulcio.sigstore.dev"
-	if sc.Spec.Signing != nil && sc.Spec.Signing.FulcioURL != "" {
-		fulcioURL = sc.Spec.Signing.FulcioURL
-	}
+	fulcioURL := signing.EndpointsFor(sc).FulcioURL
 
 	log.Info("establishing signing context",
 		"serviceAccount", saName,

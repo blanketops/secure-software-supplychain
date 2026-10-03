@@ -127,6 +127,10 @@ type SigningSpec struct {
 	// +kubebuilder:default="https://rekor.sigstore.dev"
 	RekorURL string `json:"rekorURL,omitempty"`
 
+	// CTLogURL is the certificate transparency log Fulcio writes to
+	// +kubebuilder:default="https://ctfe.sigstore.dev"
+	CTLogURL string `json:"ctLogURL,omitempty"`
+
 	// OIDCIssuer is the OIDC issuer for keyless signing
 	// +kubebuilder:default="https://oauth2.sigstore.dev/auth"
 	OIDCIssuer string `json:"oidcIssuer,omitempty"`

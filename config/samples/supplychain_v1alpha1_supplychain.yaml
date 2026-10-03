@@ -31,4 +31,5 @@ spec:
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local
+    ctLogURL: http://ctlog.ctlog-system.svc/fulcio
   serviceAccountName: supply-chain-runner

@@ -50,7 +50,11 @@ var _ = Describe("GitHubWebhook Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: supplychainv1alpha1.GitHubWebhookSpec{
+						Repository:     "ntlaletsi70/for-kaniko-app",
+						SupplyChainRef: supplychainv1alpha1.LocalObjectRef{Name: "for-kaniko-app"},
+						HookURL:        "https://smee.io/test-channel",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -64,6 +68,16 @@ var _ = Describe("GitHubWebhook Controller", func() {
 
 			By("Cleanup the specific resource instance GitHubWebhook")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+
+			By("Reconciling the deletion so the finalizer is released")
+			controllerReconciler := &GitHubWebhookReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")

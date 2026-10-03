@@ -191,17 +191,25 @@ var _ = Describe("SupplyChain Controller", func() {
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			_, reconcileErr := r.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "for-kaniko-app-duplicate",
 					Namespace: namespace,
 				},
-			})
+			}
+			// The first pass only adds the finalizer and requeues.
+			_, reconcileErr := r.Reconcile(ctx, req)
+			Expect(reconcileErr).NotTo(HaveOccurred())
+
 			// Reconciler should return an error for the duplicate repo
+			_, reconcileErr = r.Reconcile(ctx, req)
 			Expect(reconcileErr).To(HaveOccurred())
 			Expect(reconcileErr.Error()).To(ContainSubstring("one SupplyChain per repository is law"))
 
-			_ = k8sClient.Delete(ctx, duplicate)
+			// Delete, then reconcile once more so the finalizer is released.
+			Expect(k8sClient.Delete(ctx, duplicate)).To(Succeed())
+			_, reconcileErr = r.Reconcile(ctx, req)
+			Expect(reconcileErr).NotTo(HaveOccurred())
 		}
 	})
 })

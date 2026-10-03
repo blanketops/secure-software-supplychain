@@ -118,7 +118,7 @@ supplychain install
 This applies all platform dependencies in order:
 - MetalLB (LoadBalancer support for kind)
 - Tekton Pipelines, Triggers, Interceptors, Chains, Dashboard, Tasks, Results
-- Sigstore (Fulcio, Rekor)
+- Sigstore (Fulcio, Rekor, Policy Controller)
 - Grafeas
 - NGINX Ingress Controller
 - SonarQube
@@ -246,6 +246,7 @@ spec:
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local
+    ctLogURL: http://ctlog.ctlog-system.svc/fulcio
 ```
 
 ### GitHubWebhook CR
@@ -315,6 +316,44 @@ cosign verify \
   docker.io/nkanyezisolutions/for-kaniko-app:<sha>
 ```
 
+### Enforce the signature at admission (SupplyChainPolicy)
+
+`SupplyChainPolicy` is the admission side of a `SupplyChain`. It renders one sigstore
+[policy-controller](https://docs.sigstore.dev/policy-controller/overview/) `TrustRoot` and one
+`ClusterImagePolicy`, both named `<namespace>-<name>`, so only images signed by that SupplyChain are admitted.
+
+```yaml
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChainPolicy
+metadata:
+  name: for-kaniko-app
+spec:
+  supplyChainRef:
+    name: for-kaniko-app
+  mode: enforce   # or warn
+```
+
+Nothing else is declared, because it is already known:
+
+| Policy input | Source |
+|---|---|
+| Image glob | `SupplyChain.spec.image` (`registry/name**`) |
+| Signer identity | `SupplyChain.spec.serviceAccountName` + the cluster OIDC issuer |
+| Fulcio / Rekor / CT log URLs | `SupplyChain.spec.signing` |
+| Fulcio root, Rekor key, CT log key | `blanketops-sigstore-roots` ConfigMap in the same namespace |
+
+`supplychain install` installs policy-controller into `cosign-system`. It only enforces in namespaces
+labelled `policy.sigstore.dev/include=true`, so nothing is checked until you opt a namespace in:
+
+```bash
+kubectl label namespace <workload-namespace> policy.sigstore.dev/include=true
+```
+
+```bash
+kubectl get supplychainpolicies -n default
+kubectl get clusterimagepolicies,trustroots
+```
+
 ### CLI commands
 
 ```bash
@@ -353,7 +392,7 @@ supplychain uninstall
 
 `supplychain.blanketops.dev/v1alpha1`
 
-**Resources:** `SupplyChain`, `GitHubWebhook`, `ImageBuild`, `ImageSignature`, `ImageBuildResult`
+**Resources:** `SupplyChain`, `GitHubWebhook`, `ImageBuild`, `ImageSignature`, `ImageBuildResult`, `SupplyChainPolicy`
 
 ---
 

@@ -57,12 +57,15 @@ type ImageBuildReconciler struct {
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagesignatures,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuildresults/finalizers,verbs=update
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagesignatures/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagesignatures/finalizers,verbs=update
 // +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns;pipelines;taskruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=external-secrets.io,resources=externalsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+
 func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues(
 		"controller", "imagebuild",
