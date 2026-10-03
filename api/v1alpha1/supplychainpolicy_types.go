@@ -39,6 +39,16 @@ type SupplyChainPolicySpec struct {
 	// +optional
 	Mode string `json:"mode,omitempty"`
 
+	// serviceAccountName is the ServiceAccount this policy is rendered on behalf
+	// of. Before anything is rendered it must pass three SubjectAccessReviews:
+	// it can read the SupplyChain (scope), it may declare policy for it
+	// (intent), and it may produce the admission policies (output). The
+	// controller creates the ServiceAccount; granting it those permissions is
+	// left to an administrator.
+	// +kubebuilder:default="supply-chain-policy-runner"
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
 	// signers are the keyless identities whose signature and authorization
 	// attestation are accepted; any one of them is enough. Each must hold a
 	// Fulcio certificate chaining to the trust root.
@@ -86,6 +96,39 @@ type PolicyRekor struct {
 	URL string `json:"url"`
 }
 
+// AuthorizationProof is the API server's answer to one SubjectAccessReview.
+type AuthorizationProof struct {
+	// principal is the identity that was reviewed.
+	Principal string `json:"principal"`
+	// group is the API group of the resource.
+	// +optional
+	Group string `json:"group,omitempty"`
+	// resource is the resource the action targets.
+	Resource string `json:"resource"`
+	// verb is the action.
+	Verb string `json:"verb"`
+	// allowed is the API server's verdict.
+	Allowed bool `json:"allowed"`
+	// reason is the API server's explanation, if it gave one.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// evaluatedAt is when the review was performed.
+	EvaluatedAt metav1.Time `json:"evaluatedAt"`
+}
+
+// PolicyAuthorization holds the three proofs of the policy's ServiceAccount.
+type PolicyAuthorization struct {
+	// scope: the ServiceAccount can read the SupplyChain it sets policy for.
+	// +optional
+	Scope *AuthorizationProof `json:"scope,omitempty"`
+	// intent: the ServiceAccount may declare admission policy for it.
+	// +optional
+	Intent *AuthorizationProof `json:"intent,omitempty"`
+	// output: the ServiceAccount may produce the admission policies.
+	// +optional
+	Output *AuthorizationProof `json:"output,omitempty"`
+}
+
 // SignerIdentity is a signer as it appears in a Fulcio certificate.
 type SignerIdentity struct {
 	// issuer is the OIDC issuer in the certificate.
@@ -124,6 +167,11 @@ type SupplyChainPolicyStatus struct {
 	// images are the image globs the ClusterImagePolicies apply to.
 	// +optional
 	Images []string `json:"images,omitempty"`
+
+	// authorization is the outcome of the three SubjectAccessReviews for the
+	// policy's ServiceAccount, as of the last reconcile.
+	// +optional
+	Authorization *PolicyAuthorization `json:"authorization,omitempty"`
 
 	// signers are the identities the policy accepts, as resolved from the spec
 	// and the SupplyChain.

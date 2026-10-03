@@ -12,6 +12,12 @@ spec:
   supplyChainRef:
     name: for-kaniko-app
 
+  # The ServiceAccount the policy is rendered on behalf of. Nothing is rendered
+  # until it passes three SubjectAccessReviews: scope (get supplychains),
+  # intent (create supplychainpolicies) and output (create
+  # clusterimagepolicies). Grant them with supplychain_v1alpha1_policyrole.yaml.
+  serviceAccountName: supply-chain-policy-runner
+
   # enforce rejects an image that fails verification; warn admits it with a
   # warning.
   mode: enforce

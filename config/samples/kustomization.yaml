@@ -9,5 +9,6 @@ resources:
 #- supplychain_v1alpha1_imagesignature.yaml
 #- supplychain_v1alpha1_imagebuildresult.yaml
 - supplychain_v1alpha1_githubwebhook.yaml
+- supplychain_v1alpha1_policyrole.yaml
 - supplychain_v1alpha1_supplychainpolicy.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

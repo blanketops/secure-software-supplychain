@@ -68,6 +68,7 @@ func verifySupplyChainPolicy() {
 		for _, args := range [][]string{
 			{"delete", "supplychainpolicy", policyName, "-n", policyNamespace, "--ignore-not-found", "--timeout=1m"},
 			{"delete", "supplychain", policyName, "-n", policyNamespace, "--ignore-not-found", "--timeout=1m"},
+			{"delete", "clusterrole,clusterrolebinding", "scp-e2e-policy-runner", "--ignore-not-found"},
 			{"delete", "ns", policyNamespace, workloadNamespace, "--ignore-not-found", "--wait=false"},
 		} {
 			_, _ = utils.Run(exec.Command("kubectl", args...))
@@ -100,6 +101,34 @@ data:
 %[7]s
   %[8]s: |
 %[9]s
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: scp-e2e-policy-runner
+rules:
+- apiGroups: ["supplychain.blanketops.dev"]
+  resources: ["supplychains"]
+  verbs: ["get"]
+- apiGroups: ["supplychain.blanketops.dev"]
+  resources: ["supplychainpolicies"]
+  verbs: ["create"]
+- apiGroups: ["policy.sigstore.dev"]
+  resources: ["clusterimagepolicies"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: scp-e2e-policy-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: scp-e2e-policy-runner
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-policy-runner
+  namespace: %[1]s
 ---
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChain
@@ -159,6 +188,15 @@ spec:
 		unsignedRegistry + "/" + unsignedName + "**",
 		signing.ServiceAccountIdentity(policyNamespace, "supply-chain-runner"),
 		"http://rekor-server.rekor-system.svc.cluster.local",
+	}))
+
+	By("checking the policy's ServiceAccount passed its three authorization checks")
+	proofs, err := kubectl("get", "supplychainpolicy", policyName, "-n", policyNamespace,
+		"-o", "jsonpath={.status.authorization.scope.allowed} {.status.authorization.intent.allowed} "+
+			"{.status.authorization.output.allowed} {.status.authorization.output.principal}")
+	Expect(err).NotTo(HaveOccurred())
+	Expect(strings.Fields(proofs)).To(Equal([]string{
+		"true", "true", "true", "system:serviceaccount:" + policyNamespace + ":supply-chain-policy-runner",
 	}))
 
 	By("checking policy-controller accepted the rendered resources")

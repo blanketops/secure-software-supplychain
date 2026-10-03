@@ -31,6 +31,9 @@ type AuthzProof struct {
 	// Principal is the full SA identity (system:serviceaccount:ns:name).
 	Principal string `json:"principal"`
 
+	// Group is the API group of the resource.
+	Group string `json:"group,omitempty"`
+
 	// Resource is the Kubernetes resource being acted on (e.g. "imagebuildruns").
 	Resource string `json:"resource"`
 
@@ -71,13 +74,44 @@ func VerifyAuthorization(
 	resource string,
 	verb string,
 ) (*AuthzProof, error) {
+	return Verify(ctx, c, serviceAccount, namespace, Check{Group: SupplyChainGroup, Resource: resource, Verb: verb})
+}
+
+// SupplyChainGroup is the API group of this operator's resources.
+const SupplyChainGroup = "supplychain.blanketops.dev"
+
+// Check is one action a ServiceAccount must be authorized for.
+type Check struct {
+	Group    string
+	Resource string
+	Verb     string
+	// ClusterScoped is set for resources that live outside any namespace; the
+	// review is then not limited to the ServiceAccount's namespace.
+	ClusterScoped bool
+}
+
+// Verify performs the SubjectAccessReview for one Check. The returned proof is
+// set whenever the API server answered, including when it answered "denied",
+// in which case the error says so.
+func Verify(
+	ctx context.Context,
+	c client.Client,
+	serviceAccount string,
+	namespace string,
+	check Check,
+) (*AuthzProof, error) {
+	resource, verb := check.Resource, check.Verb
+	reviewNamespace := namespace
+	if check.ClusterScoped {
+		reviewNamespace = ""
+	}
 	sar := &authv1.SubjectAccessReview{
 		Spec: authv1.SubjectAccessReviewSpec{
 			User: Principal(namespace, serviceAccount),
 			ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: namespace,
+				Namespace: reviewNamespace,
 				Verb:      verb,
-				Group:     "supplychain.blanketops.dev",
+				Group:     check.Group,
 				Resource:  resource,
 			},
 		},
@@ -89,6 +123,7 @@ func VerifyAuthorization(
 
 	proof := &AuthzProof{
 		Principal:   sar.Spec.User,
+		Group:       check.Group,
 		Resource:    resource,
 		Verb:        verb,
 		Allowed:     sar.Status.Allowed,

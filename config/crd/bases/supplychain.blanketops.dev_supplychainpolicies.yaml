@@ -89,6 +89,16 @@ spec:
                 required:
                 - url
                 type: object
+              serviceAccountName:
+                default: supply-chain-policy-runner
+                description: |-
+                  serviceAccountName is the ServiceAccount this policy is rendered on behalf
+                  of. Before anything is rendered it must pass three SubjectAccessReviews:
+                  it can read the SupplyChain (scope), it may declare policy for it
+                  (intent), and it may produce the admission policies (output). The
+                  controller creates the ServiceAccount; granting it those permissions is
+                  left to an administrator.
+                type: string
               signers:
                 description: |-
                   signers are the keyless identities whose signature and authorization
@@ -139,6 +149,114 @@ spec:
           status:
             description: status defines the observed state of SupplyChainPolicy
             properties:
+              authorization:
+                description: |-
+                  authorization is the outcome of the three SubjectAccessReviews for the
+                  policy's ServiceAccount, as of the last reconcile.
+                properties:
+                  intent:
+                    description: 'intent: the ServiceAccount may declare admission
+                      policy for it.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                  output:
+                    description: 'output: the ServiceAccount may produce the admission
+                      policies.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                  scope:
+                    description: 'scope: the ServiceAccount can read the SupplyChain
+                      it sets policy for.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                type: object
               clusterImagePolicies:
                 description: |-
                   clusterImagePolicies are the names of the managed policy.sigstore.dev

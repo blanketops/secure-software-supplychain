@@ -28,3 +28,6 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Local ClusterSecretStore with real credentials (ESO fake provider) — never commit
+config/samples/supplychain_v1alpha1_secretsstore.yaml

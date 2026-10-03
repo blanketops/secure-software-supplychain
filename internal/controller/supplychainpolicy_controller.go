@@ -49,6 +49,10 @@ const (
 
 	conditionReady = "Ready"
 
+	// authorizationRetry is how long to wait before reviewing a denied
+	// ServiceAccount again. RBAC changes do not trigger a reconcile.
+	authorizationRetry = 30 * time.Second
+
 	// policyControllerRetry is how long to wait before looking for the
 	// policy-controller CRDs again. They cannot be watched before they exist.
 	policyControllerRetry = time.Minute
@@ -66,6 +70,8 @@ type SupplyChainPolicyReconciler struct {
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=supplychains,verbs=get;list;watch
 // +kubebuilder:rbac:groups=policy.sigstore.dev,resources=clusterimagepolicies;trustroots,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 // Reconcile renders the policy-controller TrustRoot and ClusterImagePolicies for
 // a SupplyChainPolicy from the SupplyChain it references and the sigstore
@@ -86,6 +92,19 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err := r.Update(ctx, &scp); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// The policy's ServiceAccount must prove it is authorized before anything
+	// is rendered. A denial leaves what is already rendered in place: losing
+	// authorization should not quietly stop enforcement.
+	if err := r.ensureServiceAccount(ctx, &scp); err != nil {
+		return ctrl.Result{}, err
+	}
+	authorization, err := policy.Authorize(ctx, r.Client, &scp)
+	scp.Status.Authorization = authorization
+	if err != nil {
+		log.Info("ServiceAccount is not authorized to render the policy", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: authorizationRetry}, r.notReady(ctx, &scp, "AuthorizationDenied", err.Error())
 	}
 
 	var sc supplychainv1alpha1.SupplyChain
@@ -151,6 +170,32 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	scp.Status.CTLogURL = rendered.Endpoints.CTLogURL
 	return ctrl.Result{}, r.setReady(ctx, &scp, metav1.ConditionTrue, "PolicyApplied",
 		"TrustRoot and ClusterImagePolicies are in sync with the SupplyChain")
+}
+
+// ensureServiceAccount creates the policy's ServiceAccount if it is missing.
+// What it may do is granted separately, by an administrator.
+func (r *SupplyChainPolicyReconciler) ensureServiceAccount(
+	ctx context.Context,
+	scp *supplychainv1alpha1.SupplyChainPolicy,
+) error {
+	name := scp.Spec.ServiceAccountName
+	if name == "" {
+		name = policy.DefaultServiceAccount
+	}
+	var existing corev1.ServiceAccount
+	err := r.Get(ctx, types.NamespacedName{Namespace: scp.Namespace, Name: name}, &existing)
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	logf.FromContext(ctx).Info("Creating ServiceAccount", "name", name)
+	err = r.Create(ctx, &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: scp.Namespace,
+			Labels:    map[string]string{"blanketops.dev/managed": "true"},
+		},
+	})
+	return client.IgnoreAlreadyExists(err)
 }
 
 // apply creates or updates one rendered resource. It refuses to touch a

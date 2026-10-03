@@ -30,6 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -108,7 +109,35 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		})).To(Succeed())
 	}
 
+	// grantPolicyRunner gives the policy's ServiceAccount what its three proofs
+	// require, as config/samples/supplychain_v1alpha1_policyrole.yaml does.
+	grantPolicyRunner := func() {
+		const name = "policy-test-runner"
+		role := &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Rules: []rbacv1.PolicyRule{
+				{APIGroups: []string{policy.ScopeCheck.Group}, Resources: []string{policy.ScopeCheck.Resource},
+					Verbs: []string{policy.ScopeCheck.Verb}},
+				{APIGroups: []string{policy.IntentCheck.Group}, Resources: []string{policy.IntentCheck.Resource},
+					Verbs: []string{policy.IntentCheck.Verb}},
+				{APIGroups: []string{policy.OutputCheck.Group}, Resources: []string{policy.OutputCheck.Resource},
+					Verbs: []string{policy.OutputCheck.Verb}},
+			},
+		}
+		binding := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: name},
+			Subjects: []rbacv1.Subject{{
+				Kind: rbacv1.ServiceAccountKind, Name: policy.DefaultServiceAccount, Namespace: namespace,
+			}},
+		}
+		for _, obj := range []client.Object{role, binding} {
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, obj))).To(Succeed())
+		}
+	}
+
 	BeforeEach(func() {
+		grantPolicyRunner()
 		Expect(k8sClient.Create(ctx, &supplychainv1alpha1.SupplyChainPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyName, Namespace: namespace},
 			Spec: supplychainv1alpha1.SupplyChainPolicySpec{
@@ -132,6 +161,44 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		} {
 			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, obj))).To(Succeed())
 		}
+	})
+
+	It("renders nothing for a ServiceAccount that is not authorized", func() {
+		createSupplyChain()
+		createRoots()
+
+		var scp supplychainv1alpha1.SupplyChainPolicy
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		scp.Spec.ServiceAccountName = "unprivileged-policy-runner"
+		Expect(k8sClient.Update(ctx, &scp)).To(Succeed())
+
+		result, err := reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(authorizationRetry))
+
+		ready := readyCondition()
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Reason).To(Equal("AuthorizationDenied"))
+
+		By("recording all three denials")
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		authorization := scp.Status.Authorization
+		Expect(authorization).NotTo(BeNil())
+		for _, proof := range []*supplychainv1alpha1.AuthorizationProof{
+			authorization.Scope, authorization.Intent, authorization.Output,
+		} {
+			Expect(proof).NotTo(BeNil())
+			Expect(proof.Allowed).To(BeFalse())
+			Expect(proof.Principal).To(Equal("system:serviceaccount:default:unprivileged-policy-runner"))
+		}
+
+		By("creating the ServiceAccount but no policy")
+		var sa corev1.ServiceAccount
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Namespace: namespace, Name: "unprivileged-policy-runner",
+		}, &sa)).To(Succeed())
+		_, err = getRendered(policy.ClusterImagePolicyGVK)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
 	It("reports a missing SupplyChain", func() {
@@ -170,6 +237,16 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 			Subject: "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner",
 		}}))
 		Expect(scp.Status.RekorURL).To(Equal("http://rekor-server.rekor-system.svc.cluster.local"))
+
+		By("recording the three proofs of the policy's ServiceAccount")
+		Expect(scp.Spec.ServiceAccountName).To(Equal(policy.DefaultServiceAccount))
+		proofs := scp.Status.Authorization
+		Expect(proofs).NotTo(BeNil())
+		Expect(proofs.Scope.Allowed).To(BeTrue())
+		Expect(proofs.Intent.Allowed).To(BeTrue())
+		Expect(proofs.Output.Allowed).To(BeTrue())
+		Expect(proofs.Output.Group).To(Equal("policy.sigstore.dev"))
+		Expect(proofs.Output.Principal).To(Equal("system:serviceaccount:default:supply-chain-policy-runner"))
 
 		trustRoot, err := getRendered(policy.TrustRootGVK)
 		Expect(err).NotTo(HaveOccurred())

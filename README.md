@@ -163,6 +163,7 @@ This applies:
 - `ClusterSecretStore` (ESO fake provider with credentials)
 - `SupplyChain` CR
 - `GitHubWebhook` CR
+- `SupplyChainPolicy` CR, and the role its `supply-chain-policy-runner` ServiceAccount needs
 
 ---
 
@@ -327,11 +328,25 @@ spec:
   supplyChainRef:
     name: for-kaniko-app
   mode: enforce   # or warn
+  serviceAccountName: supply-chain-policy-runner   # default
   signers:        # optional: defaults to the SupplyChain's ServiceAccount
   - serviceAccountName: supply-chain-runner
   rekor:          # optional: defaults to the SupplyChain's signing.rekorURL
     url: http://rekor-server.rekor-system.svc.cluster.local
 ```
+
+Like a build, a policy is gated on three SubjectAccessReviews. Its ServiceAccount (`supply-chain-policy-runner`
+by default, created by the controller) must pass all three before anything is rendered, and the verdicts are
+recorded in `status.authorization`:
+
+| Proof | Resource | Verb | Meaning |
+|-------|----------|------|---------|
+| Scope | `supplychains` | `get` | SA can read the SupplyChain it sets policy for |
+| Intent | `supplychainpolicies` | `create` | SA may declare admission policy for it |
+| Output | `clusterimagepolicies` (`policy.sigstore.dev`) | `create` | SA may produce the admission policies |
+
+Grant them with `config/samples/supplychain_v1alpha1_policyrole.yaml`. Until then the policy stays
+`Ready=False` with reason `AuthorizationDenied`; policies that were already rendered are left in place.
 
 Only `supplyChainRef` is required; `signers` and `rekor` default to what the SupplyChain signs with, and
 `status` reports the resolved signers and the Fulcio, Rekor and CT log endpoints. State `signers` to pin them
