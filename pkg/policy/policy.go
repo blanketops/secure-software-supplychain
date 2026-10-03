@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
@@ -50,24 +51,34 @@ var (
 
 // Rendered is the desired policy-controller state for one SupplyChainPolicy.
 type Rendered struct {
-	TrustRoot          *unstructured.Unstructured
-	ClusterImagePolicy *unstructured.Unstructured
+	TrustRoot *unstructured.Unstructured
+	// ClusterImagePolicies must all pass for an image to be admitted: one
+	// requires the signature, the other the authorization attestation.
+	// policy-controller ORs the authorities inside a policy and ANDs the
+	// policies, so the two requirements cannot share one policy.
+	ClusterImagePolicies []*unstructured.Unstructured
 	// Images are the globs the ClusterImagePolicy applies to.
 	Images []string
 	// Identity is the certificate subject the images must be signed by.
 	Identity string
 }
 
-// ResourceName is the name shared by the TrustRoot and ClusterImagePolicy of a
-// SupplyChainPolicy. Both are cluster-scoped, so the namespace is part of it.
+// ResourceName is the name of the TrustRoot and the signature
+// ClusterImagePolicy of a SupplyChainPolicy, and the prefix of its other
+// policies. All are cluster-scoped, so the namespace is part of it.
 func ResourceName(scp *supplyv1alpha1.SupplyChainPolicy) string {
 	return scp.Namespace + "-" + scp.Name
 }
 
-// Render builds the TrustRoot and ClusterImagePolicy for scp from the
+// Render builds the TrustRoot and ClusterImagePolicies for scp from the
 // SupplyChain it references and the trust anchors in roots (the data of
 // signing.RootsConfigMap). The sigstore endpoints and keys are stated once, in
-// the TrustRoot; the ClusterImagePolicy only points at it.
+// the TrustRoot; the policies only point at it.
+//
+// Together the policies admit an image only if the SupplyChain's
+// ServiceAccount signed it keylessly (Fulcio cert chained to the trust root,
+// embedded CT log proof, Rekor entry) and attested that it passed the three
+// authorization checks before signing.
 func Render(
 	scp *supplyv1alpha1.SupplyChainPolicy,
 	sc *supplyv1alpha1.SupplyChain,
@@ -97,36 +108,65 @@ func Render(
 	for _, glob := range images {
 		globs = append(globs, map[string]any{"glob": glob})
 	}
-	policySpec := map[string]any{
-		"mode":   mode,
-		"images": globs,
-		"authorities": []any{
-			map[string]any{
-				"name": "supply-chain",
-				"keyless": map[string]any{
-					"url":          endpoints.FulcioURL,
-					"trustRootRef": name,
-					"identities": []any{
-						map[string]any{
-							"issuer":  signing.KubernetesOIDCIssuer,
-							"subject": identity,
-						},
+	// authority is the keyless signer both policies trust.
+	authority := func(authorityName string) map[string]any {
+		return map[string]any{
+			"name": authorityName,
+			"keyless": map[string]any{
+				"url":          endpoints.FulcioURL,
+				"trustRootRef": name,
+				"identities": []any{
+					map[string]any{
+						"issuer":  signing.KubernetesOIDCIssuer,
+						"subject": identity,
 					},
 				},
-				"ctlog": map[string]any{
-					"url":          endpoints.RekorURL,
-					"trustRootRef": name,
-				},
+			},
+			"ctlog": map[string]any{
+				"url":          endpoints.RekorURL,
+				"trustRootRef": name,
+			},
+		}
+	}
+	policySpec := func(authority map[string]any) map[string]any {
+		return map[string]any{"mode": mode, "images": globs, "authorities": []any{authority}}
+	}
+
+	authorized := authority("authorization")
+	authorized["attestations"] = []any{
+		map[string]any{
+			"name":          "authorization",
+			"predicateType": signing.AuthorizationPredicateType,
+			"policy": map[string]any{
+				"type": "cue",
+				"data": authorizationCUE(authz.Principal(sc.Namespace, serviceAccount)),
 			},
 		},
 	}
 
 	return &Rendered{
-		TrustRoot:          newObject(TrustRootGVK, name, scp, trustRootSpec),
-		ClusterImagePolicy: newObject(ClusterImagePolicyGVK, name, scp, policySpec),
-		Images:             images,
-		Identity:           identity,
+		TrustRoot: newObject(TrustRootGVK, name, scp, trustRootSpec),
+		ClusterImagePolicies: []*unstructured.Unstructured{
+			newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature"))),
+			newObject(ClusterImagePolicyGVK, name+"-authorization", scp, policySpec(authorized)),
+		},
+		Images:   images,
+		Identity: identity,
 	}, nil
+}
+
+// authorizationCUE is the policy the authorization attestation must satisfy:
+// all three proofs present, for this ServiceAccount, and allowed.
+func authorizationCUE(principal string) string {
+	proof := func(field string, check signing.AuthorizationCheck) string {
+		return fmt.Sprintf("\t%s: {principal: %q, resource: %q, verb: %q, allowed: true}\n",
+			field, principal, check.Resource, check.Verb)
+	}
+	return fmt.Sprintf("predicateType: %q\npredicate: {\n", signing.AuthorizationPredicateType) +
+		proof("scope", signing.ScopeCheck) +
+		proof("intent", signing.IntentCheck) +
+		proof("output", signing.OutputCheck) +
+		"}\n"
 }
 
 // ImageGlob matches every tag and digest of the image a SupplyChain pushes.

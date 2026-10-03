@@ -67,7 +67,7 @@ type SupplyChainPolicyReconciler struct {
 // +kubebuilder:rbac:groups=policy.sigstore.dev,resources=clusterimagepolicies;trustroots,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
-// Reconcile renders the policy-controller TrustRoot and ClusterImagePolicy for
+// Reconcile renders the policy-controller TrustRoot and ClusterImagePolicies for
 // a SupplyChainPolicy from the SupplyChain it references and the sigstore
 // trust anchors in its namespace.
 func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -121,8 +121,9 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, r.notReady(ctx, &scp, "TrustAnchorsInvalid", err.Error())
 	}
 
-	// TrustRoot first: the ClusterImagePolicy refers to it.
-	for _, desired := range []*unstructured.Unstructured{rendered.TrustRoot, rendered.ClusterImagePolicy} {
+	// TrustRoot first: the ClusterImagePolicies refer to it.
+	policyNames := make([]string, 0, len(rendered.ClusterImagePolicies))
+	for _, desired := range append([]*unstructured.Unstructured{rendered.TrustRoot}, rendered.ClusterImagePolicies...) {
 		result, err := r.apply(ctx, &scp, desired)
 		if meta.IsNoMatchError(err) {
 			log.Info("Could not find policy-controller CRDs", "kind", desired.GetKind())
@@ -138,12 +139,15 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	for _, p := range rendered.ClusterImagePolicies {
+		policyNames = append(policyNames, p.GetName())
+	}
 	scp.Status.TrustRoot = rendered.TrustRoot.GetName()
-	scp.Status.ClusterImagePolicy = rendered.ClusterImagePolicy.GetName()
+	scp.Status.ClusterImagePolicies = policyNames
 	scp.Status.Images = rendered.Images
 	scp.Status.Identity = rendered.Identity
 	return ctrl.Result{}, r.setReady(ctx, &scp, metav1.ConditionTrue, "PolicyApplied",
-		"TrustRoot and ClusterImagePolicy are in sync with the SupplyChain")
+		"TrustRoot and ClusterImagePolicies are in sync with the SupplyChain")
 }
 
 // apply creates or updates one rendered resource. It refuses to touch a
@@ -194,27 +198,31 @@ func (r *SupplyChainPolicyReconciler) deleteRendered(
 	scp *supplychainv1alpha1.SupplyChainPolicy,
 ) error {
 	log := logf.FromContext(ctx)
-	// ClusterImagePolicy first, so it never references a missing TrustRoot.
+	// ClusterImagePolicies first, so none references a missing TrustRoot. They
+	// are found by label, which also catches any left from an older rendering.
 	for _, gvk := range []schema.GroupVersionKind{policy.ClusterImagePolicyGVK, policy.TrustRootGVK} {
-		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(gvk)
-		err := r.Get(ctx, types.NamespacedName{Name: policy.ResourceName(scp)}, obj)
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		err := r.List(ctx, list, client.MatchingLabels{
+			policy.LabelPolicyNamespace: scp.Namespace,
+			policy.LabelPolicyName:      scp.Name,
+		})
+		if meta.IsNoMatchError(err) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if !policy.OwnedBy(obj, scp) {
-			continue
+		for i := range list.Items {
+			obj := &list.Items[i]
+			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+				return err
+			}
+			log.Info("Deleted policy resource", "kind", gvk.Kind, "name", obj.GetName())
 		}
-		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
-			return err
-		}
-		log.Info("Deleted policy resource", "kind", gvk.Kind, "name", obj.GetName())
 	}
 	scp.Status.TrustRoot = ""
-	scp.Status.ClusterImagePolicy = ""
+	scp.Status.ClusterImagePolicies = nil
 	scp.Status.Images = nil
 	scp.Status.Identity = ""
 	return nil

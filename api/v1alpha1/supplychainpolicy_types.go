@@ -44,7 +44,7 @@ type SupplyChainPolicyStatus struct {
 	// conditions represent the current state of the SupplyChainPolicy resource.
 	//
 	// Condition types:
-	// - "Ready": the TrustRoot and ClusterImagePolicy are in sync with the SupplyChain
+	// - "Ready": the TrustRoot and ClusterImagePolicies are in sync with the SupplyChain
 	//
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
@@ -60,15 +60,18 @@ type SupplyChainPolicyStatus struct {
 	// +optional
 	TrustRoot string `json:"trustRoot,omitempty"`
 
-	// clusterImagePolicy is the name of the managed policy.sigstore.dev ClusterImagePolicy.
+	// clusterImagePolicies are the names of the managed policy.sigstore.dev
+	// ClusterImagePolicies. An image must satisfy all of them: one requires the
+	// keyless signature, the other the authorization attestation.
 	// +optional
-	ClusterImagePolicy string `json:"clusterImagePolicy,omitempty"`
+	ClusterImagePolicies []string `json:"clusterImagePolicies,omitempty"`
 
-	// images are the image globs the ClusterImagePolicy applies to.
+	// images are the image globs the ClusterImagePolicies apply to.
 	// +optional
 	Images []string `json:"images,omitempty"`
 
-	// identity is the Fulcio certificate subject the images must be signed by.
+	// identity is the Fulcio certificate subject the images must be signed and
+	// attested by.
 	// +optional
 	Identity string `json:"identity,omitempty"`
 }
@@ -79,13 +82,14 @@ type SupplyChainPolicyStatus struct {
 // +kubebuilder:printcolumn:name="SupplyChain",type=string,JSONPath=`.spec.supplyChainRef.name`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
-// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.clusterImagePolicy`
+// +kubebuilder:printcolumn:name="Signer",type=string,JSONPath=`.status.identity`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // SupplyChainPolicy is the Schema for the supplychainpolicies API.
 // It is the admission side of a SupplyChain: one SupplyChainPolicy renders a
-// sigstore policy-controller TrustRoot and ClusterImagePolicy that only admit
-// images built and signed by the referenced SupplyChain.
+// sigstore policy-controller TrustRoot and the ClusterImagePolicies that only
+// admit images the referenced SupplyChain signed keylessly and attested as
+// authorized.
 type SupplyChainPolicy struct {
 	metav1.TypeMeta `json:",inline"`
 

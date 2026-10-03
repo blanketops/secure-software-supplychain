@@ -84,7 +84,7 @@ func EstablishSigningContext(
 	// 1. SAR scope — can this SA see the chain definition?
 	// -------------------------------------------------------------------------
 	scopeProof, err := authz.VerifyAuthorization(
-		ctx, c, serviceAccount, namespace, "supplychains", "get",
+		ctx, c, serviceAccount, namespace, ScopeCheck.Resource, ScopeCheck.Verb,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scope authorization failed: %w", err)
@@ -94,7 +94,7 @@ func EstablishSigningContext(
 	// 2. SAR intent — can this SA initiate a build execution?
 	// -------------------------------------------------------------------------
 	intentProof, err := authz.VerifyAuthorization(
-		ctx, c, serviceAccount, namespace, "imagebuilds", "create",
+		ctx, c, serviceAccount, namespace, IntentCheck.Resource, IntentCheck.Verb,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("intent authorization failed: %w", err)
@@ -104,7 +104,7 @@ func EstablishSigningContext(
 	// 3. SAR output — can this SA produce signing records?
 	// -------------------------------------------------------------------------
 	outputProof, err := authz.VerifyAuthorization(
-		ctx, c, serviceAccount, namespace, "imagesignatures", "create",
+		ctx, c, serviceAccount, namespace, OutputCheck.Resource, OutputCheck.Verb,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("output authorization failed: %w", err)

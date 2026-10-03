@@ -6,6 +6,10 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: for-kaniko-app
 spec:
+  # Admits the SupplyChain's image only if its ServiceAccount signed it
+  # keylessly (Fulcio cert, CT log proof, Rekor entry) and attested the three
+  # authorization proofs (scope, intent, output).
+  #
   # Image, signer identity, sigstore endpoints and trust anchors all come from
   # the SupplyChain and the blanketops-sigstore-roots ConfigMap.
   supplyChainRef:

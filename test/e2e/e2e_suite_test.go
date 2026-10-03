@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -61,6 +63,7 @@ var _ = BeforeSuite(func() {
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
 
 	setupCertManager()
+	installDependencies()
 })
 
 var _ = AfterSuite(func() {
@@ -98,4 +101,69 @@ func teardownCertManager() {
 
 	By("uninstalling CertManager")
 	utils.UninstallCertManager()
+}
+
+// installDependencies installs what the manager cannot run without: the Tekton
+// CRDs its controllers watch, and policy-controller, which serves the resources
+// SupplyChainPolicy renders.
+//
+// Only the CRDs are taken from the Tekton releases. Nothing here runs a
+// pipeline, and the Tekton images would only queue ahead of the ones the tests
+// wait for.
+func installDependencies() {
+	for _, release := range []string{
+		"dependencies/tekton/pipelines/release.yaml",
+		"dependencies/tekton/triggers/core/release.yaml",
+	} {
+		By("installing the CRDs of " + release)
+		crds, err := customResourceDefinitions(release)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred())
+		// Server-side: the Tekton CRDs are too large for a client-side apply annotation.
+		cmd := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
+		cmd.Stdin = strings.NewReader(crds)
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the CRDs of "+release)
+	}
+
+	By("installing policy-controller")
+	cmd := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts",
+		"-f", "dependencies/sigstore/policy-controller")
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install policy-controller")
+
+	By("waiting for the dependency CRDs to be established")
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Established", "crd", "--all", "--timeout=2m")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Dependency CRDs were not established")
+
+	By("waiting for policy-controller to be available")
+	// Not "rollout status": that gives up at the Deployment's progress deadline,
+	// which a slow image pull can exceed.
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Available", "deployment/policy-controller-webhook",
+		"-n", "cosign-system", "--timeout=15m")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "policy-controller did not become available")
+}
+
+// customResourceDefinitions returns only the CRD documents of a multi-document
+// manifest, relative to the project root.
+func customResourceDefinitions(manifest string) (string, error) {
+	dir, err := utils.GetProjectDir()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, manifest))
+	if err != nil {
+		return "", err
+	}
+	var crds []string
+	for _, doc := range strings.Split(string(data), "\n---") {
+		if strings.Contains(doc, "\nkind: CustomResourceDefinition\n") {
+			crds = append(crds, doc)
+		}
+	}
+	if len(crds) == 0 {
+		return "", fmt.Errorf("no CustomResourceDefinition found in %s", manifest)
+	}
+	return strings.Join(crds, "\n---"), nil
 }

@@ -48,6 +48,12 @@ type AuthzProof struct {
 	EvaluatedAt time.Time `json:"evaluatedAt"`
 }
 
+// Principal is the Kubernetes username of a ServiceAccount, as recorded in
+// AuthzProof.Principal.
+func Principal(namespace, serviceAccount string) string {
+	return fmt.Sprintf("system:serviceaccount:%s:%s", namespace, serviceAccount)
+}
+
 // VerifyAuthorization performs a SubjectAccessReview for the given principal
 // before any signing or pipeline work begins.
 //
@@ -67,7 +73,7 @@ func VerifyAuthorization(
 ) (*AuthzProof, error) {
 	sar := &authv1.SubjectAccessReview{
 		Spec: authv1.SubjectAccessReviewSpec{
-			User: fmt.Sprintf("system:serviceaccount:%s:%s", namespace, serviceAccount),
+			User: Principal(namespace, serviceAccount),
 			ResourceAttributes: &authv1.ResourceAttributes{
 				Namespace: namespace,
 				Verb:      verb,

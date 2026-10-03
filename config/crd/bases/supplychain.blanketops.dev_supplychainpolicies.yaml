@@ -26,8 +26,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - jsonPath: .status.clusterImagePolicy
-      name: Policy
+    - jsonPath: .status.identity
+      name: Signer
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -38,8 +39,9 @@ spec:
         description: |-
           SupplyChainPolicy is the Schema for the supplychainpolicies API.
           It is the admission side of a SupplyChain: one SupplyChainPolicy renders a
-          sigstore policy-controller TrustRoot and ClusterImagePolicy that only admit
-          images built and signed by the referenced SupplyChain.
+          sigstore policy-controller TrustRoot and the ClusterImagePolicies that only
+          admit images the referenced SupplyChain signed keylessly and attested as
+          authorized.
         properties:
           apiVersion:
             description: |-
@@ -86,16 +88,20 @@ spec:
           status:
             description: status defines the observed state of SupplyChainPolicy
             properties:
-              clusterImagePolicy:
-                description: clusterImagePolicy is the name of the managed policy.sigstore.dev
-                  ClusterImagePolicy.
-                type: string
+              clusterImagePolicies:
+                description: |-
+                  clusterImagePolicies are the names of the managed policy.sigstore.dev
+                  ClusterImagePolicies. An image must satisfy all of them: one requires the
+                  keyless signature, the other the authorization attestation.
+                items:
+                  type: string
+                type: array
               conditions:
                 description: |-
                   conditions represent the current state of the SupplyChainPolicy resource.
 
                   Condition types:
-                  - "Ready": the TrustRoot and ClusterImagePolicy are in sync with the SupplyChain
+                  - "Ready": the TrustRoot and ClusterImagePolicies are in sync with the SupplyChain
 
                   The status of each condition is one of True, False, or Unknown.
                 items:
@@ -157,11 +163,12 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               identity:
-                description: identity is the Fulcio certificate subject the images
-                  must be signed by.
+                description: |-
+                  identity is the Fulcio certificate subject the images must be signed and
+                  attested by.
                 type: string
               images:
-                description: images are the image globs the ClusterImagePolicy applies
+                description: images are the image globs the ClusterImagePolicies apply
                   to.
                 items:
                   type: string

@@ -37,9 +37,11 @@ const (
 	stepSign               = "sign-image-cosign"
 	stepAttest             = "attest-image-rekor-fulcio"
 	sigstoreRootsMountPath = "/etc/sigstore"
-	workspaceShared        = "shared-data"
-	workspaceSSHCreds      = "ssh-creds"
-	workspaceDockerConfig  = "dockerconfig"
+	// Steps of one task share /workspace.
+	authorizationPredicatePath = "/workspace/authorization-predicate.json"
+	workspaceShared            = "shared-data"
+	workspaceSSHCreds          = "ssh-creds"
+	workspaceDockerConfig      = "dockerconfig"
 	// workspaceTrivyCache removed — Trivy DB is now baked into the scanner image.
 	// See dependencies/tekton/task/trivy-db/Dockerfile.
 )
@@ -118,7 +120,7 @@ func BuildPipelineRun(
 					{Name: "git-url", Type: tektonv1.ParamTypeString},
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
-				Tasks:   buildTaskList(sc, ib, imageRef),
+				Tasks:   buildTaskList(sc, ib, imageRef, sigCtx),
 				Results: buildResults(sc),
 			},
 			Params: tektonv1.Params{
@@ -183,6 +185,7 @@ func buildTaskList(
 	sc *supplyv1alpha1.SupplyChain,
 	ib *supplyv1alpha1.ImageBuild,
 	imageRef string,
+	sigCtx *signing.RunSigningContext,
 ) []tektonv1.PipelineTask {
 	tasks := []tektonv1.PipelineTask{}
 
@@ -223,7 +226,7 @@ func buildTaskList(
 	// Step 7: sign (Cosign + Fulcio) — image is clean, now sign it
 	// Must sign before attesting — you attest to a signed image
 	if sc.Spec.Steps.Sign {
-		tasks = append(tasks, signTask(sc, imageRef, last))
+		tasks = append(tasks, signTask(sc, imageRef, last, sigCtx))
 		last = stepSign
 	}
 
@@ -425,9 +428,73 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 	}
 }
 
-func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
+func signTask(
+	sc *supplyv1alpha1.SupplyChain,
+	imageRef, runAfter string,
+	sigCtx *signing.RunSigningContext,
+) tektonv1.PipelineTask {
 	endpoints := signing.EndpointsFor(sc)
 
+	task := signImageTask(imageRef, runAfter, endpoints)
+	if sigCtx == nil {
+		return task
+	}
+	// The proofs were collected before the run started; without them there is
+	// nothing to attest, and the signature alone still stands.
+	predicate, err := sigCtx.AuthorizationPredicateJSON()
+	if err != nil {
+		return task
+	}
+	withAuthorizationAttestation(&task, predicate)
+	return task
+}
+
+// withAuthorizationAttestation extends the sign task so the three
+// authorization proofs are attested to the image by the same keyless identity
+// that signed it. SupplyChainPolicy requires this attestation at admission.
+func withAuthorizationAttestation(task *tektonv1.PipelineTask, predicate string) {
+	spec := &task.TaskSpec.TaskSpec
+	sign := spec.Steps[len(spec.Steps)-1]
+
+	spec.Params = append(spec.Params, tektonv1.ParamSpec{Name: "AUTHORIZATION_PREDICATE", Type: tektonv1.ParamTypeString})
+	task.Params = append(task.Params, tektonv1.Param{
+		Name:  "AUTHORIZATION_PREDICATE",
+		Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: predicate},
+	})
+
+	spec.Steps = append(spec.Steps,
+		tektonv1.Step{
+			// The cosign image has no shell, so the predicate file is written
+			// by a step that does. It goes through the environment so the JSON
+			// is never interpreted by the shell.
+			Name:  "write-authorization-predicate",
+			Image: "busybox:1.36",
+			Env:   []corev1.EnvVar{{Name: "PREDICATE", Value: "$(params.AUTHORIZATION_PREDICATE)"}},
+			Script: `#!/bin/sh
+set -e
+printf '%s' "${PREDICATE}" > ` + authorizationPredicatePath + `
+`,
+		},
+		tektonv1.Step{
+			Name:         "attest-authorization",
+			Image:        sign.Image,
+			VolumeMounts: sign.VolumeMounts,
+			Env:          sign.Env,
+			Args: []string{
+				"attest",
+				"--predicate=" + authorizationPredicatePath,
+				"--type=" + signing.AuthorizationPredicateType,
+				"--fulcio-url=$(params.FULCIO_URL)",
+				"--rekor-url=$(params.REKOR_URL)",
+				"--oidc-issuer=" + signing.KubernetesOIDCIssuer,
+				"--yes",
+				"$(params.IMAGE)@$(params.DIGEST)",
+			},
+		},
+	)
+}
+
+func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
 		Name:     stepSign,
 		RunAfter: after(runAfter),

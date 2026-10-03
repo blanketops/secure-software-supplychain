@@ -734,6 +734,11 @@ func (in *SupplyChainPolicyStatus) DeepCopyInto(out *SupplyChainPolicyStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ClusterImagePolicies != nil {
+		in, out := &in.ClusterImagePolicies, &out.ClusterImagePolicies
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Images != nil {
 		in, out := &in.Images, &out.Images
 		*out = make([]string, len(*in))

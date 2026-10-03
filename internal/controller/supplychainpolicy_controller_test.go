@@ -67,11 +67,12 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		supplyChainName = "policy-test-chain"
 		policyName      = "policy-test"
 		renderedName    = namespace + "-" + policyName
+		// authorizationName is the ClusterImagePolicy requiring the attestation.
+		authorizationName = renderedName + "-authorization"
 	)
 
 	ctx := context.Background()
 	policyKey := types.NamespacedName{Name: policyName, Namespace: namespace}
-	renderedKey := types.NamespacedName{Name: renderedName}
 
 	reconcilePolicy := func() (reconcile.Result, error) {
 		r := &SupplyChainPolicyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
@@ -82,10 +83,13 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
 		return meta.FindStatusCondition(scp.Status.Conditions, conditionReady)
 	}
-	getRendered := func(gvk schema.GroupVersionKind) (*unstructured.Unstructured, error) {
+	getNamed := func(gvk schema.GroupVersionKind, name string) (*unstructured.Unstructured, error) {
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk)
-		return obj, k8sClient.Get(ctx, renderedKey, obj)
+		return obj, k8sClient.Get(ctx, types.NamespacedName{Name: name}, obj)
+	}
+	getRendered := func(gvk schema.GroupVersionKind) (*unstructured.Unstructured, error) {
+		return getNamed(gvk, renderedName)
 	}
 	createSupplyChain := func() {
 		sc := forKanikoAppSupplyChain(supplyChainName)
@@ -159,7 +163,7 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
 		Expect(meta.IsStatusConditionTrue(scp.Status.Conditions, conditionReady)).To(BeTrue())
 		Expect(scp.Status.TrustRoot).To(Equal(renderedName))
-		Expect(scp.Status.ClusterImagePolicy).To(Equal(renderedName))
+		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{renderedName, authorizationName}))
 		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/nkanyezisolutions/policy-test-app**"))
 		Expect(scp.Status.Identity).To(Equal(
 			"https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner"))
@@ -179,6 +183,14 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		ref, _, _ := unstructured.NestedString(authorities[0].(map[string]any), "keyless", "trustRootRef")
 		Expect(ref).To(Equal(renderedName))
 
+		By("requiring the authorization attestation in a second policy")
+		authorization, err := getNamed(policy.ClusterImagePolicyGVK, authorizationName)
+		Expect(err).NotTo(HaveOccurred())
+		authorities, _, _ = unstructured.NestedSlice(authorization.Object, "spec", "authorities")
+		attestations, _, _ := unstructured.NestedSlice(authorities[0].(map[string]any), "attestations")
+		Expect(attestations).To(HaveLen(1))
+		Expect(attestations[0]).To(HaveKeyWithValue("predicateType", signing.AuthorizationPredicateType))
+
 		By("leaving the resources untouched when nothing changed")
 		_, err = reconcilePolicy()
 		Expect(err).NotTo(HaveOccurred())
@@ -194,6 +206,8 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 			_, err := getRendered(gvk)
 			Expect(apierrors.IsNotFound(err)).To(BeTrue(), gvk.Kind)
 		}
+		_, err = getNamed(policy.ClusterImagePolicyGVK, authorizationName)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
 	It("does not take over a resource it does not own", func() {

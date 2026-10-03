@@ -89,9 +89,18 @@ func TestRender(t *testing.T) {
 	}
 
 	const name = "team-a-app"
-	for _, obj := range []*unstructured.Unstructured{got.TrustRoot, got.ClusterImagePolicy} {
-		if obj.GetName() != name {
-			t.Errorf("%s name = %q, want %q", obj.GetKind(), obj.GetName(), name)
+	if len(got.ClusterImagePolicies) != 2 {
+		t.Fatalf("got %d ClusterImagePolicies, want signature and authorization", len(got.ClusterImagePolicies))
+	}
+	signature, authorization := got.ClusterImagePolicies[0], got.ClusterImagePolicies[1]
+	wantNames := map[*unstructured.Unstructured]string{
+		got.TrustRoot: name,
+		signature:     name,
+		authorization: name + "-authorization",
+	}
+	for obj, want := range wantNames {
+		if obj.GetName() != want {
+			t.Errorf("%s name = %q, want %q", obj.GetKind(), obj.GetName(), want)
 		}
 		if !OwnedBy(obj, scp) {
 			t.Errorf("%s is not labelled as owned by the SupplyChainPolicy", obj.GetKind())
@@ -122,7 +131,7 @@ func TestRender(t *testing.T) {
 		}
 	}
 
-	spec := got.ClusterImagePolicy.Object["spec"].(map[string]any)
+	spec := signature.Object["spec"].(map[string]any)
 	if spec["mode"] != "enforce" {
 		t.Errorf("mode = %v, want enforce by default", spec["mode"])
 	}
@@ -146,6 +155,33 @@ func TestRender(t *testing.T) {
 	if got.Identity != wantSubject {
 		t.Errorf("Identity = %q, want %q", got.Identity, wantSubject)
 	}
+	if _, has := authority["attestations"]; has {
+		t.Error("signature policy also asks for attestations, so a bare signature would not be checked")
+	}
+
+	// The authorization policy trusts the same signer and adds the attestation.
+	authSpec := authorization.Object["spec"].(map[string]any)
+	authAuthority := authSpec["authorities"].([]any)[0].(map[string]any)
+	authIdentity := authAuthority["keyless"].(map[string]any)["identities"].([]any)[0].(map[string]any)
+	if authIdentity["subject"] != wantSubject || authAuthority["ctlog"].(map[string]any)["trustRootRef"] != name {
+		t.Errorf("authorization authority does not match the signer: %v", authAuthority)
+	}
+	attestation := authAuthority["attestations"].([]any)[0].(map[string]any)
+	if attestation["predicateType"] != signing.AuthorizationPredicateType {
+		t.Errorf("predicateType = %v", attestation["predicateType"])
+	}
+	cue := attestation["policy"].(map[string]any)["data"].(string)
+	const principal = "system:serviceaccount:team-a:supply-chain-runner"
+	for _, want := range []string{
+		`predicateType: "` + signing.AuthorizationPredicateType + `"`,
+		`scope: {principal: "` + principal + `", resource: "supplychains", verb: "get", allowed: true}`,
+		`intent: {principal: "` + principal + `", resource: "imagebuilds", verb: "create", allowed: true}`,
+		`output: {principal: "` + principal + `", resource: "imagesignatures", verb: "create", allowed: true}`,
+	} {
+		if !strings.Contains(cue, want) {
+			t.Errorf("authorization policy is missing %q:\n%s", want, cue)
+		}
+	}
 }
 
 func TestRenderMode(t *testing.T) {
@@ -156,8 +192,10 @@ func TestRenderMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := got.ClusterImagePolicy.Object["spec"].(map[string]any)["mode"]; mode != "warn" {
-		t.Errorf("mode = %v, want warn", mode)
+	for _, p := range got.ClusterImagePolicies {
+		if mode := p.Object["spec"].(map[string]any)["mode"]; mode != "warn" {
+			t.Errorf("%s mode = %v, want warn", p.GetName(), mode)
+		}
 	}
 }
 

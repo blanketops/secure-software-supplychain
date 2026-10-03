@@ -86,7 +86,7 @@ Before Fulcio is called, three SubjectAccessReviews are performed against the `s
 | IntentProof | `imagebuilds` | `create` | SA is authorized to initiate a build |
 | OutputProof | `imagesignatures` | `create` | SA is authorized to produce signing records |
 
-All three proofs are embedded in the attestation predicate that Fulcio signs over. This makes the ephemeral cert meaningful — it signs over a complete, API-server-verified authorization story, not just an identity claim.
+After the image is signed, the three proofs are attested to it with `cosign attest` (predicate type `https://blanketops.dev/attestations/authorization/v1`) by the same keyless identity. The signature says who built the image; the attestation says that identity was authorized, per the API server, at build time. `SupplyChainPolicy` requires both at admission.
 
 After all three SARs pass, a short-lived OIDC token is minted from the ServiceAccount and exchanged with Fulcio for an ephemeral signing certificate. The principal and cert PEM are stored on `ImageBuild.Status` for the terminal block to read back after the PipelineRun completes.
 
@@ -314,9 +314,9 @@ cosign verify \
 
 ### Enforce the signature at admission (SupplyChainPolicy)
 
-`SupplyChainPolicy` is the admission side of a `SupplyChain`. It renders one sigstore
-[policy-controller](https://docs.sigstore.dev/policy-controller/overview/) `TrustRoot` and one
-`ClusterImagePolicy`, both named `<namespace>-<name>`, so only images signed by that SupplyChain are admitted.
+`SupplyChainPolicy` is the admission side of a `SupplyChain`. It renders a sigstore
+[policy-controller](https://docs.sigstore.dev/policy-controller/overview/) `TrustRoot` and two
+`ClusterImagePolicies`, so only images that SupplyChain signed and attested are admitted.
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -329,7 +329,17 @@ spec:
   mode: enforce   # or warn
 ```
 
-Nothing else is declared, because it is already known:
+The spec is short because everything else is already known (see the table below). What it enforces is not.
+An image matching the SupplyChain's repository is admitted only if all of this holds:
+
+| Check | Enforced by |
+|---|---|
+| Signed keylessly, with a Fulcio certificate chaining to this cluster's Fulcio root | `<namespace>-<name>` policy + `TrustRoot` |
+| Certificate issued to the SupplyChain's ServiceAccount by the cluster OIDC issuer | `identities` on both policies |
+| Certificate carries a CT log proof, and the signature is recorded in Rekor | `TrustRoot` CT log and Rekor keys |
+| Carries an authorization attestation, signed the same way, in which the ServiceAccount passed all three SubjectAccessReviews (scope, intent, output) | `<namespace>-<name>-authorization` policy |
+
+Where each input comes from:
 
 | Policy input | Source |
 |---|---|
@@ -346,7 +356,7 @@ kubectl label namespace <workload-namespace> policy.sigstore.dev/include=true
 ```
 
 ```bash
-kubectl get supplychainpolicies -n default
+kubectl get supplychainpolicies -n default -o wide
 kubectl get clusterimagepolicies,trustroots
 ```
 
