@@ -16,7 +16,6 @@ limitations under the License.
 package pipeline
 
 import (
-	"strings"
 	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -37,7 +36,6 @@ const (
 	stepTrivy              = "vulnerability-scan-trivy"
 	stepSign               = "sign-image-cosign"
 	stepAttest             = "attest-image-rekor-fulcio"
-	stepGrafeas            = "publish-metadata-grafeas"
 	sigstoreRootsMountPath = "/etc/sigstore"
 	workspaceShared        = "shared-data"
 	workspaceSSHCreds      = "ssh-creds"
@@ -233,13 +231,6 @@ func buildTaskList(
 	// Rekor logs the signature, not the raw image — sign must come first
 	if sc.Spec.Steps.Attest {
 		tasks = append(tasks, attestTask(imageRef, last))
-		last = stepAttest
-	}
-
-	// Step 9: grafeas — publish full metadata report
-	// All gates passed, all attestations recorded — now publish
-	if sc.Spec.Steps.Grafeas != nil {
-		tasks = append(tasks, grafeasTask(sc, imageRef, last))
 	}
 
 	return tasks
@@ -573,24 +564,6 @@ echo "IMAGE_DIGEST=${digest}"
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-		},
-	}
-}
-
-func grafeasTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
-	// Strip protocol — grpcurl needs host:port only. HTTP was 8081, gRPC is 8080.
-	grpcHost := strings.TrimPrefix(sc.Spec.Steps.Grafeas.ServerURL, "https://")
-	grpcHost = strings.TrimPrefix(grpcHost, "http://")
-	grpcHost = strings.Replace(grpcHost, ":8081", ":8080", 1)
-
-	return tektonv1.PipelineTask{
-		Name:     stepGrafeas,
-		RunAfter: after(runAfter),
-		TaskRef:  &tektonv1.TaskRef{Name: "grafeas-publish"},
-		Params: tektonv1.Params{
-			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "GRAFEAS_HOST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: grpcHost}},
-			{Name: "PROJECT_ID", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "blanketops"}},
 		},
 	}
 }

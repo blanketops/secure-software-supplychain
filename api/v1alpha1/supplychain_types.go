@@ -87,9 +87,6 @@ type StepsSpec struct {
 	// Attest enables provenance attestation via Tekton Chains
 	// +kubebuilder:default=true
 	Attest bool `json:"attest,omitempty"`
-	// Grafeas enables artifact metadata publishing to Grafeas
-	// +optional
-	Grafeas *GrafeasSpec `json:"grafeas,omitempty"`
 }
 
 // SonarQubeSpec configures the SonarQube step
@@ -105,15 +102,6 @@ type SonarQubeSpec struct {
 	// ProjectKey is the SonarQube project key (alphanumeric, -, _, ., : only)
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9\-_.:]+$`
 	ProjectKey string `json:"projectKey"`
-}
-
-// GrafeasSpec configures the Grafeas artifact metadata step
-type GrafeasSpec struct {
-	// Enabled toggles this step
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled,omitempty"`
-	// ServerURL is the Grafeas server endpoint
-	ServerURL string `json:"serverURL"`
 }
 
 // SigningSpec configures Sigstore signing (Cosign + Fulcio + Rekor)

@@ -5,7 +5,6 @@ resources:
 - cosignsign.yaml
 - gitclone.yaml
 
-- grafeaspublish.yaml
 - sonarqubescanner.yaml
 - kaniko.yaml
 - tektonchainattest.yaml

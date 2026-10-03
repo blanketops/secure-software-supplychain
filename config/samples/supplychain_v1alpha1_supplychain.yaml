@@ -25,9 +25,6 @@ spec:
       tokenSecretRef: sonarqube-token
       projectKey: ntlaletsi70_for-kaniko-app
 
-    grafeas:
-      #serverURL: http://grafeas.secure-software-supply-chain-supply-chain.svc.cluster.local:8080 #deployed
-      serverURL: http://grafeas.default.svc.cluster.local:8080
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local

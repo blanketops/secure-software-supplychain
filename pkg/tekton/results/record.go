@@ -125,7 +125,6 @@ func (r *Recorder) Record(
 //	vulnerability-scan-trivy: TRIVY_SCAN_SUMMARY, TRIVY_CRITICAL_COUNT,
 //	                           TRIVY_HIGH_COUNT, TRIVY_TOTAL_COUNT, TRIVY_SARIF_PATH
 //	code-scan-sonarqube:    SONAR_GATE_STATUS
-//	publish-metadata-grafeas: GRAFEAS_OCCURRENCE
 func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepResults {
 	r := &supplyv1alpha1.PipelineStepResults{}
 	for _, result := range run.Status.Results {
@@ -156,9 +155,6 @@ func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepRe
 		// SonarQube
 		case "SONAR_GATE_STATUS":
 			r.SonarGateStatus = result.Value.StringVal
-		// Grafeas
-		case "GRAFEAS_OCCURRENCE":
-			r.GrafeasOccurrence = result.Value.StringVal
 		}
 	}
 	return r

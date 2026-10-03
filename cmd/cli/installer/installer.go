@@ -176,10 +176,6 @@ var installOrder = []step{
 		},
 	},
 	{
-		Name:  "Grafeas",
-		Paths: []string{"dependencies/grafeas"},
-	},
-	{
 		Name:  "MetalLB Dependencies",
 		Paths: []string{"dependencies/metallb/setup"},
 	},
@@ -233,7 +229,6 @@ var statusChecks = []struct {
 	{Namespace: "tekton-pipelines", Deployment: "tekton-dashboard", Label: "Tekton Dashboard"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
 	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},
-	{Namespace: "default", Deployment: "grafeas-server", Label: "Grafeas"},
 	{Namespace: "ingress-nginx", Deployment: "ingress-nginx-controller", Label: "NGINX Ingress"},
 }
 

@@ -19,7 +19,7 @@ Neo Tlaletsi
 
 _[INSERT ARCHITECTURE DIAGRAM HERE]_
 
-**Figure 1:** BlanketOps Environments Supply Chain — Git source flows through a `SupplyChain` CR and `ImageBuild` CR into a Tekton PipelineRun. The left column handles build and scan (Buildpacks, SonarQube, Trivy). The right column handles signing, attestation, and metadata publishing (Cosign + Fulcio + Rekor, Tekton Chains, Grafeas). The output is a signed, attested OCI image in the registry.
+**Figure 1:** BlanketOps Environments Supply Chain — Git source flows through a `SupplyChain` CR and `ImageBuild` CR into a Tekton PipelineRun. The left column handles build and scan (Buildpacks, SonarQube, Trivy). The right column handles signing, attestation, and admission (Cosign + Fulcio + Rekor, Tekton Chains, Policy Controller). The output is a signed, attested OCI image in the registry.
 
 ---
 
@@ -34,7 +34,7 @@ This setup will demonstrate the following tools:
 - [**Trivy**](https://aquasecurity.github.io/trivy/): Scans the built image for known vulnerabilities. Configured to fail the pipeline on HIGH and CRITICAL findings.
 - [**Cosign**](https://github.com/sigstore/cosign) + [**Fulcio**](https://github.com/sigstore/fulcio) + [**Rekor**](https://github.com/sigstore/rekor): Signs the image using keyless signing via the public Sigstore infrastructure. No key management required — Fulcio issues a short-lived certificate and Rekor records the signature to a public transparency log.
 - [**Tekton Chains**](https://tekton.dev/docs/chains/): Generates a SLSA provenance attestation for each build, recording what was built, from what source, and by what pipeline.
-- [**Grafeas**](https://grafeas.io/): Publishes artifact metadata and occurrence records for every successful build.
+- [**Policy Controller**](https://docs.sigstore.dev/policy-controller/overview/): Verifies at admission that an image was signed by its supply chain before it is allowed to run.
 - **SupplyChain CR:** The pipeline definition for a repository. One SupplyChain per repository — this is law.
 - **ImageBuild CR:** A single pipeline execution. Create one to trigger a build.
 
@@ -49,7 +49,7 @@ Ensure the following tools are installed:
 - **kubectl:** Command-line tool for managing Kubernetes clusters.
 - **kubebuilder:** Scaffolds the operator project.
 - **Go 1.22+:** Required to build the operator.
-- **Helm:** Deploys Tekton, SonarQube, and Grafeas.
+- **Helm:** Deploys Tekton and SonarQube.
 - **Kind or an existing cluster:** To run the operator locally.
 - **Git:** Clones the demonstration repository.
 
@@ -150,9 +150,6 @@ spec:
       tokenSecretRef:
         name: sonarqube-token
         key: token
-    grafeas:
-      enabled: true
-      serverURL: http://grafeas.secure-software-supplychainsupply-chain.svc.cluster.local:8080
   signing:
     fulcioURL: https://fulcio.sigstore.dev
     rekorURL: https://rekor.sigstore.dev
@@ -226,7 +223,7 @@ cosign verify \
 | **Fulcio**             | A certificate authority for keyless code signing, backed by OIDC identity.                          |
 | **Rekor**              | A public transparency log for signed artifacts. Records every signature immutably.                  |
 | **Tekton Chains**      | A Tekton component that automatically generates SLSA provenance attestations for builds.            |
-| **Grafeas**            | An open artifact metadata API for storing and querying build and security information.              |
+| **Policy Controller**  | A Sigstore admission controller that only admits images whose signatures satisfy a policy.         |
 | **SLSA**               | Supply chain Levels for Software Artifacts — a framework for supply chain security.                 |
 | **SSOT**               | Single Source of Truth — the SupplyChain CR is the authoritative definition of the pipeline.        |
 | **OCI**                | Open Container Initiative — the standard for container image formats and runtimes.                  |
@@ -244,6 +241,6 @@ cosign verify \
 - [Cloud Native Buildpacks](https://buildpacks.io)
 - [Trivy](https://aquasecurity.github.io/trivy)
 - [Tekton Chains](https://tekton.dev/docs/chains)
-- [Grafeas](https://grafeas.io)
+- [Policy Controller](https://github.com/sigstore/policy-controller)
 - [Kubebuilder](https://book.kubebuilder.io)
 - [BlanketOps](https://github.com/blanketops)

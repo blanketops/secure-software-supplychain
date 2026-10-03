@@ -62,10 +62,6 @@ func forKanikoAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 					TokenSecretRef: "sonarqube-token",
 					ProjectKey:     "ntlaletsi70_for-kaniko-app",
 				},
-				Grafeas: &supplychainv1alpha1.GrafeasSpec{
-					Enabled:   true,
-					ServerURL: "http://grafeas.default.svc.cluster.local:8080",
-				},
 			},
 			Signing: &supplychainv1alpha1.SigningSpec{
 				FulcioURL: "http://fulcio-server.fulcio-system.svc.cluster.local",
@@ -152,13 +148,6 @@ var _ = Describe("SupplyChain Controller", func() {
 		Expect(sc.Spec.Steps.SonarQube.ServerURL).To(Equal("http://sonarqube-sonarqube.default.svc.cluster.local:9000"))
 		Expect(sc.Spec.Steps.SonarQube.TokenSecretRef).To(Equal("sonarqube-token"))
 		Expect(sc.Spec.Steps.SonarQube.ProjectKey).To(Equal("ntlaletsi70_for-kaniko-app"))
-	})
-
-	It("should have Grafeas enabled with the correct server URL", func() {
-		var sc supplychainv1alpha1.SupplyChain
-		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
-		Expect(sc.Spec.Steps.Grafeas.Enabled).To(BeTrue())
-		Expect(sc.Spec.Steps.Grafeas.ServerURL).To(Equal("http://grafeas.default.svc.cluster.local:8080"))
 	})
 
 	It("should have the correct Fulcio and Rekor URLs", func() {

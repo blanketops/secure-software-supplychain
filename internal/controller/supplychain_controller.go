@@ -193,7 +193,6 @@ func customTasks(namespace string) []tektonv1.Task {
 		sonarQubeTask(namespace),
 		cosignSignTask(namespace),
 		tektonChainsAttestTask(namespace),
-		grafeasPublishTask(namespace),
 	}
 }
 
@@ -270,42 +269,6 @@ set -e
 digest=$(crane digest $(params.IMAGE))
 echo -n "$(params.IMAGE)" | tee $(results.IMAGE_URL.path)
 echo -n "${digest}" | tee $(results.IMAGE_DIGEST.path)`,
-			}},
-		},
-	}
-}
-
-func grafeasPublishTask(namespace string) tektonv1.Task {
-	return tektonv1.Task{
-		ObjectMeta: metav1.ObjectMeta{Name: "grafeas-publish", Namespace: namespace},
-		Spec: tektonv1.TaskSpec{
-			Params: []tektonv1.ParamSpec{
-				{Name: "IMAGE", Type: tektonv1.ParamTypeString},
-				{Name: "GRAFEAS_HOST", Type: tektonv1.ParamTypeString},
-				{Name: "PROJECT_ID", Type: tektonv1.ParamTypeString},
-			},
-			Steps: []tektonv1.Step{{
-				Name:  "publish",
-				Image: "alpine:latest",
-				Script: `#!/bin/sh
-set -e
-apk add --no-cache git 2>/dev/null
-wget -qO /tmp/grpcurl.tar.gz \
-  https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz
-tar -xzf /tmp/grpcurl.tar.gz -C /usr/local/bin grpcurl
-git clone --quiet --depth=1 --filter=blob:none https://github.com/grafeas/grafeas.git /tmp/grafeas
-git clone --quiet --depth=1 --filter=blob:none https://github.com/googleapis/googleapis.git /tmp/googleapis
-HOST="$(params.GRAFEAS_HOST)"
-PROJECT="$(params.PROJECT_ID)"
-IMAGE="$(params.IMAGE)"
-GRPC="-plaintext -import-path /tmp/grafeas -import-path /tmp/googleapis -proto proto/v1beta1/grafeas.proto"
-grpcurl $GRPC \
-  -d "{\"parent\":\"projects/${PROJECT}\",\"noteId\":\"build\",\"note\":{\"shortDescription\":\"BlanketOps build note\",\"kind\":\"BUILD\",\"build\":{\"builderVersion\":\"secure-software-supplychainv1\"}}}" \
-  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateNote || echo "Note may already exist"
-grpcurl $GRPC \
-  -d "{\"parent\":\"projects/${PROJECT}\",\"occurrence\":{\"resource\":{\"uri\":\"${IMAGE}\"},\"noteName\":\"projects/${PROJECT}/notes/build\",\"kind\":\"BUILD\",\"build\":{\"provenance\":{\"id\":\"$(context.taskRun.name)\",\"projectId\":\"${PROJECT}\",\"builtArtifacts\":[{\"id\":\"${IMAGE}\",\"names\":[\"${IMAGE}\"]}]}}}}" \
-  ${HOST} grafeas.v1beta1.GrafeasV1Beta1/CreateOccurrence
-echo "Metadata published successfully"`,
 			}},
 		},
 	}

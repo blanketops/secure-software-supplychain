@@ -71,13 +71,6 @@ type PipelineStepResults struct {
 	// SonarGateStatus is the SonarQube quality gate result.
 	// +optional
 	SonarGateStatus string `json:"sonarGateStatus,omitempty"`
-
-	// ── Attestation ───────────────────────────────────────────────────────
-
-	// GrafeasOccurrence is the Grafeas occurrence name for this build event.
-	// e.g. projects/blanketops/occurrences/abc123
-	// +optional
-	GrafeasOccurrence string `json:"grafeasOccurrence,omitempty"`
 }
 
 // ImageBuildResultSpec defines the desired state of ImageBuildResult.

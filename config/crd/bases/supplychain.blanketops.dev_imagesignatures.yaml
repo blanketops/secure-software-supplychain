@@ -73,11 +73,6 @@ spec:
                 description: FulcioURL is the Fulcio CA that issued the ephemeral
                   signing certificate.
                 type: string
-              grafeasOccurrence:
-                description: |-
-                  GrafeasOccurrence is the Grafeas occurrence name for this signing event.
-                  e.g. projects/blanketops/occurrences/abc123
-                type: string
               image:
                 description: |-
                   Image is the fully qualified image reference that was signed.

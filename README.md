@@ -24,8 +24,7 @@ GitHub Push
                                                  ├── push-image-docker     (registry push)
                                                  ├── vulnerability-scan-trivy (CVE scan)
                                                  ├── sign-image-cosign     (keyless signing)
-                                                 ├── attest-image-rekor-fulcio (provenance)
-                                                 └── publish-metadata-grafeas  (metadata)
+                                                 └── attest-image-rekor-fulcio (provenance)
 ```
 
 ---
@@ -52,7 +51,7 @@ The pipeline is driven end-to-end by two CRs and a set of Tekton Tasks. The cont
 
 **`ImageSignature`** — the cryptographic audit record. Created before the PipelineRun with `Phase=Pending`, updated to `Phase=Signed` on success. Carries the Fulcio cert reference, principal identity, and Rekor log index.
 
-**`ImageBuildResult`** — the durable execution record. Survives PipelineRun pruning. Captures full pipeline step results: git provenance, image digest, Trivy scan summary, SonarQube gate status, Grafeas occurrence.
+**`ImageBuildResult`** — the durable execution record. Survives PipelineRun pruning. Captures full pipeline step results: git provenance, image digest, Trivy scan summary, SonarQube gate status.
 
 ---
 
@@ -119,7 +118,6 @@ This applies all platform dependencies in order:
 - MetalLB (LoadBalancer support for kind)
 - Tekton Pipelines, Triggers, Interceptors, Chains, Dashboard, Tasks, Results
 - Sigstore (Fulcio, Rekor, Policy Controller)
-- Grafeas
 - NGINX Ingress Controller
 - SonarQube
 
@@ -241,8 +239,6 @@ spec:
       serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000
       tokenSecretRef: sonarqube-token
       projectKey: ntlaletsi70_for-kaniko-app
-    grafeas:
-      serverURL: http://grafeas.grafeas.svc.cluster.local:8080
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local
@@ -418,7 +414,7 @@ This operator is one component of the BlanketOps platform:
 - [Skopeo](https://github.com/containers/skopeo)
 - [Trivy](https://aquasecurity.github.io/trivy)
 - [SonarQube](https://www.sonarqube.org)
-- [Grafeas](https://grafeas.io)
+- [Policy Controller](https://github.com/sigstore/policy-controller)
 - [Kubebuilder](https://book.kubebuilder.io)
 - [External Secrets Operator](https://external-secrets.io)
 - [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)

@@ -54,11 +54,6 @@ type ImageSignatureSpec struct {
 	// ImageBuild is the name of the ImageBuild that produced this signature.
 	// +kubebuilder:validation:Required
 	ImageBuild string `json:"imageBuild"`
-
-	// GrafeasOccurrence is the Grafeas occurrence name for this signing event.
-	// e.g. projects/blanketops/occurrences/abc123
-	// +optional
-	GrafeasOccurrence string `json:"grafeasOccurrence,omitempty"`
 }
 
 // ImageSignatureStatus defines the observed state of ImageSignature.

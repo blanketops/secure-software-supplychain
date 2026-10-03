@@ -55,10 +55,9 @@ func installCmd() *cobra.Command {
 		Long: `Installs all supply chain platform dependencies in the correct order:
   1. MetalLB
   2. Tekton Pipelines, Triggers, Chains, Dashboard, Tasks, Results
-  3. Sigstore (Fulcio, Rekor)
-  4. Grafeas
-  5. NGINX Ingress Controller
-  6. SonarQube
+  3. Sigstore (Fulcio, Rekor, Policy Controller)
+  4. NGINX Ingress Controller
+  5. SonarQube
 
 All manifests are embedded in the binary — no network access required
 beyond connectivity to the Kubernetes API server.

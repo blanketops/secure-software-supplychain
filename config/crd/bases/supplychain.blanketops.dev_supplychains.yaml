@@ -142,19 +142,6 @@ spec:
                     description: Buildpacks enables the Cloud Native Buildpacks build
                       step
                     type: boolean
-                  grafeas:
-                    description: Grafeas enables artifact metadata publishing to Grafeas
-                    properties:
-                      enabled:
-                        default: true
-                        description: Enabled toggles this step
-                        type: boolean
-                      serverURL:
-                        description: ServerURL is the Grafeas server endpoint
-                        type: string
-                    required:
-                    - serverURL
-                    type: object
                   sign:
                     default: true
                     description: Sign enables image signing via Cosign + Sigstore

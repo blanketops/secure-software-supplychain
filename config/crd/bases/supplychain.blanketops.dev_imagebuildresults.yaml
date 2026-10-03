@@ -97,11 +97,6 @@ spec:
                   committerDate:
                     description: CommitterDate is the date of the commit.
                     type: string
-                  grafeasOccurrence:
-                    description: |-
-                      GrafeasOccurrence is the Grafeas occurrence name for this build event.
-                      e.g. projects/blanketops/occurrences/abc123
-                    type: string
                   imageDigest:
                     description: ImageDigest is the content-addressable digest of
                       the built image.

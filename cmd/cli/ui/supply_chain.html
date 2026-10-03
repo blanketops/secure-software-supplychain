@@ -1282,7 +1282,7 @@
       { k: 'failed', l: 'failed' },
     ];
     const PIPE_STEPS = [
-      'git-clone', 'auth-fulcio', 'sonarqube', 'buildah', 'skopeo', 'trivy', 'cosign', 'attest', 'grafeas'
+      'git-clone', 'auth-fulcio', 'sonarqube', 'buildah', 'skopeo', 'trivy', 'cosign', 'attest'
     ];
 
     function pipelineDots(phase) {
@@ -1454,7 +1454,6 @@
         const img = spec.image || spec.imageRef || status.image || '—';
         const principal = status.principalIdentity || spec.principal || '';
         const rekorIdx = status.rekorLogIndex || spec.rekorLogIndex || '';
-        const grafeas = status.grafeasOccurrence || spec.grafeasResourceURL || '';
         const certPEM = status.signingCertPEM || spec.signingCertPEM || '';
         const phaseClass = phase.toLowerCase() === 'signed' ? 'signed' : phase.toLowerCase() === 'failed' ? 'failed' : 'pending';
 
@@ -1465,7 +1464,6 @@
       <div class="sig-pills">
         <span class="sp ${certPEM ? 'ok' : 'no'}">fulcio cert</span>
         <span class="sp ${rekorIdx ? 'ok' : 'no'}">rekor ${rekorIdx ? '#' + rekorIdx : ''}</span>
-        <span class="sp ${grafeas ? 'ok' : 'no'}">grafeas</span>
       </div>
       <div style="margin-top:6px;font-size:9px;color:var(--mut)">age ${age(m.creationTimestamp)}</div>
     </div>`;
