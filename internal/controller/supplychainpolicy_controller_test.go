@@ -165,8 +165,11 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(scp.Status.TrustRoot).To(Equal(renderedName))
 		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{renderedName, authorizationName}))
 		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/nkanyezisolutions/policy-test-app**"))
-		Expect(scp.Status.Identity).To(Equal(
-			"https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner"))
+		Expect(scp.Status.Signers).To(Equal([]supplychainv1alpha1.SignerIdentity{{
+			Issuer:  signing.KubernetesOIDCIssuer,
+			Subject: "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner",
+		}}))
+		Expect(scp.Status.RekorURL).To(Equal("http://rekor-server.rekor-system.svc.cluster.local"))
 
 		trustRoot, err := getRendered(policy.TrustRootGVK)
 		Expect(err).NotTo(HaveOccurred())
@@ -208,6 +211,51 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		}
 		_, err = getNamed(policy.ClusterImagePolicyGVK, authorizationName)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("accepts stated signers and a pinned Rekor log", func() {
+		createSupplyChain()
+		createRoots()
+
+		var scp supplychainv1alpha1.SupplyChainPolicy
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		scp.Spec.Signers = []supplychainv1alpha1.PolicySigner{
+			{ServiceAccountName: "supply-chain-runner"},
+			{Subject: "release@blanketops.dev", Issuer: "https://accounts.example.com"},
+		}
+		scp.Spec.Rekor = &supplychainv1alpha1.PolicyRekor{URL: "http://rekor.pinned"}
+		Expect(k8sClient.Update(ctx, &scp)).To(Succeed())
+
+		_, err := reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		Expect(scp.Status.Signers).To(Equal([]supplychainv1alpha1.SignerIdentity{
+			{Issuer: signing.KubernetesOIDCIssuer,
+				Subject: "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner"},
+			{Issuer: "https://accounts.example.com", Subject: "release@blanketops.dev"},
+		}))
+		Expect(scp.Status.RekorURL).To(Equal("http://rekor.pinned"))
+
+		cip, err := getRendered(policy.ClusterImagePolicyGVK)
+		Expect(err).NotTo(HaveOccurred())
+		authorities, _, _ := unstructured.NestedSlice(cip.Object, "spec", "authorities")
+		identities, _, _ := unstructured.NestedSlice(authorities[0].(map[string]any), "keyless", "identities")
+		Expect(identities).To(HaveLen(2))
+		rekorURL, _, _ := unstructured.NestedString(authorities[0].(map[string]any), "ctlog", "url")
+		Expect(rekorURL).To(Equal("http://rekor.pinned"))
+	})
+
+	It("rejects a signer that is not exactly one of serviceAccountName or subject", func() {
+		var scp supplychainv1alpha1.SupplyChainPolicy
+		for _, signer := range []supplychainv1alpha1.PolicySigner{
+			{},
+			{ServiceAccountName: "runner", Subject: "someone@example.com"},
+		} {
+			Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+			scp.Spec.Signers = []supplychainv1alpha1.PolicySigner{signer}
+			Expect(k8sClient.Update(ctx, &scp)).To(MatchError(ContainSubstring("exactly one of")))
+		}
 	})
 
 	It("does not take over a resource it does not own", func() {

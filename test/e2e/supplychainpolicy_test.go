@@ -128,6 +128,10 @@ spec:
   supplyChainRef:
     name: %[10]s
   mode: enforce
+  signers:
+  - serviceAccountName: supply-chain-runner
+  rekor:
+    url: http://rekor-server.rekor-system.svc.cluster.local
 `,
 		policyNamespace, workloadNamespace, signing.RootsConfigMap,
 		signing.RootsFulcioKey, indent(newRootCertPEM()),
@@ -146,7 +150,7 @@ spec:
 
 	By("checking what the policy admits")
 	status, err := kubectl("get", "supplychainpolicy", policyName, "-n", policyNamespace,
-		"-o", "jsonpath={.status.clusterImagePolicies[*]} {.status.trustRoot} {.status.images[0]} {.status.identity}")
+		"-o", "jsonpath={.status.clusterImagePolicies[*]} {.status.trustRoot} {.status.images[0]} {.status.signers[0].subject} {.status.rekorURL}")
 	Expect(err).NotTo(HaveOccurred())
 	Expect(strings.Fields(status)).To(Equal([]string{
 		renderedName,
@@ -154,6 +158,7 @@ spec:
 		renderedName,
 		unsignedRegistry + "/" + unsignedName + "**",
 		signing.ServiceAccountIdentity(policyNamespace, "supply-chain-runner"),
+		"http://rekor-server.rekor-system.svc.cluster.local",
 	}))
 
 	By("checking policy-controller accepted the rendered resources")

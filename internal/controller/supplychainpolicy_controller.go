@@ -145,7 +145,10 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	scp.Status.TrustRoot = rendered.TrustRoot.GetName()
 	scp.Status.ClusterImagePolicies = policyNames
 	scp.Status.Images = rendered.Images
-	scp.Status.Identity = rendered.Identity
+	scp.Status.Signers = rendered.Signers
+	scp.Status.FulcioURL = rendered.Endpoints.FulcioURL
+	scp.Status.RekorURL = rendered.Endpoints.RekorURL
+	scp.Status.CTLogURL = rendered.Endpoints.CTLogURL
 	return ctrl.Result{}, r.setReady(ctx, &scp, metav1.ConditionTrue, "PolicyApplied",
 		"TrustRoot and ClusterImagePolicies are in sync with the SupplyChain")
 }
@@ -224,7 +227,10 @@ func (r *SupplyChainPolicyReconciler) deleteRendered(
 	scp.Status.TrustRoot = ""
 	scp.Status.ClusterImagePolicies = nil
 	scp.Status.Images = nil
-	scp.Status.Identity = ""
+	scp.Status.Signers = nil
+	scp.Status.FulcioURL = ""
+	scp.Status.RekorURL = ""
+	scp.Status.CTLogURL = ""
 	return nil
 }
 

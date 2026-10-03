@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -152,8 +153,12 @@ func TestRender(t *testing.T) {
 	if identity["issuer"] != signing.KubernetesOIDCIssuer || identity["subject"] != wantSubject {
 		t.Errorf("identity = %v", identity)
 	}
-	if got.Identity != wantSubject {
-		t.Errorf("Identity = %q, want %q", got.Identity, wantSubject)
+	wantSigners := []supplyv1alpha1.SignerIdentity{{Issuer: signing.KubernetesOIDCIssuer, Subject: wantSubject}}
+	if !reflect.DeepEqual(got.Signers, wantSigners) {
+		t.Errorf("Signers = %v, want %v", got.Signers, wantSigners)
+	}
+	if got.Endpoints.RekorURL != "http://rekor.local" {
+		t.Errorf("Endpoints.RekorURL = %q", got.Endpoints.RekorURL)
 	}
 	if _, has := authority["attestations"]; has {
 		t.Error("signature policy also asks for attestations, so a bare signature would not be checked")
@@ -181,6 +186,53 @@ func TestRender(t *testing.T) {
 		if !strings.Contains(cue, want) {
 			t.Errorf("authorization policy is missing %q:\n%s", want, cue)
 		}
+	}
+}
+
+func TestRenderSignersAndRekor(t *testing.T) {
+	scp, sc, roots := fixtures(t)
+	scp.Spec.Signers = []supplyv1alpha1.PolicySigner{
+		{ServiceAccountName: "release-signer"},
+		{Subject: "https://github.com/blanketops/app/.github/workflows/release.yml@refs/heads/main",
+			Issuer: "https://token.actions.githubusercontent.com"},
+	}
+	scp.Spec.Rekor = &supplyv1alpha1.PolicyRekor{URL: "http://rekor.pinned"}
+
+	got, err := Render(scp, sc, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []supplyv1alpha1.SignerIdentity{
+		{Issuer: signing.KubernetesOIDCIssuer,
+			Subject: "https://kubernetes.io/namespaces/team-a/serviceaccounts/release-signer"},
+		{Issuer: "https://token.actions.githubusercontent.com",
+			Subject: "https://github.com/blanketops/app/.github/workflows/release.yml@refs/heads/main"},
+	}
+	if !reflect.DeepEqual(got.Signers, want) {
+		t.Errorf("Signers = %v, want %v", got.Signers, want)
+	}
+
+	// Both policies must trust exactly the stated signers and the pinned log.
+	for _, p := range got.ClusterImagePolicies {
+		authority := p.Object["spec"].(map[string]any)["authorities"].([]any)[0].(map[string]any)
+		identities := authority["keyless"].(map[string]any)["identities"].([]any)
+		if len(identities) != len(want) {
+			t.Fatalf("%s has %d identities, want %d", p.GetName(), len(identities), len(want))
+		}
+		for i, identity := range identities {
+			got := identity.(map[string]any)
+			if got["issuer"] != want[i].Issuer || got["subject"] != want[i].Subject {
+				t.Errorf("%s identity %d = %v, want %v", p.GetName(), i, got, want[i])
+			}
+		}
+		if url := authority["ctlog"].(map[string]any)["url"]; url != "http://rekor.pinned" {
+			t.Errorf("%s verifies against Rekor %v, want the pinned log", p.GetName(), url)
+		}
+	}
+	keys := got.TrustRoot.Object["spec"].(map[string]any)["sigstoreKeys"].(map[string]any)
+	if baseURL := keys["tLogs"].([]any)[0].(map[string]any)["baseURL"]; baseURL != "http://rekor.pinned" {
+		t.Errorf("TrustRoot tLog baseURL = %v, want the pinned log", baseURL)
 	}
 }
 

@@ -22,10 +22,11 @@ import (
 
 // SupplyChainPolicySpec defines the desired state of SupplyChainPolicy.
 //
-// Everything the admission policy needs is already declared on the referenced
-// SupplyChain (image repository, Fulcio/Rekor/CT log endpoints, signing
-// ServiceAccount) or lives in the sigstore trust anchor ConfigMap, so none of
-// it is repeated here.
+// Only supplyChainRef is required. The image repository, the Fulcio and CT log
+// endpoints and the trust anchors always come from the referenced SupplyChain
+// and the sigstore trust anchor ConfigMap. Signers and the Rekor log default to
+// what the SupplyChain signs with, and can be stated here to pin them or to
+// accept more than one signer. Status reports what was resolved.
 type SupplyChainPolicySpec struct {
 	// supplyChainRef references the SupplyChain whose images this policy admits.
 	// +required
@@ -37,6 +38,60 @@ type SupplyChainPolicySpec struct {
 	// +kubebuilder:default=enforce
 	// +optional
 	Mode string `json:"mode,omitempty"`
+
+	// signers are the keyless identities whose signature and authorization
+	// attestation are accepted; any one of them is enough. Each must hold a
+	// Fulcio certificate chaining to the trust root.
+	// Defaults to the SupplyChain's ServiceAccount, which is the identity the
+	// pipeline signs with.
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=atomic
+	// +optional
+	Signers []PolicySigner `json:"signers,omitempty"`
+
+	// rekor is the transparency log every signature and attestation must be
+	// recorded in.
+	// Defaults to the Rekor log the SupplyChain signs to.
+	// +optional
+	Rekor *PolicyRekor `json:"rekor,omitempty"`
+}
+
+// PolicySigner is one keyless identity allowed to sign.
+// +kubebuilder:validation:XValidation:rule="has(self.serviceAccountName) != has(self.subject)",message="set exactly one of serviceAccountName or subject"
+type PolicySigner struct {
+	// serviceAccountName names a ServiceAccount in the policy's namespace. It
+	// is shorthand for the subject Fulcio issues to that ServiceAccount.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// subject is the exact subject of the Fulcio certificate, for signers that
+	// are not a ServiceAccount in this namespace.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Subject string `json:"subject,omitempty"`
+
+	// issuer is the OIDC issuer that vouched for the signer.
+	// Defaults to the cluster's ServiceAccount token issuer.
+	// +optional
+	Issuer string `json:"issuer,omitempty"`
+}
+
+// PolicyRekor identifies the transparency log to verify against. Its public
+// key comes from the sigstore trust anchor ConfigMap.
+type PolicyRekor struct {
+	// url is the Rekor endpoint.
+	// +kubebuilder:validation:Pattern=`^https?://`
+	// +required
+	URL string `json:"url"`
+}
+
+// SignerIdentity is a signer as it appears in a Fulcio certificate.
+type SignerIdentity struct {
+	// issuer is the OIDC issuer in the certificate.
+	Issuer string `json:"issuer"`
+	// subject is the subject in the certificate.
+	Subject string `json:"subject"`
 }
 
 // SupplyChainPolicyStatus defines the observed state of SupplyChainPolicy.
@@ -70,10 +125,26 @@ type SupplyChainPolicyStatus struct {
 	// +optional
 	Images []string `json:"images,omitempty"`
 
-	// identity is the Fulcio certificate subject the images must be signed and
-	// attested by.
+	// signers are the identities the policy accepts, as resolved from the spec
+	// and the SupplyChain.
+	// +listType=atomic
 	// +optional
-	Identity string `json:"identity,omitempty"`
+	Signers []SignerIdentity `json:"signers,omitempty"`
+
+	// fulcioURL is the certificate authority the signers' certificates must
+	// chain to.
+	// +optional
+	FulcioURL string `json:"fulcioURL,omitempty"`
+
+	// rekorURL is the transparency log signatures and attestations must be
+	// recorded in.
+	// +optional
+	RekorURL string `json:"rekorURL,omitempty"`
+
+	// ctLogURL is the certificate transparency log the signers' certificates
+	// must carry a proof from.
+	// +optional
+	CTLogURL string `json:"ctLogURL,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -82,7 +153,8 @@ type SupplyChainPolicyStatus struct {
 // +kubebuilder:printcolumn:name="SupplyChain",type=string,JSONPath=`.spec.supplyChainRef.name`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
-// +kubebuilder:printcolumn:name="Signer",type=string,JSONPath=`.status.identity`,priority=1
+// +kubebuilder:printcolumn:name="Signers",type=string,JSONPath=`.status.signers[*].subject`,priority=1
+// +kubebuilder:printcolumn:name="Rekor",type=string,JSONPath=`.status.rekorURL`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // SupplyChainPolicy is the Schema for the supplychainpolicies API.

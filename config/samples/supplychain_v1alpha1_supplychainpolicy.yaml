@@ -6,12 +6,28 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: for-kaniko-app
 spec:
-  # Admits the SupplyChain's image only if its ServiceAccount signed it
-  # keylessly (Fulcio cert, CT log proof, Rekor entry) and attested the three
-  # authorization proofs (scope, intent, output).
-  #
-  # Image, signer identity, sigstore endpoints and trust anchors all come from
-  # the SupplyChain and the blanketops-sigstore-roots ConfigMap.
+  # The SupplyChain whose image this policy admits. The image repository, the
+  # Fulcio and CT log endpoints and the trust anchors come from it and from the
+  # blanketops-sigstore-roots ConfigMap.
   supplyChainRef:
     name: for-kaniko-app
+
+  # enforce rejects an image that fails verification; warn admits it with a
+  # warning.
   mode: enforce
+
+  # Who may sign. An image is admitted only if one of these identities signed
+  # it keylessly (Fulcio certificate with a CT log proof) and attested the
+  # three authorization proofs (scope, intent, output).
+  # Optional: defaults to the SupplyChain's ServiceAccount.
+  signers:
+  - serviceAccountName: supply-chain-runner
+    issuer: https://kubernetes.default.svc.cluster.local
+  # A signer outside this namespace is stated by its certificate subject:
+  # - subject: https://kubernetes.io/namespaces/release/serviceaccounts/release-signer
+  #   issuer: https://kubernetes.default.svc.cluster.local
+
+  # The transparency log every signature and attestation must be recorded in.
+  # Optional: defaults to the SupplyChain's signing.rekorURL.
+  rekor:
+    url: http://rekor-server.rekor-system.svc.cluster.local

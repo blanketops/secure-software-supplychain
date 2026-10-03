@@ -327,9 +327,15 @@ spec:
   supplyChainRef:
     name: for-kaniko-app
   mode: enforce   # or warn
+  signers:        # optional: defaults to the SupplyChain's ServiceAccount
+  - serviceAccountName: supply-chain-runner
+  rekor:          # optional: defaults to the SupplyChain's signing.rekorURL
+    url: http://rekor-server.rekor-system.svc.cluster.local
 ```
 
-The spec is short because everything else is already known (see the table below). What it enforces is not.
+Only `supplyChainRef` is required; `signers` and `rekor` default to what the SupplyChain signs with, and
+`status` reports the resolved signers and the Fulcio, Rekor and CT log endpoints. State `signers` to pin them
+or to accept more than one identity.
 An image matching the SupplyChain's repository is admitted only if all of this holds:
 
 | Check | Enforced by |
@@ -344,8 +350,9 @@ Where each input comes from:
 | Policy input | Source |
 |---|---|
 | Image glob | `SupplyChain.spec.image` (`registry/name**`) |
-| Signer identity | `SupplyChain.spec.serviceAccountName` + the cluster OIDC issuer |
-| Fulcio / Rekor / CT log URLs | `SupplyChain.spec.signing` |
+| Signers | `spec.signers`, else `SupplyChain.spec.serviceAccountName` + the cluster OIDC issuer |
+| Rekor URL | `spec.rekor`, else `SupplyChain.spec.signing` |
+| Fulcio / CT log URLs | `SupplyChain.spec.signing` |
 | Fulcio root, Rekor key, CT log key | `blanketops-sigstore-roots` ConfigMap in the same namespace |
 
 `supplychain install` installs policy-controller into `cosign-system`. It only enforces in namespaces

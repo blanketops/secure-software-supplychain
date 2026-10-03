@@ -26,8 +26,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - jsonPath: .status.identity
-      name: Signer
+    - jsonPath: .status.signers[*].subject
+      name: Signers
+      priority: 1
+      type: string
+    - jsonPath: .status.rekorURL
+      name: Rekor
       priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -72,6 +76,53 @@ spec:
                 - enforce
                 - warn
                 type: string
+              rekor:
+                description: |-
+                  rekor is the transparency log every signature and attestation must be
+                  recorded in.
+                  Defaults to the Rekor log the SupplyChain signs to.
+                properties:
+                  url:
+                    description: url is the Rekor endpoint.
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
+              signers:
+                description: |-
+                  signers are the keyless identities whose signature and authorization
+                  attestation are accepted; any one of them is enough. Each must hold a
+                  Fulcio certificate chaining to the trust root.
+                  Defaults to the SupplyChain's ServiceAccount, which is the identity the
+                  pipeline signs with.
+                items:
+                  description: PolicySigner is one keyless identity allowed to sign.
+                  properties:
+                    issuer:
+                      description: |-
+                        issuer is the OIDC issuer that vouched for the signer.
+                        Defaults to the cluster's ServiceAccount token issuer.
+                      type: string
+                    serviceAccountName:
+                      description: |-
+                        serviceAccountName names a ServiceAccount in the policy's namespace. It
+                        is shorthand for the subject Fulcio issues to that ServiceAccount.
+                      minLength: 1
+                      type: string
+                    subject:
+                      description: |-
+                        subject is the exact subject of the Fulcio certificate, for signers that
+                        are not a ServiceAccount in this namespace.
+                      minLength: 1
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                  - message: set exactly one of serviceAccountName or subject
+                    rule: has(self.serviceAccountName) != has(self.subject)
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: atomic
               supplyChainRef:
                 description: supplyChainRef references the SupplyChain whose images
                   this policy admits.
@@ -162,10 +213,15 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              identity:
+              ctLogURL:
                 description: |-
-                  identity is the Fulcio certificate subject the images must be signed and
-                  attested by.
+                  ctLogURL is the certificate transparency log the signers' certificates
+                  must carry a proof from.
+                type: string
+              fulcioURL:
+                description: |-
+                  fulcioURL is the certificate authority the signers' certificates must
+                  chain to.
                 type: string
               images:
                 description: images are the image globs the ClusterImagePolicies apply
@@ -177,6 +233,31 @@ spec:
                 description: observedGeneration is the generation last reconciled.
                 format: int64
                 type: integer
+              rekorURL:
+                description: |-
+                  rekorURL is the transparency log signatures and attestations must be
+                  recorded in.
+                type: string
+              signers:
+                description: |-
+                  signers are the identities the policy accepts, as resolved from the spec
+                  and the SupplyChain.
+                items:
+                  description: SignerIdentity is a signer as it appears in a Fulcio
+                    certificate.
+                  properties:
+                    issuer:
+                      description: issuer is the OIDC issuer in the certificate.
+                      type: string
+                    subject:
+                      description: subject is the subject in the certificate.
+                      type: string
+                  required:
+                  - issuer
+                  - subject
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
               trustRoot:
                 description: trustRoot is the name of the managed policy.sigstore.dev
                   TrustRoot.

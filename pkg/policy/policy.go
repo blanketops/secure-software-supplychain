@@ -59,8 +59,10 @@ type Rendered struct {
 	ClusterImagePolicies []*unstructured.Unstructured
 	// Images are the globs the ClusterImagePolicy applies to.
 	Images []string
-	// Identity is the certificate subject the images must be signed by.
-	Identity string
+	// Signers are the identities the policies accept.
+	Signers []supplyv1alpha1.SignerIdentity
+	// Endpoints are the sigstore services the policies verify against.
+	Endpoints signing.Endpoints
 }
 
 // ResourceName is the name of the TrustRoot and the signature
@@ -86,6 +88,9 @@ func Render(
 ) (*Rendered, error) {
 	name := ResourceName(scp)
 	endpoints := signing.EndpointsFor(sc)
+	if scp.Spec.Rekor != nil {
+		endpoints.RekorURL = scp.Spec.Rekor.URL
+	}
 
 	trustRootSpec, err := trustRootSpec(endpoints, roots)
 	if err != nil {
@@ -96,7 +101,11 @@ func Render(
 	if serviceAccount == "" {
 		serviceAccount = "default"
 	}
-	identity := signing.ServiceAccountIdentity(sc.Namespace, serviceAccount)
+	signers := resolveSigners(scp, serviceAccount)
+	identities := make([]any, 0, len(signers))
+	for _, signer := range signers {
+		identities = append(identities, map[string]any{"issuer": signer.Issuer, "subject": signer.Subject})
+	}
 	images := []string{ImageGlob(sc)}
 
 	mode := scp.Spec.Mode
@@ -108,19 +117,14 @@ func Render(
 	for _, glob := range images {
 		globs = append(globs, map[string]any{"glob": glob})
 	}
-	// authority is the keyless signer both policies trust.
+	// authority is the set of keyless signers both policies trust.
 	authority := func(authorityName string) map[string]any {
 		return map[string]any{
 			"name": authorityName,
 			"keyless": map[string]any{
 				"url":          endpoints.FulcioURL,
 				"trustRootRef": name,
-				"identities": []any{
-					map[string]any{
-						"issuer":  signing.KubernetesOIDCIssuer,
-						"subject": identity,
-					},
-				},
+				"identities":   identities,
 			},
 			"ctlog": map[string]any{
 				"url":          endpoints.RekorURL,
@@ -150,9 +154,34 @@ func Render(
 			newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature"))),
 			newObject(ClusterImagePolicyGVK, name+"-authorization", scp, policySpec(authorized)),
 		},
-		Images:   images,
-		Identity: identity,
+		Images:    images,
+		Signers:   signers,
+		Endpoints: endpoints,
 	}, nil
+}
+
+// resolveSigners turns spec.signers into certificate identities. With none
+// stated, the only signer is the ServiceAccount the SupplyChain's pipeline
+// signs with.
+func resolveSigners(scp *supplyv1alpha1.SupplyChainPolicy, supplyChainServiceAccount string) []supplyv1alpha1.SignerIdentity {
+	if len(scp.Spec.Signers) == 0 {
+		return []supplyv1alpha1.SignerIdentity{{
+			Issuer:  signing.KubernetesOIDCIssuer,
+			Subject: signing.ServiceAccountIdentity(scp.Namespace, supplyChainServiceAccount),
+		}}
+	}
+	signers := make([]supplyv1alpha1.SignerIdentity, 0, len(scp.Spec.Signers))
+	for _, signer := range scp.Spec.Signers {
+		identity := supplyv1alpha1.SignerIdentity{Issuer: signer.Issuer, Subject: signer.Subject}
+		if identity.Issuer == "" {
+			identity.Issuer = signing.KubernetesOIDCIssuer
+		}
+		if signer.ServiceAccountName != "" {
+			identity.Subject = signing.ServiceAccountIdentity(scp.Namespace, signer.ServiceAccountName)
+		}
+		signers = append(signers, identity)
+	}
+	return signers
 }
 
 // authorizationCUE is the policy the authorization attestation must satisfy:
