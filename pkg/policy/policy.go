@@ -20,8 +20,10 @@ limitations under the License.
 package policy
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"strings"
@@ -63,6 +65,8 @@ type Rendered struct {
 	Signers []supplyv1alpha1.SignerIdentity
 	// Endpoints are the sigstore services the policies verify against.
 	Endpoints signing.Endpoints
+	// TrustAnchors are the fingerprints of the key material in the TrustRoot.
+	TrustAnchors supplyv1alpha1.TrustAnchorFingerprints
 }
 
 // ResourceName is the name of the TrustRoot and the signature
@@ -87,10 +91,7 @@ func Render(
 	roots map[string]string,
 ) (*Rendered, error) {
 	name := ResourceName(scp)
-	endpoints := signing.EndpointsFor(sc)
-	if scp.Spec.Rekor != nil {
-		endpoints.RekorURL = scp.Spec.Rekor.URL
-	}
+	endpoints := EndpointsFor(scp, sc)
 
 	trustRootSpec, err := trustRootSpec(endpoints, roots)
 	if err != nil {
@@ -157,7 +158,67 @@ func Render(
 		Images:    images,
 		Signers:   signers,
 		Endpoints: endpoints,
+		TrustAnchors: supplyv1alpha1.TrustAnchorFingerprints{
+			FulcioRoot: fingerprint(roots[signing.RootsFulcioKey]),
+			RekorKey:   fingerprint(roots[signing.RootsRekorKey]),
+			CTLogKey:   fingerprint(roots[signing.RootsCTLogKey]),
+		},
 	}, nil
+}
+
+// EndpointsFor resolves the sigstore endpoints a policy verifies against: the
+// ones stated in its trust root, else the ones the SupplyChain signs with.
+func EndpointsFor(scp *supplyv1alpha1.SupplyChainPolicy, sc *supplyv1alpha1.SupplyChain) signing.Endpoints {
+	endpoints := signing.EndpointsFor(sc)
+	trustRoot := scp.Spec.TrustRoot
+	if trustRoot == nil {
+		return endpoints
+	}
+	override := func(authority *supplyv1alpha1.TrustedAuthority, url *string) {
+		if authority != nil && authority.URL != "" {
+			*url = authority.URL
+		}
+	}
+	override(trustRoot.Fulcio, &endpoints.FulcioURL)
+	override(trustRoot.Rekor, &endpoints.RekorURL)
+	override(trustRoot.CTLog, &endpoints.CTLogURL)
+	return endpoints
+}
+
+// TrustSources says which ConfigMap key holds each trust anchor of a policy,
+// keyed by the name the anchor has in the default ConfigMap
+// (signing.RootsFulcioKey and friends). Anything the policy does not state
+// comes from signing.RootsConfigMap.
+func TrustSources(scp *supplyv1alpha1.SupplyChainPolicy) map[string]supplyv1alpha1.ConfigMapKeyRef {
+	sources := map[string]supplyv1alpha1.ConfigMapKeyRef{
+		signing.RootsFulcioKey: {Name: signing.RootsConfigMap, Key: signing.RootsFulcioKey},
+		signing.RootsRekorKey:  {Name: signing.RootsConfigMap, Key: signing.RootsRekorKey},
+		signing.RootsCTLogKey:  {Name: signing.RootsConfigMap, Key: signing.RootsCTLogKey},
+	}
+	trustRoot := scp.Spec.TrustRoot
+	if trustRoot == nil {
+		return sources
+	}
+	override := func(anchor string, authority *supplyv1alpha1.TrustedAuthority) {
+		if authority != nil && authority.PEMRef != nil {
+			sources[anchor] = *authority.PEMRef
+		}
+	}
+	override(signing.RootsFulcioKey, trustRoot.Fulcio)
+	override(signing.RootsRekorKey, trustRoot.Rekor)
+	override(signing.RootsCTLogKey, trustRoot.CTLog)
+	return sources
+}
+
+// fingerprint identifies a trust anchor by the SHA-256 of its first PEM
+// block's contents, so it does not change with whitespace or line endings.
+func fingerprint(pemData string) string {
+	data := []byte(strings.TrimSpace(pemData))
+	if block, _ := pem.Decode(data); block != nil {
+		data = block.Bytes
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // resolveSigners turns spec.signers into certificate identities. With none
@@ -235,7 +296,7 @@ func newObject(
 func trustRootSpec(endpoints signing.Endpoints, roots map[string]string) (map[string]any, error) {
 	for _, key := range []string{signing.RootsFulcioKey, signing.RootsRekorKey, signing.RootsCTLogKey} {
 		if strings.TrimSpace(roots[key]) == "" {
-			return nil, fmt.Errorf("trust anchor %q is missing from ConfigMap %q", key, signing.RootsConfigMap)
+			return nil, fmt.Errorf("trust anchor %q is missing or empty", key)
 		}
 	}
 

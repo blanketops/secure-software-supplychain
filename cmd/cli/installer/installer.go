@@ -65,7 +65,7 @@ const (
 	// needs to start. A wait that gives up too early forces a re-run, and a
 	// re-run re-creates the sigstore setup Jobs, which regenerate keys the
 	// running services have already loaded.
-	readyTimeout = 30 * time.Minute
+	readyTimeout = time.Hour
 
 	// ctlog secret coords.
 	ctfePublicKeySecret = "ctlog-public-key"

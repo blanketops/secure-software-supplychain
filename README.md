@@ -336,8 +336,16 @@ spec:
   serviceAccountName: supply-chain-policy-runner   # default
   signers:        # optional: defaults to the SupplyChain's ServiceAccount
   - serviceAccountName: supply-chain-runner
-  rekor:          # optional: defaults to the SupplyChain's signing.rekorURL
-    url: http://rekor-server.rekor-system.svc.cluster.local
+  trustRoot:      # optional: defaults to the SupplyChain's endpoints and the trust anchor ConfigMap
+    fulcio:
+      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      pemRef: {name: blanketops-sigstore-roots, key: fulcio-root.pem}
+    rekor:
+      url: http://rekor-server.rekor-system.svc.cluster.local
+      pemRef: {name: blanketops-sigstore-roots, key: rekor.pub}
+    ctLog:
+      url: http://ctlog.ctlog-system.svc/fulcio
+      pemRef: {name: blanketops-sigstore-roots, key: ctfe.pub}
 ```
 
 Like a build, a policy is gated on three SubjectAccessReviews. Its ServiceAccount (`supply-chain-policy-runner`
@@ -353,9 +361,13 @@ recorded in `status.authorization`:
 Grant them with `config/samples/supplychain_v1alpha1_policyrole.yaml`. Until then the policy stays
 `Ready=False` with reason `AuthorizationDenied`; policies that were already rendered are left in place.
 
-Only `supplyChainRef` is required; `signers` and `rekor` default to what the SupplyChain signs with, and
-`status` reports the resolved signers and the Fulcio, Rekor and CT log endpoints. State `signers` to pin them
-or to accept more than one identity.
+Only `supplyChainRef` is required. `signers` and `trustRoot` default to what the SupplyChain signs with; state
+them to pin them, to accept more than one identity, or to trust a different sigstore.
+
+`status` reports what was resolved: the signers, the three endpoints, and `trustAnchors`, the SHA-256
+fingerprints of the Fulcio root and the two log keys in the rendered `TrustRoot`. If a signed image is rejected
+with "certificate signed by unknown authority", compare `status.trustAnchors.fulcioRoot` with the root Fulcio is
+serving: they differ when Fulcio's CA was regenerated after the trust anchors were collected.
 An image matching the SupplyChain's repository is admitted only if all of this holds:
 
 | Check | Enforced by |
@@ -371,9 +383,8 @@ Where each input comes from:
 |---|---|
 | Image glob | `SupplyChain.spec.image` (`registry/name**`) |
 | Signers | `spec.signers`, else `SupplyChain.spec.serviceAccountName` + the cluster OIDC issuer |
-| Rekor URL | `spec.rekor`, else `SupplyChain.spec.signing` |
-| Fulcio / CT log URLs | `SupplyChain.spec.signing` |
-| Fulcio root, Rekor key, CT log key | `blanketops-sigstore-roots` ConfigMap in the same namespace |
+| Fulcio / Rekor / CT log URLs | `spec.trustRoot.*.url`, else `SupplyChain.spec.signing` |
+| Fulcio root, Rekor key, CT log key | `spec.trustRoot.*.pemRef`, else the `blanketops-sigstore-roots` ConfigMap in the same namespace |
 
 `supplychain install` installs policy-controller into `cosign-system`. It only enforces in namespaces
 labelled `policy.sigstore.dev/include=true`, so nothing is checked until you opt a namespace in:

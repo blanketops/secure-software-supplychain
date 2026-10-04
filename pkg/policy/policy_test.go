@@ -196,7 +196,9 @@ func TestRenderSignersAndRekor(t *testing.T) {
 		{Subject: "https://github.com/blanketops/app/.github/workflows/release.yml@refs/heads/main",
 			Issuer: "https://token.actions.githubusercontent.com"},
 	}
-	scp.Spec.Rekor = &supplyv1alpha1.PolicyRekor{URL: "http://rekor.pinned"}
+	scp.Spec.TrustRoot = &supplyv1alpha1.PolicyTrustRoot{
+		Rekor: &supplyv1alpha1.TrustedAuthority{URL: "http://rekor.pinned"},
+	}
 
 	got, err := Render(scp, sc, roots)
 	if err != nil {
@@ -233,6 +235,70 @@ func TestRenderSignersAndRekor(t *testing.T) {
 	keys := got.TrustRoot.Object["spec"].(map[string]any)["sigstoreKeys"].(map[string]any)
 	if baseURL := keys["tLogs"].([]any)[0].(map[string]any)["baseURL"]; baseURL != "http://rekor.pinned" {
 		t.Errorf("TrustRoot tLog baseURL = %v, want the pinned log", baseURL)
+	}
+}
+
+func TestTrustRoot(t *testing.T) {
+	scp, sc, roots := fixtures(t)
+
+	// Nothing stated: endpoints from the SupplyChain, PEM from the default ConfigMap.
+	if got := EndpointsFor(scp, sc); got != signing.EndpointsFor(sc) {
+		t.Errorf("default endpoints = %+v, want the SupplyChain's", got)
+	}
+	for anchor, source := range TrustSources(scp) {
+		if source.Name != signing.RootsConfigMap || source.Key != anchor {
+			t.Errorf("default source of %s = %+v", anchor, source)
+		}
+	}
+
+	scp.Spec.TrustRoot = &supplyv1alpha1.PolicyTrustRoot{
+		Fulcio: &supplyv1alpha1.TrustedAuthority{
+			URL:    "https://fulcio.example.com",
+			PEMRef: &supplyv1alpha1.ConfigMapKeyRef{Name: "corp-trust", Key: "ca.pem"},
+		},
+		CTLog: &supplyv1alpha1.TrustedAuthority{URL: "https://ctlog.example.com"},
+	}
+
+	endpoints := EndpointsFor(scp, sc)
+	if endpoints.FulcioURL != "https://fulcio.example.com" || endpoints.CTLogURL != "https://ctlog.example.com" {
+		t.Errorf("stated endpoints not used: %+v", endpoints)
+	}
+	if endpoints.RekorURL != "http://rekor.local" {
+		t.Errorf("unstated Rekor URL = %q, want the SupplyChain's", endpoints.RekorURL)
+	}
+
+	sources := TrustSources(scp)
+	if got := sources[signing.RootsFulcioKey]; got.Name != "corp-trust" || got.Key != "ca.pem" {
+		t.Errorf("Fulcio source = %+v, want corp-trust/ca.pem", got)
+	}
+	if got := sources[signing.RootsCTLogKey]; got.Name != signing.RootsConfigMap {
+		t.Errorf("CT log source = %+v, want the default ConfigMap when only a URL is stated", got)
+	}
+
+	got, err := Render(scp, sc, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := got.TrustRoot.Object["spec"].(map[string]any)["sigstoreKeys"].(map[string]any)
+	if uri := keys["certificateAuthorities"].([]any)[0].(map[string]any)["uri"]; uri != "https://fulcio.example.com" {
+		t.Errorf("TrustRoot CA uri = %v", uri)
+	}
+	for name, fp := range map[string]string{
+		"fulcioRoot": got.TrustAnchors.FulcioRoot, "rekorKey": got.TrustAnchors.RekorKey, "ctLogKey": got.TrustAnchors.CTLogKey,
+	} {
+		if !strings.HasPrefix(fp, "sha256:") || len(fp) != len("sha256:")+64 {
+			t.Errorf("%s fingerprint = %q", name, fp)
+		}
+	}
+	if got.TrustAnchors.RekorKey == got.TrustAnchors.CTLogKey {
+		t.Error("different keys produced the same fingerprint")
+	}
+}
+
+func TestFingerprintIgnoresWhitespace(t *testing.T) {
+	cert := rootCert(t, pkix.Name{CommonName: "fulcio"})
+	if fingerprint(cert) != fingerprint("\n"+cert+"\n\n") {
+		t.Error("fingerprint changed with surrounding whitespace")
 	}
 }
 

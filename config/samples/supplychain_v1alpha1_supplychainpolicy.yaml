@@ -33,7 +33,26 @@ spec:
   # - subject: https://kubernetes.io/namespaces/release/serviceaccounts/release-signer
   #   issuer: https://kubernetes.default.svc.cluster.local
 
-  # The transparency log every signature and attestation must be recorded in.
-  # Optional: defaults to the SupplyChain's signing.rekorURL.
-  rekor:
-    url: http://rekor-server.rekor-system.svc.cluster.local
+  # The sigstore instance signatures and attestations are verified against.
+  # Rendered as the policy-controller TrustRoot.
+  # Optional: each url defaults to the SupplyChain's signing endpoints, and
+  # each pemRef to the matching key of the blanketops-sigstore-roots ConfigMap.
+  trustRoot:
+    # The CA that must have issued the signer's certificate.
+    fulcio:
+      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: fulcio-root.pem
+    # The log every signature and attestation must be recorded in.
+    rekor:
+      url: http://rekor-server.rekor-system.svc.cluster.local
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: rekor.pub
+    # The log that must have witnessed the signer's certificate.
+    ctLog:
+      url: http://ctlog.ctlog-system.svc/fulcio
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: ctfe.pub

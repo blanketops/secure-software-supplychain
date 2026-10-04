@@ -24,9 +24,10 @@ import (
 //
 // Only supplyChainRef is required. The image repository, the Fulcio and CT log
 // endpoints and the trust anchors always come from the referenced SupplyChain
-// and the sigstore trust anchor ConfigMap. Signers and the Rekor log default to
-// what the SupplyChain signs with, and can be stated here to pin them or to
-// accept more than one signer. Status reports what was resolved.
+// and the sigstore trust anchor ConfigMap. Signers and the trust root default
+// to what the SupplyChain signs with, and can be stated here to pin them, to
+// accept more than one signer, or to trust a different sigstore. Status
+// reports what was resolved.
 type SupplyChainPolicySpec struct {
 	// supplyChainRef references the SupplyChain whose images this policy admits.
 	// +required
@@ -59,11 +60,72 @@ type SupplyChainPolicySpec struct {
 	// +optional
 	Signers []PolicySigner `json:"signers,omitempty"`
 
-	// rekor is the transparency log every signature and attestation must be
-	// recorded in.
-	// Defaults to the Rekor log the SupplyChain signs to.
+	// trustRoot is the sigstore instance signatures and attestations are
+	// verified against: the Fulcio CA that must have issued the signer's
+	// certificate, the CT log that must have witnessed it, and the Rekor log
+	// the signature must be recorded in. It is rendered as the
+	// policy-controller TrustRoot.
+	// Each part defaults to the SupplyChain's signing endpoints and to the
+	// sigstore trust anchor ConfigMap in the policy's namespace.
 	// +optional
-	Rekor *PolicyRekor `json:"rekor,omitempty"`
+	TrustRoot *PolicyTrustRoot `json:"trustRoot,omitempty"`
+}
+
+// PolicyTrustRoot states the three authorities a signature is checked against.
+type PolicyTrustRoot struct {
+	// fulcio is the certificate authority. Its PEM is the CA certificate chain.
+	// +optional
+	Fulcio *TrustedAuthority `json:"fulcio,omitempty"`
+
+	// rekor is the signature transparency log. Its PEM is the log's public key.
+	// +optional
+	Rekor *TrustedAuthority `json:"rekor,omitempty"`
+
+	// ctLog is the certificate transparency log. Its PEM is the log's public key.
+	// +optional
+	CTLog *TrustedAuthority `json:"ctLog,omitempty"`
+}
+
+// TrustedAuthority is one sigstore service and the key material that
+// identifies it.
+type TrustedAuthority struct {
+	// url is the service endpoint.
+	// Defaults to the matching endpoint in the SupplyChain's signing spec.
+	// +kubebuilder:validation:Pattern=`^https?://`
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// pemRef points at the PEM that identifies the service.
+	// Defaults to the matching key of the sigstore trust anchor ConfigMap.
+	// +optional
+	PEMRef *ConfigMapKeyRef `json:"pemRef,omitempty"`
+}
+
+// ConfigMapKeyRef selects a key of a ConfigMap in the policy's namespace.
+type ConfigMapKeyRef struct {
+	// name of the ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Name string `json:"name"`
+
+	// key within the ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Key string `json:"key"`
+}
+
+// TrustAnchorFingerprints identify the key material a policy trusts, so it can
+// be compared with what the sigstore services are actually using.
+type TrustAnchorFingerprints struct {
+	// fulcioRoot is the SHA-256 of the Fulcio root certificate.
+	// +optional
+	FulcioRoot string `json:"fulcioRoot,omitempty"`
+	// rekorKey is the SHA-256 of the Rekor public key.
+	// +optional
+	RekorKey string `json:"rekorKey,omitempty"`
+	// ctLogKey is the SHA-256 of the CT log public key.
+	// +optional
+	CTLogKey string `json:"ctLogKey,omitempty"`
 }
 
 // PolicySigner is one keyless identity allowed to sign.
@@ -85,15 +147,6 @@ type PolicySigner struct {
 	// Defaults to the cluster's ServiceAccount token issuer.
 	// +optional
 	Issuer string `json:"issuer,omitempty"`
-}
-
-// PolicyRekor identifies the transparency log to verify against. Its public
-// key comes from the sigstore trust anchor ConfigMap.
-type PolicyRekor struct {
-	// url is the Rekor endpoint.
-	// +kubebuilder:validation:Pattern=`^https?://`
-	// +required
-	URL string `json:"url"`
 }
 
 // AuthorizationProof is the API server's answer to one SubjectAccessReview.
@@ -193,6 +246,11 @@ type SupplyChainPolicyStatus struct {
 	// must carry a proof from.
 	// +optional
 	CTLogURL string `json:"ctLogURL,omitempty"`
+
+	// trustAnchors are the fingerprints of the key material in the rendered
+	// TrustRoot.
+	// +optional
+	TrustAnchors *TrustAnchorFingerprints `json:"trustAnchors,omitempty"`
 }
 
 // +kubebuilder:object:root=true

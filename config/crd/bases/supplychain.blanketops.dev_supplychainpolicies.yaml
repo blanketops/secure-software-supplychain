@@ -76,19 +76,6 @@ spec:
                 - enforce
                 - warn
                 type: string
-              rekor:
-                description: |-
-                  rekor is the transparency log every signature and attestation must be
-                  recorded in.
-                  Defaults to the Rekor log the SupplyChain signs to.
-                properties:
-                  url:
-                    description: url is the Rekor endpoint.
-                    pattern: ^https?://
-                    type: string
-                required:
-                - url
-                type: object
               serviceAccountName:
                 default: supply-chain-policy-runner
                 description: |-
@@ -142,6 +129,101 @@ spec:
                     type: string
                 required:
                 - name
+                type: object
+              trustRoot:
+                description: |-
+                  trustRoot is the sigstore instance signatures and attestations are
+                  verified against: the Fulcio CA that must have issued the signer's
+                  certificate, the CT log that must have witnessed it, and the Rekor log
+                  the signature must be recorded in. It is rendered as the
+                  policy-controller TrustRoot.
+                  Each part defaults to the SupplyChain's signing endpoints and to the
+                  sigstore trust anchor ConfigMap in the policy's namespace.
+                properties:
+                  ctLog:
+                    description: ctLog is the certificate transparency log. Its PEM
+                      is the log's public key.
+                    properties:
+                      pemRef:
+                        description: |-
+                          pemRef points at the PEM that identifies the service.
+                          Defaults to the matching key of the sigstore trust anchor ConfigMap.
+                        properties:
+                          key:
+                            description: key within the ConfigMap.
+                            minLength: 1
+                            type: string
+                          name:
+                            description: name of the ConfigMap.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      url:
+                        description: |-
+                          url is the service endpoint.
+                          Defaults to the matching endpoint in the SupplyChain's signing spec.
+                        pattern: ^https?://
+                        type: string
+                    type: object
+                  fulcio:
+                    description: fulcio is the certificate authority. Its PEM is the
+                      CA certificate chain.
+                    properties:
+                      pemRef:
+                        description: |-
+                          pemRef points at the PEM that identifies the service.
+                          Defaults to the matching key of the sigstore trust anchor ConfigMap.
+                        properties:
+                          key:
+                            description: key within the ConfigMap.
+                            minLength: 1
+                            type: string
+                          name:
+                            description: name of the ConfigMap.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      url:
+                        description: |-
+                          url is the service endpoint.
+                          Defaults to the matching endpoint in the SupplyChain's signing spec.
+                        pattern: ^https?://
+                        type: string
+                    type: object
+                  rekor:
+                    description: rekor is the signature transparency log. Its PEM
+                      is the log's public key.
+                    properties:
+                      pemRef:
+                        description: |-
+                          pemRef points at the PEM that identifies the service.
+                          Defaults to the matching key of the sigstore trust anchor ConfigMap.
+                        properties:
+                          key:
+                            description: key within the ConfigMap.
+                            minLength: 1
+                            type: string
+                          name:
+                            description: name of the ConfigMap.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      url:
+                        description: |-
+                          url is the service endpoint.
+                          Defaults to the matching endpoint in the SupplyChain's signing spec.
+                        pattern: ^https?://
+                        type: string
+                    type: object
                 type: object
             required:
             - supplyChainRef
@@ -376,6 +458,21 @@ spec:
                   type: object
                 type: array
                 x-kubernetes-list-type: atomic
+              trustAnchors:
+                description: |-
+                  trustAnchors are the fingerprints of the key material in the rendered
+                  TrustRoot.
+                properties:
+                  ctLogKey:
+                    description: ctLogKey is the SHA-256 of the CT log public key.
+                    type: string
+                  fulcioRoot:
+                    description: fulcioRoot is the SHA-256 of the Fulcio root certificate.
+                    type: string
+                  rekorKey:
+                    description: rekorKey is the SHA-256 of the Rekor public key.
+                    type: string
+                type: object
               trustRoot:
                 description: trustRoot is the name of the managed policy.sigstore.dev
                   TrustRoot.

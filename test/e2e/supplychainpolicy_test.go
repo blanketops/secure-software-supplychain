@@ -159,8 +159,14 @@ spec:
   mode: enforce
   signers:
   - serviceAccountName: supply-chain-runner
-  rekor:
-    url: http://rekor-server.rekor-system.svc.cluster.local
+  trustRoot:
+    fulcio:
+      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      pemRef:
+        name: %[3]s
+        key: %[4]s
+    rekor:
+      url: http://rekor-server.rekor-system.svc.cluster.local
 `,
 		policyNamespace, workloadNamespace, signing.RootsConfigMap,
 		signing.RootsFulcioKey, indent(newRootCertPEM()),

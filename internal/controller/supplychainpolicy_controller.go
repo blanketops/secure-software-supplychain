@@ -41,7 +41,6 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/policy"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
 const (
@@ -125,17 +124,16 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			fmt.Sprintf("SupplyChain %q does not sign its images", sc.Name))
 	}
 
-	var roots corev1.ConfigMap
-	key = types.NamespacedName{Namespace: scp.Namespace, Name: signing.RootsConfigMap}
-	if err := r.Get(ctx, key, &roots); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.notReady(ctx, &scp, "TrustAnchorsNotFound",
-				fmt.Sprintf("ConfigMap %q not found", key.Name))
-		}
+	roots, missing, err := r.trustAnchors(ctx, &scp)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if missing != "" {
+		return ctrl.Result{}, r.notReady(ctx, &scp, "TrustAnchorsNotFound",
+			fmt.Sprintf("ConfigMap %q not found", missing))
+	}
 
-	rendered, err := policy.Render(&scp, &sc, roots.Data)
+	rendered, err := policy.Render(&scp, &sc, roots)
 	if err != nil {
 		return ctrl.Result{}, r.notReady(ctx, &scp, "TrustAnchorsInvalid", err.Error())
 	}
@@ -168,8 +166,36 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	scp.Status.FulcioURL = rendered.Endpoints.FulcioURL
 	scp.Status.RekorURL = rendered.Endpoints.RekorURL
 	scp.Status.CTLogURL = rendered.Endpoints.CTLogURL
+	scp.Status.TrustAnchors = &rendered.TrustAnchors
 	return ctrl.Result{}, r.setReady(ctx, &scp, metav1.ConditionTrue, "PolicyApplied",
 		"TrustRoot and ClusterImagePolicies are in sync with the SupplyChain")
+}
+
+// trustAnchors reads the PEM of each trust anchor from the ConfigMap key the
+// policy points at. It returns them under their default key names, or the name
+// of the first ConfigMap that does not exist.
+func (r *SupplyChainPolicyReconciler) trustAnchors(
+	ctx context.Context,
+	scp *supplychainv1alpha1.SupplyChainPolicy,
+) (roots map[string]string, missing string, err error) {
+	configMaps := map[string]*corev1.ConfigMap{}
+	roots = map[string]string{}
+	for anchor, source := range policy.TrustSources(scp) {
+		cm, fetched := configMaps[source.Name]
+		if !fetched {
+			cm = &corev1.ConfigMap{}
+			err := r.Get(ctx, types.NamespacedName{Namespace: scp.Namespace, Name: source.Name}, cm)
+			if apierrors.IsNotFound(err) {
+				return nil, source.Name, nil
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			configMaps[source.Name] = cm
+		}
+		roots[anchor] = cm.Data[source.Key]
+	}
+	return roots, "", nil
 }
 
 // ensureServiceAccount creates the policy's ServiceAccount if it is missing.
@@ -276,6 +302,7 @@ func (r *SupplyChainPolicyReconciler) deleteRendered(
 	scp.Status.FulcioURL = ""
 	scp.Status.RekorURL = ""
 	scp.Status.CTLogURL = ""
+	scp.Status.TrustAnchors = nil
 	return nil
 }
 
@@ -312,8 +339,8 @@ func emptyLike(desired *unstructured.Unstructured) *unstructured.Unstructured {
 }
 
 // policiesInNamespace requeues the SupplyChainPolicies that depend on obj:
-// those referencing a changed SupplyChain, or all of them in the namespace
-// when the trust anchors change.
+// those referencing a changed SupplyChain, or those whose trust anchors come
+// from a changed ConfigMap.
 func (r *SupplyChainPolicyReconciler) policiesInNamespace(ctx context.Context, obj client.Object) []reconcile.Request {
 	var list supplychainv1alpha1.SupplyChainPolicyList
 	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
@@ -326,24 +353,34 @@ func (r *SupplyChainPolicyReconciler) policiesInNamespace(ctx context.Context, o
 		if isSupplyChain && list.Items[i].Spec.SupplyChainRef.Name != obj.GetName() {
 			continue
 		}
+		if !isSupplyChain && !trustsConfigMap(&list.Items[i], obj.GetName()) {
+			continue
+		}
 		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 	}
 	return requests
 }
 
+// trustsConfigMap reports whether any trust anchor of scp comes from the named
+// ConfigMap.
+func trustsConfigMap(scp *supplychainv1alpha1.SupplyChainPolicy, name string) bool {
+	for _, source := range policy.TrustSources(scp) {
+		if source.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SupplyChainPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	isRoots := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		return obj.GetName() == signing.RootsConfigMap
-	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&supplychainv1alpha1.SupplyChainPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&supplychainv1alpha1.SupplyChain{},
 			handler.EnqueueRequestsFromMapFunc(r.policiesInNamespace),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(r.policiesInNamespace),
-			builder.WithPredicates(isRoots)).
+			handler.EnqueueRequestsFromMapFunc(r.policiesInNamespace)).
 		Named("supplychainpolicy").
 		Complete(r)
 }

@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"time"
@@ -300,7 +301,9 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 			{ServiceAccountName: "supply-chain-runner"},
 			{Subject: "release@blanketops.dev", Issuer: "https://accounts.example.com"},
 		}
-		scp.Spec.Rekor = &supplychainv1alpha1.PolicyRekor{URL: "http://rekor.pinned"}
+		scp.Spec.TrustRoot = &supplychainv1alpha1.PolicyTrustRoot{
+			Rekor: &supplychainv1alpha1.TrustedAuthority{URL: "http://rekor.pinned"},
+		}
 		Expect(k8sClient.Update(ctx, &scp)).To(Succeed())
 
 		_, err := reconcilePolicy()
@@ -321,6 +324,60 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(identities).To(HaveLen(2))
 		rekorURL, _, _ := unstructured.NestedString(authorities[0].(map[string]any), "ctlog", "url")
 		Expect(rekorURL).To(Equal("http://rekor.pinned"))
+	})
+
+	It("composes the trust root from the ConfigMap keys the policy points at", func() {
+		createSupplyChain()
+		createRoots()
+		corpRoot := selfSignedRoot()
+		Expect(k8sClient.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "corp-trust", Namespace: namespace},
+			Data:       map[string]string{"ca.pem": corpRoot},
+		})).To(Succeed())
+		DeferCleanup(func() {
+			Expect(k8sClient.Delete(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "corp-trust", Namespace: namespace},
+			})).To(Succeed())
+		})
+
+		By("reporting the default trust anchors first")
+		_, err := reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+		var scp supplychainv1alpha1.SupplyChainPolicy
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		Expect(scp.Status.TrustAnchors).NotTo(BeNil())
+		defaultRoot := scp.Status.TrustAnchors.FulcioRoot
+		Expect(defaultRoot).To(HavePrefix("sha256:"))
+
+		By("pointing Fulcio at another ConfigMap and URL")
+		scp.Spec.TrustRoot = &supplychainv1alpha1.PolicyTrustRoot{
+			Fulcio: &supplychainv1alpha1.TrustedAuthority{
+				URL:    "https://fulcio.example.com",
+				PEMRef: &supplychainv1alpha1.ConfigMapKeyRef{Name: "corp-trust", Key: "ca.pem"},
+			},
+		}
+		Expect(k8sClient.Update(ctx, &scp)).To(Succeed())
+		_, err = reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		Expect(scp.Status.FulcioURL).To(Equal("https://fulcio.example.com"))
+		Expect(scp.Status.TrustAnchors.FulcioRoot).NotTo(Equal(defaultRoot))
+
+		trustRoot, err := getRendered(policy.TrustRootGVK)
+		Expect(err).NotTo(HaveOccurred())
+		cas, _, _ := unstructured.NestedSlice(trustRoot.Object, "spec", "sigstoreKeys", "certificateAuthorities")
+		Expect(cas[0]).To(HaveKeyWithValue("uri", "https://fulcio.example.com"))
+		Expect(cas[0]).To(HaveKeyWithValue("certChain", base64.StdEncoding.EncodeToString([]byte(corpRoot))))
+
+		By("reporting a trust ConfigMap that does not exist")
+		scp.Spec.TrustRoot.Fulcio.PEMRef.Name = "no-such-trust"
+		Expect(k8sClient.Update(ctx, &scp)).To(Succeed())
+		_, err = reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+		ready := readyCondition()
+		Expect(ready.Reason).To(Equal("TrustAnchorsNotFound"))
+		Expect(ready.Message).To(ContainSubstring("no-such-trust"))
 	})
 
 	It("rejects a signer that is not exactly one of serviceAccountName or subject", func() {
