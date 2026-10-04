@@ -327,18 +327,57 @@ func (r *ImageBuildReconciler) syncStatus(
 		ib.Status.Phase = "Running"
 	}
 
-	var steps []supplychainv1alpha1.StepStatus
-	for _, child := range pr.Status.PipelineRunStatusFields.ChildReferences {
-		steps = append(steps, supplychainv1alpha1.StepStatus{
-			Name:  child.Name,
-			Phase: string(child.DisplayName),
-		})
+	if ib.Status.Phase == "Succeeded" {
+		_, ib.Status.ImageDigest = results.ExtractImageResults(pr)
 	}
-	if len(steps) > 0 {
+
+	if steps := r.stepStatuses(ctx, pr); len(steps) > 0 {
 		ib.Status.Steps = steps
 	}
 
-	_ = r.Status().Update(ctx, ib)
+	if err := r.Status().Update(ctx, ib); err != nil {
+		logger.Error(err, "Failed to update ImageBuild status")
+	}
+}
+
+// stepStatuses reports each pipeline task of pr and how far it got. The
+// PipelineRun only lists its TaskRuns by name, so their conditions are read
+// from the TaskRuns themselves.
+func (r *ImageBuildReconciler) stepStatuses(
+	ctx context.Context,
+	pr *tektonv1.PipelineRun,
+) []supplychainv1alpha1.StepStatus {
+	var taskRuns tektonv1.TaskRunList
+	if err := r.List(ctx, &taskRuns,
+		client.InNamespace(pr.Namespace),
+		client.MatchingLabels{"tekton.dev/pipelineRun": pr.Name},
+	); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list TaskRuns", "pipelineRun", pr.Name)
+		return nil
+	}
+	phases := make(map[string]string, len(taskRuns.Items))
+	for i := range taskRuns.Items {
+		phase := "Running"
+		switch condition := taskRuns.Items[i].Status.GetCondition("Succeeded"); {
+		case condition == nil:
+			phase = "Pending"
+		case condition.IsTrue():
+			phase = "Succeeded"
+		case condition.IsFalse():
+			phase = "Failed"
+		}
+		phases[taskRuns.Items[i].Name] = phase
+	}
+
+	var steps []supplychainv1alpha1.StepStatus
+	for _, child := range pr.Status.ChildReferences {
+		phase, found := phases[child.Name]
+		if !found {
+			phase = "Pending"
+		}
+		steps = append(steps, supplychainv1alpha1.StepStatus{Name: child.PipelineTaskName, Phase: phase})
+	}
+	return steps
 }
 
 func (r *ImageBuildReconciler) setFailed(

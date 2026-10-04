@@ -158,7 +158,9 @@ func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
 		{Name: "commit", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"}},
 		{Name: "committer-date", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"}},
 		{Name: "url", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"}},
-		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
+		// The digest the registry serves, from the push — not the digest of the
+		// local build archive, which changes when the image is pushed.
+		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)"}},
 		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"}},
 	}
 
@@ -377,6 +379,9 @@ func pushImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 					{Name: "source"},
 					{Name: "dockerconfig"},
 				},
+				Results: []tektonv1.TaskResult{
+					{Name: "IMAGE_DIGEST", Description: "Digest of the image manifest as pushed to the registry"},
+				},
 				Steps: []tektonv1.Step{
 					{
 						Name:  "push",
@@ -386,11 +391,16 @@ func pushImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 						},
 						Script: `#!/bin/sh
 set -e
+# The manifest is rewritten on push, so its digest differs from the build
+# archive's. --digestfile records the digest the registry will serve; that is
+# the one that must be signed, attested and deployed.
 skopeo copy \
   --dest-authfile /workspace/dockerconfig/config.json \
+  --digestfile /tmp/pushed-digest \
   docker-archive:/workspace/source/image.tar \
   docker://$(params.IMAGE)
-echo "Pushed $(params.IMAGE)"
+printf '%s' "$(cat /tmp/pushed-digest)" > $(results.IMAGE_DIGEST.path)
+echo "Pushed $(params.IMAGE)@$(cat /tmp/pushed-digest)"
 `,
 					},
 				},
@@ -580,7 +590,7 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_DIGEST)"}},
+			{Name: "DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)"}},
 			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.FulcioURL}},
 			{Name: "REKOR_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.RekorURL}},
 		},

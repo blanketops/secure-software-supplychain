@@ -1016,6 +1016,13 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	}
 	obj.SetResourceVersion(existing.GetResourceVersion())
 	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
+	// Some objects cannot be changed once created: a Job's pod template, a
+	// bound PersistentVolumeClaim's spec. The API server rejects the update as
+	// invalid. The object is already there from an earlier run, so a re-run of
+	// the installer keeps it rather than failing.
+	if apierrors.IsInvalid(err) {
+		return nil
+	}
 	return err
 }
 
