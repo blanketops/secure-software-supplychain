@@ -24,7 +24,8 @@ GitHub Push
                                                  ├── push-image-docker     (registry push)
                                                  ├── vulnerability-scan-trivy (CVE scan)
                                                  ├── sign-image-cosign     (keyless signing)
-                                                 └── attest-image-rekor-fulcio (provenance)
+                                                 ├── attest-image-rekor-fulcio (provenance)
+                                                 └── verify-image-policy   (signature + authorization, as admission checks them)
 ```
 
 ---
@@ -87,6 +88,10 @@ Before Fulcio is called, three SubjectAccessReviews are performed against the `s
 | OutputProof | `imagesignatures` | `create` | SA is authorized to produce signing records |
 
 After the image is signed, the three proofs are attested to it with `cosign attest` (predicate type `https://blanketops.dev/attestations/authorization/v1`) by the same keyless identity. The signature says who built the image; the attestation says that identity was authorized, per the API server, at build time. `SupplyChainPolicy` requires both at admission.
+
+The last task of every build, `verify-image-policy`, checks the pushed image the same way: `cosign verify` for the
+signature and `cosign verify-attestation` for the authorization proofs, against the same signer, trust anchors and
+policy text that admission uses. A build that produces an image admission would reject fails.
 
 After all three SARs pass, a short-lived OIDC token is minted from the ServiceAccount and exchanged with Fulcio for an ephemeral signing certificate. The principal and cert PEM are stored on `ImageBuild.Status` for the terminal block to read back after the PipelineRun completes.
 

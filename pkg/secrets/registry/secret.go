@@ -188,7 +188,7 @@ func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
 					"blanketops.dev/managed":      "true",
 					"blanketops.dev/purpose":      "registry",
 					"blanketops.dev/supply-chain": p.sc.Name,
-					"blanketops.dev/image-build":  p.ib.Name,
+					"blanketops.dev/image-build":  p.ib.LabelValue(),
 				},
 			},
 			"spec": map[string]any{

@@ -71,6 +71,20 @@ type PipelineStepResults struct {
 	// SonarGateStatus is the SonarQube quality gate result.
 	// +optional
 	SonarGateStatus string `json:"sonarGateStatus,omitempty"`
+
+	// ── Policy ────────────────────────────────────────────────────────────
+
+	// PolicyVerification is PASS when the build's last step verified the
+	// pushed image the way admission does: keyless signature and authorization
+	// attestation by the SupplyChain's ServiceAccount. It is empty when that
+	// step did not run or did not pass.
+	// +optional
+	PolicyVerification string `json:"policyVerification,omitempty"`
+
+	// VerifiedSigner is the certificate identity the signature and the
+	// attestation were verified against.
+	// +optional
+	VerifiedSigner string `json:"verifiedSigner,omitempty"`
 }
 
 // ImageBuildResultSpec defines the desired state of ImageBuildResult.
@@ -132,6 +146,7 @@ type ImageBuildResultStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="ImageURL",type=string,JSONPath=`.status.imageURL`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.status.imageDigest`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.buildResults.policyVerification`
 // +kubebuilder:printcolumn:name="CompletedAt",type=date,JSONPath=`.status.completedAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

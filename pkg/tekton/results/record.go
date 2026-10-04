@@ -71,7 +71,7 @@ func (r *Recorder) Record(
 			Namespace: ib.Namespace,
 			Labels: map[string]string{
 				"blanketops.dev/managed":      "true",
-				"blanketops.dev/image-build":  ib.Name,
+				"blanketops.dev/image-build":  ib.LabelValue(),
 				"blanketops.dev/supply-chain": ib.Spec.SupplyChainRef.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
@@ -125,6 +125,7 @@ func (r *Recorder) Record(
 //	vulnerability-scan-trivy: TRIVY_SCAN_SUMMARY, TRIVY_CRITICAL_COUNT,
 //	                           TRIVY_HIGH_COUNT, TRIVY_TOTAL_COUNT, TRIVY_SARIF_PATH
 //	code-scan-sonarqube:    SONAR_GATE_STATUS
+//	verify-image-policy:    POLICY_VERIFICATION, VERIFIED_SIGNER
 func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepResults {
 	r := &supplyv1alpha1.PipelineStepResults{}
 	for _, result := range run.Status.Results {
@@ -155,6 +156,11 @@ func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepRe
 		// SonarQube
 		case "SONAR_GATE_STATUS":
 			r.SonarGateStatus = result.Value.StringVal
+		// Policy
+		case "POLICY_VERIFICATION":
+			r.PolicyVerification = result.Value.StringVal
+		case "VERIFIED_SIGNER":
+			r.VerifiedSigner = result.Value.StringVal
 		}
 	}
 	return r

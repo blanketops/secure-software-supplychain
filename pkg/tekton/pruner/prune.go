@@ -85,7 +85,7 @@ func (p *Pruner) PruneForImageBuild(
 	if err := p.Client.List(ctx, &runs,
 		client.InNamespace(ib.Namespace),
 		client.MatchingLabels{
-			"blanketops.dev/image-build": ib.Name,
+			"blanketops.dev/image-build": ib.LabelValue(),
 		},
 	); err != nil {
 		return fmt.Errorf("listing PipelineRuns for %s: %w", ib.Name, err)

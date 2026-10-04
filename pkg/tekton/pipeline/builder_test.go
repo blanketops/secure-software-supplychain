@@ -109,6 +109,87 @@ func TestSignsThePushedDigest(t *testing.T) {
 	}
 }
 
+// The build's last task must check the published image the way admission does:
+// same digest, same signer, and the same authorization policy text.
+func TestVerifiesTheImageAgainstThePolicyLast(t *testing.T) {
+	pr := testPipelineRun(t)
+	tasks := pr.Spec.PipelineSpec.Tasks
+	verify := tasks[len(tasks)-1]
+	if verify.Name != stepVerify {
+		t.Fatalf("last task = %q, want %q", verify.Name, stepVerify)
+	}
+	if len(verify.RunAfter) != 1 || verify.RunAfter[0] != stepAttest {
+		t.Errorf("verify runs after %v, want %q", verify.RunAfter, stepAttest)
+	}
+
+	if got, want := param(t, verify.Params, "DIGEST"), "$(tasks."+stepPushImage+".results.IMAGE_DIGEST)"; got != want {
+		t.Errorf("verify DIGEST = %q, want the pushed digest %q", got, want)
+	}
+	const identity = "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner"
+	if got := param(t, verify.Params, "IDENTITY"); got != identity {
+		t.Errorf("verify IDENTITY = %q, want %q", got, identity)
+	}
+	wantPolicy := signing.AuthorizationPolicyCUE("system:serviceaccount:default:supply-chain-runner")
+	if got := param(t, verify.Params, "AUTHORIZATION_POLICY"); got != wantPolicy {
+		t.Errorf("verify policy differs from the admission policy:\n%s", got)
+	}
+
+	steps := verify.TaskSpec.TaskSpec.Steps
+	signature, authorization := strings.Join(steps[1].Args, " "), strings.Join(steps[2].Args, " ")
+	if !strings.HasPrefix(signature, "verify ") || !strings.HasPrefix(authorization, "verify-attestation ") {
+		t.Fatalf("verify steps run %q and %q", steps[1].Args[0], steps[2].Args[0])
+	}
+	for _, args := range []string{signature, authorization} {
+		for _, want := range []string{
+			"--certificate-identity=$(params.IDENTITY)",
+			"--certificate-oidc-issuer=" + signing.KubernetesOIDCIssuer,
+			"$(params.IMAGE)@$(params.DIGEST)",
+		} {
+			if !strings.Contains(args, want) {
+				t.Errorf("%q is missing %q", args, want)
+			}
+		}
+	}
+	if !strings.Contains(authorization, "--type="+signing.AuthorizationPredicateType) {
+		t.Errorf("verify-attestation does not select the authorization predicate: %q", authorization)
+	}
+
+	// The outcome is reported last, so it is only written when both passed,
+	// and it is surfaced as pipeline results for the ImageBuildResult.
+	report := steps[len(steps)-1]
+	if report.Name != "report" || !strings.Contains(report.Script, "$(results.POLICY_VERIFICATION.path)") {
+		t.Errorf("last verify step %q does not report the outcome", report.Name)
+	}
+	reported := map[string]string{}
+	for _, result := range pr.Spec.PipelineSpec.Results {
+		reported[result.Name] = result.Value.StringVal
+	}
+	for _, name := range []string{"POLICY_VERIFICATION", "VERIFIED_SIGNER"} {
+		if want := "$(tasks." + stepVerify + ".results." + name + ")"; reported[name] != want {
+			t.Errorf("pipeline result %s = %q, want %q", name, reported[name], want)
+		}
+	}
+}
+
+func TestNoVerifyWithoutSigning(t *testing.T) {
+	sc := &supplyv1alpha1.SupplyChain{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+		Spec:       supplyv1alpha1.SupplyChainSpec{Image: supplyv1alpha1.ImageSpec{Registry: "docker.io", Name: "org/app"}},
+	}
+	ib := &supplyv1alpha1.ImageBuild{ObjectMeta: metav1.ObjectMeta{Name: "build", Namespace: "default"}}
+	pr := BuildPipelineRun("run", "default", sc, ib, "docker.io/org/app:tag", nil)
+	for _, task := range pr.Spec.PipelineSpec.Tasks {
+		if task.Name == stepVerify || task.Name == stepSign {
+			t.Errorf("pipeline with signing off has task %q", task.Name)
+		}
+	}
+	for _, result := range pr.Spec.PipelineSpec.Results {
+		if result.Name == "POLICY_VERIFICATION" {
+			t.Error("pipeline with signing off reports a result of the verify task it does not have")
+		}
+	}
+}
+
 func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 	sign := findTask(t, testPipelineRun(t), stepSign)
 

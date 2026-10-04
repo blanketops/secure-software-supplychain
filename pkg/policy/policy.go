@@ -144,7 +144,7 @@ func Render(
 			"predicateType": signing.AuthorizationPredicateType,
 			"policy": map[string]any{
 				"type": "cue",
-				"data": authorizationCUE(authz.Principal(sc.Namespace, serviceAccount)),
+				"data": signing.AuthorizationPolicyCUE(authz.Principal(sc.Namespace, serviceAccount)),
 			},
 		},
 	}
@@ -243,20 +243,6 @@ func resolveSigners(scp *supplyv1alpha1.SupplyChainPolicy, supplyChainServiceAcc
 		signers = append(signers, identity)
 	}
 	return signers
-}
-
-// authorizationCUE is the policy the authorization attestation must satisfy:
-// all three proofs present, for this ServiceAccount, and allowed.
-func authorizationCUE(principal string) string {
-	proof := func(field string, check signing.AuthorizationCheck) string {
-		return fmt.Sprintf("\t%s: {principal: %q, resource: %q, verb: %q, allowed: true}\n",
-			field, principal, check.Resource, check.Verb)
-	}
-	return fmt.Sprintf("predicateType: %q\npredicate: {\n", signing.AuthorizationPredicateType) +
-		proof("scope", signing.ScopeCheck) +
-		proof("intent", signing.IntentCheck) +
-		proof("output", signing.OutputCheck) +
-		"}\n"
 }
 
 // ImageGlob matches every tag and digest of the image a SupplyChain pushes.

@@ -65,3 +65,19 @@ func (c *RunSigningContext) AuthorizationPredicateJSON() (string, error) {
 	}
 	return string(data), nil
 }
+
+// AuthorizationPolicyCUE is the policy an authorization attestation must
+// satisfy: all three proofs present, for this principal, and allowed. The
+// admission policy and the pipeline's own verification step both use it, so
+// they cannot disagree about what "authorized" means.
+func AuthorizationPolicyCUE(principal string) string {
+	proof := func(field string, check AuthorizationCheck) string {
+		return fmt.Sprintf("\t%s: {principal: %q, resource: %q, verb: %q, allowed: true}\n",
+			field, principal, check.Resource, check.Verb)
+	}
+	return fmt.Sprintf("predicateType: %q\npredicate: {\n", AuthorizationPredicateType) +
+		proof("scope", ScopeCheck) +
+		proof("intent", IntentCheck) +
+		proof("output", OutputCheck) +
+		"}\n"
+}

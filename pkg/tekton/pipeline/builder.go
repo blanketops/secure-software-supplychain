@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
@@ -36,9 +37,12 @@ const (
 	stepTrivy              = "vulnerability-scan-trivy"
 	stepSign               = "sign-image-cosign"
 	stepAttest             = "attest-image-rekor-fulcio"
+	stepVerify             = "verify-image-policy"
+	cosignImage            = "gcr.io/projectsigstore/cosign:v2.2.3"
 	sigstoreRootsMountPath = "/etc/sigstore"
 	// Steps of one task share /workspace.
 	authorizationPredicatePath = "/workspace/authorization-predicate.json"
+	authorizationPolicyPath    = "/workspace/authorization-policy.cue"
 	workspaceShared            = "shared-data"
 	workspaceSSHCreds          = "ssh-creds"
 	workspaceDockerConfig      = "dockerconfig"
@@ -121,7 +125,7 @@ func BuildPipelineRun(
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
 				Tasks:   buildTaskList(sc, ib, imageRef, sigCtx),
-				Results: buildResults(sc),
+				Results: buildResults(sc, sigCtx != nil),
 			},
 			Params: tektonv1.Params{
 				{
@@ -153,7 +157,7 @@ func BuildPipelineRun(
 // ── buildResults update ────────────────────────────────────────────────────
 // Replace the REKOR_LOG_INDEX entry in buildResults:
 
-func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
+func buildResults(sc *supplyv1alpha1.SupplyChain, verified bool) []tektonv1.PipelineResult {
 	results := []tektonv1.PipelineResult{
 		{Name: "commit", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"}},
 		{Name: "committer-date", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"}},
@@ -171,6 +175,14 @@ func buildResults(sc *supplyv1alpha1.SupplyChain) []tektonv1.PipelineResult {
 			tektonv1.PipelineResult{Name: "TRIVY_HIGH_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_HIGH_COUNT)"}},
 			tektonv1.PipelineResult{Name: "TRIVY_TOTAL_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_TOTAL_COUNT)"}},
 			tektonv1.PipelineResult{Name: "TRIVY_SARIF_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"}},
+		)
+	}
+
+	// Reported by the verify task, which only runs for a signed build.
+	if sc.Spec.Steps.Sign && verified {
+		results = append(results,
+			tektonv1.PipelineResult{Name: "POLICY_VERIFICATION", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepVerify + ".results.POLICY_VERIFICATION)"}},
+			tektonv1.PipelineResult{Name: "VERIFIED_SIGNER", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepVerify + ".results.VERIFIED_SIGNER)"}},
 		)
 	}
 
@@ -236,6 +248,13 @@ func buildTaskList(
 	// Rekor logs the signature, not the raw image — sign must come first
 	if sc.Spec.Steps.Attest {
 		tasks = append(tasks, attestTask(imageRef, last))
+		last = stepAttest
+	}
+
+	// Step 9: verify — check the published image the way admission will.
+	// A build only succeeds if what it produced can actually be deployed.
+	if sc.Spec.Steps.Sign && sigCtx != nil {
+		tasks = append(tasks, verifyTask(sc, imageRef, last))
 	}
 
 	return tasks
@@ -563,7 +582,7 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 						// can find the entry by sha256 digest.
 						// IMAGE@DIGEST format: docker.io/org/repo:tag@sha256:abc...
 						Name:  "sign",
-						Image: "gcr.io/projectsigstore/cosign:v2.2.3",
+						Image: cosignImage,
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "oidc-info", MountPath: "/var/run/sigstore/cosign"},
 							{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath},
@@ -641,6 +660,131 @@ echo "IMAGE_DIGEST=${digest}"
 		},
 		Params: tektonv1.Params{
 			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
+		},
+	}
+}
+
+// verifyTask is the last step of a build: it verifies the pushed image against
+// what a SupplyChainPolicy requires at admission. The signature must come from
+// the SupplyChain's ServiceAccount, with a Fulcio certificate chaining to the
+// trust anchors, a CT log proof and a Rekor entry; and the authorization
+// attestation must be signed the same way and show all three proofs allowed.
+func verifyTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
+	endpoints := signing.EndpointsFor(sc)
+	serviceAccount := sc.Spec.ServiceAccountName
+	if serviceAccount == "" {
+		serviceAccount = "default"
+	}
+	identity := signing.ServiceAccountIdentity(sc.Namespace, serviceAccount)
+	policy := signing.AuthorizationPolicyCUE(authz.Principal(sc.Namespace, serviceAccount))
+
+	trust := []corev1.EnvVar{
+		{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
+		{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsFulcioKey},
+		{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/" + signing.RootsRekorKey},
+		{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsCTLogKey},
+	}
+	roots := []corev1.VolumeMount{{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath}}
+	signer := []string{
+		"--certificate-identity=$(params.IDENTITY)",
+		"--certificate-oidc-issuer=" + signing.KubernetesOIDCIssuer,
+		"--rekor-url=$(params.REKOR_URL)",
+	}
+	const image = "$(params.IMAGE)@$(params.DIGEST)"
+	str := func(name, value string) tektonv1.Param {
+		return tektonv1.Param{Name: name, Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}}
+	}
+
+	return tektonv1.PipelineTask{
+		Name:     stepVerify,
+		RunAfter: after(runAfter),
+		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
+			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
+		},
+		TaskSpec: &tektonv1.EmbeddedTask{
+			TaskSpec: tektonv1.TaskSpec{
+				Params: []tektonv1.ParamSpec{
+					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
+					{Name: "DIGEST", Type: tektonv1.ParamTypeString},
+					{Name: "REKOR_URL", Type: tektonv1.ParamTypeString},
+					{Name: "IDENTITY", Type: tektonv1.ParamTypeString},
+					{Name: "AUTHORIZATION_POLICY", Type: tektonv1.ParamTypeString},
+				},
+				Workspaces: []tektonv1.WorkspaceDeclaration{{Name: "dockerconfig"}},
+				Results: []tektonv1.TaskResult{
+					{Name: "POLICY_VERIFICATION", Description: "PASS when the signature and the authorization attestation verified"},
+					{Name: "VERIFIED_SIGNER", Description: "Certificate identity both were verified against"},
+				},
+				Volumes: []corev1.Volume{{
+					Name: "sigstore-roots",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: signing.RootsConfigMap},
+						},
+					},
+				}},
+				Steps: []tektonv1.Step{
+					{
+						// The cosign image has no shell; see withAuthorizationAttestation.
+						Name:  "write-authorization-policy",
+						Image: "busybox:1.36",
+						Env:   []corev1.EnvVar{{Name: "POLICY", Value: "$(params.AUTHORIZATION_POLICY)"}},
+						Script: `#!/bin/sh
+set -e
+printf '%s' "${POLICY}" > ` + authorizationPolicyPath + `
+`,
+					},
+					{
+						Name:         "verify-signature",
+						Image:        cosignImage,
+						VolumeMounts: roots,
+						Env:          trust,
+						Args:         append(append([]string{"verify"}, signer...), image),
+					},
+					{
+						Name:         "verify-authorization",
+						Image:        cosignImage,
+						VolumeMounts: roots,
+						Env:          trust,
+						Args: append(append([]string{
+							"verify-attestation",
+							"--type=" + signing.AuthorizationPredicateType,
+							"--policy=" + authorizationPolicyPath,
+						}, signer...), image),
+					},
+					{
+						// Only reached when both verifications passed: a failing
+						// step stops the task, so the results stay unset.
+						Name:  "report",
+						Image: "busybox:1.36",
+						Env: []corev1.EnvVar{
+							{Name: "IMAGE", Value: image},
+							{Name: "IDENTITY", Value: "$(params.IDENTITY)"},
+							{Name: "REKOR_URL", Value: "$(params.REKOR_URL)"},
+						},
+						Script: `#!/bin/sh
+set -e
+printf '%s' "PASS" > $(results.POLICY_VERIFICATION.path)
+printf '%s' "${IDENTITY}" > $(results.VERIFIED_SIGNER.path)
+echo "Supply chain policy verification"
+echo "  Image:          ${IMAGE}"
+echo "  Signer:         ${IDENTITY}"
+echo "  Issuer:         ` + signing.KubernetesOIDCIssuer + `"
+echo "  Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)"
+echo "  Authorization:  verified (scope, intent, output allowed)"
+echo "  Rekor:          ${REKOR_URL}"
+echo "  Result:         PASS"
+`,
+					},
+				},
+			},
+		},
+		Params: tektonv1.Params{
+			str("IMAGE", imageRef),
+			str("DIGEST", "$(tasks."+stepPushImage+".results.IMAGE_DIGEST)"),
+			str("REKOR_URL", endpoints.RekorURL),
+			str("IDENTITY", identity),
+			str("AUTHORIZATION_POLICY", policy),
 		},
 	}
 }

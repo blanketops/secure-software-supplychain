@@ -66,7 +66,7 @@ func (r *GitSSHSecretReconciler) Reconcile(
 					"blanketops.dev/managed":      "true",
 					"blanketops.dev/purpose":      "git-ssh",
 					"blanketops.dev/supply-chain": sc.Name,
-					"blanketops.dev/image-build":  ib.Name,
+					"blanketops.dev/image-build":  ib.LabelValue(),
 				},
 			},
 			"spec": map[string]any{

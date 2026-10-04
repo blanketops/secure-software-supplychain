@@ -26,6 +26,9 @@ spec:
     - jsonPath: .status.imageDigest
       name: Digest
       type: string
+    - jsonPath: .status.buildResults.policyVerification
+      name: Policy
+      type: string
     - jsonPath: .status.completedAt
       name: CompletedAt
       type: date
@@ -105,6 +108,13 @@ spec:
                     description: ImageURL is the fully-qualified image reference that
                       was built and pushed.
                     type: string
+                  policyVerification:
+                    description: |-
+                      PolicyVerification is PASS when the build's last step verified the
+                      pushed image the way admission does: keyless signature and authorization
+                      attestation by the SupplyChain's ServiceAccount. It is empty when that
+                      step did not run or did not pass.
+                    type: string
                   repoURL:
                     description: RepoURL is the git repository URL.
                     type: string
@@ -129,6 +139,11 @@ spec:
                     type: string
                   trivyTotalCount:
                     description: TrivyTotalCount is the total HIGH+CRITICAL count.
+                    type: string
+                  verifiedSigner:
+                    description: |-
+                      VerifiedSigner is the certificate identity the signature and the
+                      attestation were verified against.
                     type: string
                 type: object
               completedAt:

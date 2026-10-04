@@ -16,8 +16,30 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// maxLabelValueLength is the longest value Kubernetes accepts for a label.
+const maxLabelValueLength = 63
+
+// LabelValue is the value that identifies this ImageBuild in the
+// blanketops.dev/image-build label of the objects created for it.
+//
+// It is the name when that fits in a label. A build triggered by a push is
+// named after the SupplyChain, the branch and the full commit SHA, which is
+// often longer than a label value may be; then the name is cut short and a
+// hash of the full name is appended, so it stays unique and stable.
+func (ib *ImageBuild) LabelValue() string {
+	if len(ib.Name) <= maxLabelValueLength {
+		return ib.Name
+	}
+	sum := sha256.Sum256([]byte(ib.Name))
+	suffix := "-" + hex.EncodeToString(sum[:])[:8]
+	return ib.Name[:maxLabelValueLength-len(suffix)] + suffix
+}
 
 // ImageBuildSpec defines the desired state of ImageBuild.
 type ImageBuildSpec struct {

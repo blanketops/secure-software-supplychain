@@ -84,7 +84,7 @@ func (s *SignatureReconciler) EnsureSignature(
 			Namespace: ib.Namespace,
 			Labels: map[string]string{
 				"blanketops.dev/managed":      "true",
-				"blanketops.dev/image-build":  ib.Name,
+				"blanketops.dev/image-build":  ib.LabelValue(),
 				"blanketops.dev/supply-chain": sc.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{

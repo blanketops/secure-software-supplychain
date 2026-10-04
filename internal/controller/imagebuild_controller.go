@@ -271,7 +271,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	if pr.Labels == nil {
 		pr.Labels = map[string]string{}
 	}
-	pr.Labels["blanketops.dev/image-build"] = ib.Name
+	pr.Labels["blanketops.dev/image-build"] = ib.LabelValue()
 
 	if err := controllerutil.SetControllerReference(ib, pr, r.Scheme); err != nil {
 		return nil, nil, err
