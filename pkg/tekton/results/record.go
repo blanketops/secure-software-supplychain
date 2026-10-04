@@ -57,6 +57,16 @@ func (r *Recorder) Record(
 	phase, reason := extractPhase(run)
 	buildResults := ExtractAllResults(run)
 
+	var taskRuns tektonv1.TaskRunList
+	if err := r.Client.List(ctx, &taskRuns,
+		client.InNamespace(run.Namespace),
+		client.MatchingLabels{"tekton.dev/pipelineRun": run.Name},
+	); err != nil {
+		log.Error(err, "Failed to list TaskRuns; recording the pipeline results only")
+	} else {
+		FillFromTaskRuns(buildResults, taskRuns.Items)
+	}
+
 	log.Info("recording build result",
 		"phase", phase,
 		"imageURL", buildResults.ImageURL,
@@ -129,41 +139,77 @@ func (r *Recorder) Record(
 func ExtractAllResults(run *tektonv1.PipelineRun) *supplyv1alpha1.PipelineStepResults {
 	r := &supplyv1alpha1.PipelineStepResults{}
 	for _, result := range run.Status.Results {
-		switch result.Name {
-		// Git
-		case "commit":
-			r.Commit = result.Value.StringVal
-		case "committer-date":
-			r.CommitterDate = result.Value.StringVal
-		case "url":
-			r.RepoURL = result.Value.StringVal
-		// Build
-		case "IMAGE_URL":
-			r.ImageURL = result.Value.StringVal
-		case "IMAGE_DIGEST":
-			r.ImageDigest = result.Value.StringVal
-		// Trivy
-		case "TRIVY_SCAN_SUMMARY":
-			r.TrivyScanSummary = result.Value.StringVal
-		case "TRIVY_CRITICAL_COUNT":
-			r.TrivyCriticalCount = result.Value.StringVal
-		case "TRIVY_HIGH_COUNT":
-			r.TrivyHighCount = result.Value.StringVal
-		case "TRIVY_TOTAL_COUNT":
-			r.TrivyTotalCount = result.Value.StringVal
-		case "TRIVY_SARIF_PATH":
-			r.TrivySarifPath = result.Value.StringVal
-		// SonarQube
-		case "SONAR_GATE_STATUS":
-			r.SonarGateStatus = result.Value.StringVal
-		// Policy
-		case "POLICY_VERIFICATION":
-			r.PolicyVerification = result.Value.StringVal
-		case "VERIFIED_SIGNER":
-			r.VerifiedSigner = result.Value.StringVal
-		}
+		setResult(r, result.Name, result.Value.StringVal)
 	}
 	return r
+}
+
+// setResult stores one named result in its field. It reports whether the name
+// is one it knows.
+func setResult(r *supplyv1alpha1.PipelineStepResults, name, value string) bool {
+	if field := resultField(r, name); field != nil {
+		*field = value
+		return true
+	}
+	return false
+}
+
+func resultField(r *supplyv1alpha1.PipelineStepResults, name string) *string {
+	switch name {
+	// Git
+	case "commit":
+		return &r.Commit
+	case "committer-date":
+		return &r.CommitterDate
+	case "url":
+		return &r.RepoURL
+	// Build
+	case "IMAGE_URL":
+		return &r.ImageURL
+	case "IMAGE_DIGEST":
+		return &r.ImageDigest
+	// Trivy
+	case "TRIVY_SCAN_SUMMARY":
+		return &r.TrivyScanSummary
+	case "TRIVY_CRITICAL_COUNT":
+		return &r.TrivyCriticalCount
+	case "TRIVY_HIGH_COUNT":
+		return &r.TrivyHighCount
+	case "TRIVY_TOTAL_COUNT":
+		return &r.TrivyTotalCount
+	case "TRIVY_SARIF_PATH":
+		return &r.TrivySarifPath
+	// SonarQube
+	case "SONAR_GATE_STATUS":
+		return &r.SonarGateStatus
+	// Policy
+	case "POLICY_VERIFICATION":
+		return &r.PolicyVerification
+	case "VERIFIED_SIGNER":
+		return &r.VerifiedSigner
+	}
+	return nil
+}
+
+// FillFromTaskRuns adds what the tasks of a run reported but the run itself
+// did not. A PipelineRun only publishes results of tasks that succeeded, so
+// for a build stopped by a gate the reason (how many vulnerabilities, say) is
+// only on the TaskRun.
+//
+// The image URL and digest are never taken from here: only the pipeline's own
+// values say what was published, and a build that failed before the push
+// published nothing.
+func FillFromTaskRuns(r *supplyv1alpha1.PipelineStepResults, taskRuns []tektonv1.TaskRun) {
+	for i := range taskRuns {
+		for _, result := range taskRuns[i].Status.Results {
+			if result.Name == "IMAGE_URL" || result.Name == "IMAGE_DIGEST" {
+				continue
+			}
+			if field := resultField(r, result.Name); field != nil && *field == "" {
+				*field = result.Value.StringVal
+			}
+		}
+	}
 }
 
 // ExtractImageResults returns just IMAGE_URL and IMAGE_DIGEST.

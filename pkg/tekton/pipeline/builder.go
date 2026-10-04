@@ -43,9 +43,11 @@ const (
 	// Steps of one task share /workspace.
 	authorizationPredicatePath = "/workspace/authorization-predicate.json"
 	authorizationPolicyPath    = "/workspace/authorization-policy.cue"
-	workspaceShared            = "shared-data"
-	workspaceSSHCreds          = "ssh-creds"
-	workspaceDockerConfig      = "dockerconfig"
+	// imageArchive is the build output in the shared workspace.
+	imageArchive          = "image.tar"
+	workspaceShared       = "shared-data"
+	workspaceSSHCreds     = "ssh-creds"
+	workspaceDockerConfig = "dockerconfig"
 	// workspaceTrivyCache removed — Trivy DB is now baked into the scanner image.
 	// See dependencies/tekton/task/trivy-db/Dockerfile.
 )
@@ -225,17 +227,20 @@ func buildTaskList(
 	tasks = append(tasks, buildImageTask(imageRef, last))
 	last = stepBuildImage
 
-	// Step 5: push image (Skopeo) — push to registry to get a real digest
-	tasks = append(tasks, pushImageTask(imageRef, last))
-	last = stepPushImage
-
-	// Step 6: trivy — scan the real registry image digest, not a local tar
-	// Scanning after push guarantees we're scanning what will actually run.
+	// Step 5: trivy — scan the build archive before anything is published.
+	// The push step copies that same archive to the registry, so what is
+	// scanned is what will run; scanning first means an image that fails the
+	// gate never reaches the registry.
 	// Uses a custom image with the vulnerability DB pre-baked — no downloads.
 	if sc.Spec.Steps.Trivy {
 		tasks = append(tasks, trivyTask(last))
 		last = stepTrivy
 	}
+
+	// Step 6: push image (Skopeo) — only what passed the scan. The push also
+	// yields the digest the registry serves, which is what gets signed.
+	tasks = append(tasks, pushImageTask(imageRef, last))
+	last = stepPushImage
 
 	// Step 7: sign (Cosign + Fulcio) — image is clean, now sign it
 	// Must sign before attesting — you attest to a signed image
@@ -448,6 +453,12 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 			{Name: "IMAGE_PATH", Value: tektonv1.ParamValue{
 				Type:      tektonv1.ParamTypeString,
 				StringVal: "$(params.image-ref)",
+			}},
+			// Scan the archive the build step wrote to the shared workspace, so
+			// the image is checked before the push step publishes it.
+			{Name: "IMAGE_TAR", Value: tektonv1.ParamValue{
+				Type:      tektonv1.ParamTypeString,
+				StringVal: imageArchive,
 			}},
 			{Name: "SEVERITY", Value: tektonv1.ParamValue{
 				Type:      tektonv1.ParamTypeString,

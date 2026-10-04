@@ -1,230 +1,326 @@
 # secure-software-supply-chain
 
-A Kubernetes operator that manages a full software supply chain pipeline from two CRs. Built with Kubebuilder, powered by Tekton, secured by Sigstore.
+A Kubernetes operator that turns a git push into a container image that is built, scanned, signed, attested,
+verified, and only then allowed to run. Built with Kubebuilder, driven by Tekton, secured by Sigstore.
 
 > "Treat your pipeline as infrastructure, not a script."
 
----
-
-## Overview
-
-`secure-software-supply-chain` is part of the [BlanketOps](https://github.com/ntlaletsi70) platform engineering project. It implements a supply chain security pipeline as a Kubernetes controller — declarative, auditable, and self-managing.
-
-A `SupplyChain` CR defines the pipeline for a repository. An `ImageBuild` CR is auto-created on every GitHub push via a Tekton EventListener — no manual triggering required. The controller drives a Tekton `PipelineRun` through build, scan, sign, attest, and publish — all reconciled automatically.
-
-```
-GitHub Push
-    └── EventListener (Tekton Triggers)
-            └── creates ──► ImageBuild CR
-                                └── owns ──► Tekton PipelineRun
-                                                 ├── git-clone             (source fetch)
-                                                 ├── authentication-fulcio (OIDC warm-up)
-                                                 ├── sonarqube-scanner     (quality gate)
-                                                 ├── build-image-buildah   (OCI image build)
-                                                 ├── push-image-docker     (registry push)
-                                                 ├── vulnerability-scan-trivy (CVE scan)
-                                                 ├── sign-image-cosign     (keyless signing)
-                                                 ├── attest-image-rekor-fulcio (provenance)
-                                                 └── verify-image-policy   (signature + authorization, as admission checks them)
-```
+It is part of the [BlanketOps](https://github.com/ntlaletsi70) platform engineering project.
 
 ---
 
-## Architecture
+## What it does
+
+You declare a `SupplyChain` for a repository and a `SupplyChainPolicy` for what may run. From then on:
+
+```
+git push
+  └── GitHub webhook ──► EventListener (Tekton Triggers)
+        └── creates ──► ImageBuild
+              └── owns ──► PipelineRun
+                    1. git-clone                 fetch the source
+                    2. authentication-fulcio     check the signing identity can reach Fulcio
+                    3. code-scan-sonarqube       static analysis
+                    4. build-image-buildah       build the image to a local archive
+                    5. vulnerability-scan-trivy  scan the archive; any CRITICAL finding stops the build
+                    6. push-image-docker         publish, and record the digest the registry serves
+                    7. sign-image-cosign         keyless signature + authorization attestation
+                    8. attest-image-rekor-fulcio hand the image to Tekton Chains for provenance
+                    9. verify-image-policy       verify the published image the way admission will
+
+kubectl apply (a workload)
+  └── policy-controller ──► admits the image only if the SupplyChainPolicy is satisfied
+```
+
+What a successful build guarantees:
+
+| Guarantee | How |
+|---|---|
+| No critical vulnerabilities | Trivy scans before the push; an image that fails is never published or signed |
+| Signed by a known identity, with no long-lived keys | Cosign keyless: a Fulcio certificate issued to the pipeline's ServiceAccount |
+| The signature is publicly witnessed | CT log proof in the certificate, Rekor entry for the signature |
+| The build was authorized | Three SubjectAccessReviews, attested to the image |
+| The signature is on the image you can pull | The digest signed is the one the registry serves |
+| The image would be admitted | The last step verifies it against the same rules as admission |
+
+---
+
+## Resources
+
+API group: `supplychain.blanketops.dev/v1alpha1`
+
+| Kind | What it is |
+|---|---|
+| `SupplyChain` | The pipeline definition for one repository. One per repository; the controller enforces it. Owns the Tekton tasks, the trigger stack, the EventListener ingress and the `supply-chain-runner` ServiceAccount. |
+| `SupplyChainPolicy` | The admission side of a SupplyChain. Renders the policy-controller `TrustRoot` and `ClusterImagePolicies` that decide which of its images may run. |
+| `GitHubWebhook` | Registers the push webhook on the GitHub repository and keeps it registered. |
+| `ImageBuild` | One execution of the pipeline. Created by a push, or by hand. Owns the `PipelineRun` and tracks each step. |
+| `ImageSignature` | The signing record of a build: who signed, with which certificate, and the Rekor index. |
+| `ImageBuildResult` | The durable record of a build. Survives PipelineRun pruning. Git provenance, digest, scan counts, policy verification. |
 
 ![Supply Chain Architecture](docs/architecture.png)
 
-The pipeline is driven end-to-end by two CRs and a set of Tekton Tasks. The controller reconciles the full lifecycle — from webhook registration to signed image attestation.
-
 ---
 
-### CRs
+## How a build is authorized
 
-**`SupplyChain`** — the pipeline definition for a repository. One per repo. The controller enforces this at reconcile time. It owns and reconciles:
-- Custom Tekton Tasks
-- TriggerBinding, TriggerTemplate, EventListener (GitHub webhook automation)
-- Ingress for the EventListener (host sourced from `spec.webhookHost`)
-- The `supply-chain-runner` ServiceAccount
+Before a build starts, the `ImageBuild` controller runs three gates in order.
 
-**`GitHubWebhook`** — manages GitHub webhook registration. Automatically registers the webhook URL with GitHub using a GitHub App installation token. Idempotent — safe to apply on every reconcile.
+**Gate 1: prerequisites.** The git SSH key, registry credentials and SonarQube token are synced from the
+`ClusterSecretStore` by External Secrets. The build waits until all of them exist.
 
-**`ImageBuild`** — a single pipeline execution. Auto-created by the EventListener on every GitHub push. Owns the Tekton `PipelineRun` and tracks per-step status.
-
-**`ImageSignature`** — the cryptographic audit record. Created before the PipelineRun with `Phase=Pending`, updated to `Phase=Signed` on success. Carries the Fulcio cert reference, principal identity, and Rekor log index.
-
-**`ImageBuildResult`** — the durable execution record. Survives PipelineRun pruning. Captures full pipeline step results: git provenance, image digest, Trivy scan summary, SonarQube gate status.
-
----
-
-### Trigger Layer
-
-The `SupplyChain` controller automatically provisions the full Tekton Triggers stack per chain:
-
-- **TriggerBinding** — extracts `git-repo-url`, `git-revision`, `git-commit-sha`, `short-sha`, `repo-full-name` from the GitHub push payload
-- **TriggerTemplate** — creates an `ImageBuild` CR with extracted params. Name is deterministic: `<supplychain>-<branch>-<full-sha>` — idempotent on replay
-- **EventListener** — shared across all SupplyChains in the namespace, exposed via nginx Ingress
-- **Ingress** — routes `spec.webhookHost` → EventListener. Host updated automatically when `webhookHost` changes
-
----
-
-### Mediator
-
-The `ImageBuildReconciler` uses a mediator pattern to sequence prerequisites before pipeline construction.
-
-**Gate 1 — Prerequisites**
-- Git SSH ExternalSecret reconciliation
-- Registry ExternalSecret reconciliation (Buildah + Tekton Chains split credentials)
-- SonarQube ExternalSecret reconciliation
-- Convergence wait — all secrets must materialise before proceeding
-
-**Gate 2 — Signing Context (three-proof authorization)**
-
-Before Fulcio is called, three SubjectAccessReviews are performed against the `supply-chain-runner` ServiceAccount. All three must pass:
+**Gate 2: three proofs.** Three SubjectAccessReviews are performed for the `supply-chain-runner` ServiceAccount.
+All three must be allowed:
 
 | Proof | Resource | Verb | Meaning |
 |-------|----------|------|---------|
-| ScopeProof | `supplychains` | `get` | SA can see the chain it claims to execute against |
-| IntentProof | `imagebuilds` | `create` | SA is authorized to initiate a build |
-| OutputProof | `imagesignatures` | `create` | SA is authorized to produce signing records |
+| Scope | `supplychains` | `get` | The ServiceAccount can see the chain it builds for |
+| Intent | `imagebuilds` | `create` | It may start a build |
+| Output | `imagesignatures` | `create` | It may produce signing records |
 
-After the image is signed, the three proofs are attested to it with `cosign attest` (predicate type `https://blanketops.dev/attestations/authorization/v1`) by the same keyless identity. The signature says who built the image; the attestation says that identity was authorized, per the API server, at build time. `SupplyChainPolicy` requires both at admission.
+Then a short-lived token is minted for the ServiceAccount and exchanged with Fulcio for a signing certificate.
 
-The last task of every build, `verify-image-policy`, checks the pushed image the same way: `cosign verify` for the
-signature and `cosign verify-attestation` for the authorization proofs, against the same signer, trust anchors and
-policy text that admission uses. A build that produces an image admission would reject fails.
+**Gate 3: the PipelineRun.** Created with the proofs injected. An `ImageSignature` is created as `Pending` first,
+so the signing identity is on record before anything runs.
 
-After all three SARs pass, a short-lived OIDC token is minted from the ServiceAccount and exchanged with Fulcio for an ephemeral signing certificate. The principal and cert PEM are stored on `ImageBuild.Status` for the terminal block to read back after the PipelineRun completes.
+After signing, the three proofs are attached to the image with `cosign attest` (predicate type
+`https://blanketops.dev/attestations/authorization/v1`), signed by the same keyless identity. The signature says
+who built the image. The attestation says that identity was authorized, according to the API server, when it did.
 
-**Gate 3 — PipelineRun**
-
-Builds and creates the Tekton `PipelineRun` with the signing context injected. The `ImageSignature` CR is created at `Phase=Pending` before the PipelineRun starts.
+When the PipelineRun finishes, the controller records an `ImageBuildResult`, marks the `ImageSignature` `Signed`
+or `Failed`, and prunes old PipelineRuns (the last 3 succeeded and 1 failed are kept).
 
 ---
 
-### Terminal Actions
+## Enforcing at admission: SupplyChainPolicy
 
-When a PipelineRun reaches a terminal state (Succeeded or Failed), the reconciler runs three best-effort actions:
+```yaml
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChainPolicy
+metadata:
+  name: for-kaniko-app
+spec:
+  supplyChainRef:
+    name: for-kaniko-app
+  mode: enforce                                    # or warn
+  serviceAccountName: supply-chain-policy-runner   # default
+  signers:
+  - serviceAccountName: supply-chain-runner
+  trustRoot:
+    fulcio:
+      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      pemRef: {name: blanketops-sigstore-roots, key: fulcio-root.pem}
+    rekor:
+      url: http://rekor-server.rekor-system.svc.cluster.local
+      pemRef: {name: blanketops-sigstore-roots, key: rekor.pub}
+    ctLog:
+      url: http://ctlog.ctlog-system.svc/fulcio
+      pemRef: {name: blanketops-sigstore-roots, key: ctfe.pub}
+```
 
-1. **Recorder** — creates or updates an `ImageBuildResult` CR with the full pipeline step results
-2. **Signature** — marks the `ImageSignature` as `Signed` (with digest) or `Failed`
-3. **Pruner** — deletes old PipelineRuns beyond the retention window (keeps last 3 succeeded, 1 failed)
+Only `supplyChainRef` is required. Everything else defaults to what the SupplyChain signs with:
+
+| Field | Default |
+|---|---|
+| Image glob | `SupplyChain.spec.image`, as `registry/name**` (not configurable) |
+| `signers` | The SupplyChain's ServiceAccount and the cluster OIDC issuer |
+| `trustRoot.*.url` | `SupplyChain.spec.signing` |
+| `trustRoot.*.pemRef` | The matching key of the `blanketops-sigstore-roots` ConfigMap in the same namespace |
+
+State `signers` to accept more than one identity. State `trustRoot` to trust a different sigstore.
+
+### What gets rendered
+
+One `TrustRoot` and two `ClusterImagePolicies`, all cluster-scoped and named `<namespace>-<name>`. An image is
+admitted only if it passes both policies:
+
+| Check | Policy |
+|---|---|
+| Signed keylessly by one of the signers, with a Fulcio certificate chaining to the trust root | `<namespace>-<name>` |
+| That certificate has a CT log proof and the signature is in Rekor | `<namespace>-<name>` |
+| Carries an authorization attestation, signed the same way, with scope, intent and output all allowed | `<namespace>-<name>-authorization` |
+
+A wrong Fulcio root, Rekor key or CT log key each cause rejection, as does a missing signature or attestation.
+
+### The policy is authorized too
+
+A policy is rendered on behalf of its own ServiceAccount, `supply-chain-policy-runner` by default, which the
+controller creates. Nothing is rendered until it passes three SubjectAccessReviews:
+
+| Proof | Resource | Verb | Meaning |
+|-------|----------|------|---------|
+| Scope | `supplychains` | `get` | It can read the SupplyChain it sets policy for |
+| Intent | `supplychainpolicies` | `create` | It may declare admission policy for it |
+| Output | `clusterimagepolicies` (`policy.sigstore.dev`) | `create` | It may produce the admission policies |
+
+Grant them with `config/samples/supplychain_v1alpha1_policyrole.yaml`. Until then the policy is `Ready=False`
+with reason `AuthorizationDenied`. Policies that were already rendered stay in place, so losing the grant does
+not silently turn enforcement off.
+
+### Reading the status
+
+```bash
+kubectl get supplychainpolicies -n default -o wide
+kubectl get supplychainpolicy for-kaniko-app -n default -o yaml
+```
+
+| Status field | Meaning |
+|---|---|
+| `conditions[Ready]` | Whether the rendered resources are in sync. The reason says why not. |
+| `authorization` | The verdict of each of the three reviews. |
+| `signers`, `fulcioURL`, `rekorURL`, `ctLogURL` | What the spec and the SupplyChain resolved to. |
+| `trustAnchors` | SHA-256 fingerprints of the Fulcio root and the two log keys in the `TrustRoot`. |
+| `clusterImagePolicies`, `trustRoot` | Names of the rendered resources. |
+
+### Turning enforcement on
+
+policy-controller only acts in namespaces that opt in:
+
+```bash
+kubectl label namespace <workload-namespace> policy.sigstore.dev/include=true
+```
 
 ---
 
 ## Install
 
-### 1. Install dependencies
+Tested on a [kind](https://kind.sigs.k8s.io/) cluster.
+
+### Prerequisites
+
+- A cluster, `kubectl`, `docker`, Go.
+- [External Secrets Operator](https://external-secrets.io). The installer does not install it:
+
+  ```bash
+  helm install external-secrets external-secrets \
+    --repo https://charts.external-secrets.io \
+    -n external-secrets --create-namespace
+  ```
+
+### 1. Install the dependencies
 
 ```bash
-supplychain install
+go build -o bin/supplychain ./cmd/cli
+./bin/supplychain install --webhook-host <public-hostname>
 ```
 
-This applies all platform dependencies in order:
-- MetalLB (LoadBalancer support for kind)
-- Tekton Pipelines, Triggers, Interceptors, Chains, Dashboard, Tasks, Results
-- Sigstore (Fulcio, Rekor, Policy Controller)
-- NGINX Ingress Controller
-- SonarQube
+This applies, in order: MetalLB, Tekton Pipelines, Triggers, Interceptors, Fulcio (with its CT log), Rekor,
+Tekton Chains, policy-controller, Tekton Dashboard, the Tekton tasks, Tekton Results, the NGINX ingress
+controller, the ingress routes and SonarQube. It also collects the sigstore trust anchors into the
+`blanketops-sigstore-roots` ConfigMap.
 
-### 2. Bootstrap SonarQube
+Each wait allows up to an hour, because on a slow connection the time is almost all image pulls.
+See [Troubleshooting](#troubleshooting) if it stalls.
 
-After `supplychain install` completes and SonarQube is ready:
-
-```bash
-supplychain init-sonarqube --new-password <your-password>
-```
-
-This automatically:
-- Waits for SonarQube to be ready
-- Changes the default admin password
-- Generates a `supply-chain` user token
-- Patches the `ClusterSecretStore` with the token at `/supplychain/sonarqube/token`
-
-### 3. Deploy the operator
+### 2. Deploy the operator
 
 ```bash
-# Build and load into kind
 docker build -t blanketops/supply-chain-controller:latest .
-kind load docker-image blanketops/supply-chain-controller:latest --name blanketops
+kind load docker-image blanketops/supply-chain-controller:latest --name <cluster>
 
-# Install CRDs
 make install
-
-# Apply RBAC
-kubectl apply -f config/rbac/signing_role.yaml
-kubectl apply -f config/rbac/eventlistener_role.yaml
-
-# Deploy
 make deploy IMG=blanketops/supply-chain-controller:latest
 ```
 
-### 4. Apply samples
+### 3. Create the secret store
+
+The operator reads its credentials from a `ClusterSecretStore` named `secure-software-supply-chain-store`
+(External Secrets, fake provider). It holds real credentials, so **keep it outside the repository**:
 
 ```bash
-# The ClusterSecretStore holds real credentials, so it is kept outside the repo.
 kubectl apply -f ~/supplychain_v1alpha1_secretsstore.yaml
+```
 
+| Key | Content |
+|---|---|
+| `/supplychain/git/ssh-privatekey`, `/supplychain/git/ssh-publickey` | SSH key that can read the source repository |
+| `/supplychain/git/known-hosts`, `/supplychain/git/ssh-config` | SSH client configuration for the git host |
+| `/supplychain/registry/config` | Docker `config.json` with push access to the registry |
+| `/supplychain/sonarqube/token` | SonarQube user token (written by step 4) |
+| `/supplychain/github/pat`, `/supplychain/github/token` | GitHub token that can manage the repository's webhooks |
+
+A GitHub deploy key belongs to exactly one repository. The store has a single SSH key shared by every
+SupplyChain, so for more than one repository use a machine user's key.
+
+The synced Kubernetes Secrets do not refresh on their own. After changing a value in the store, delete the
+Secret and External Secrets recreates it.
+
+### 4. Bootstrap SonarQube
+
+SonarQube starts with `admin` / `admin`. The bootstrap sets a new admin password, generates a `supply-chain`
+token and writes it into the store:
+
+```bash
+./bin/supplychain init-sonarqube --new-password '<password>'
+```
+
+SonarQube requires at least 12 characters with upper case, lower case, a digit and a special character.
+
+> **Known limitation.** The command reaches SonarQube by its in-cluster service name, so it only works from
+> somewhere that name resolves. From a workstation, port-forward `svc/sonarqube-sonarqube` and call the same
+> API (`/sonarqube/api/users/change_password`, `/sonarqube/api/user_tokens/generate`) by hand.
+
+SonarQube keeps its data in an `emptyDir`. If its pod is recreated it is back to `admin` / `admin` and the token
+must be generated again.
+
+### 5. Apply the roles and the resources
+
+```bash
 kubectl apply -k config/samples
 ```
 
-The `ClusterSecretStore` must be named `secure-software-supply-chain-store` (ESO fake provider, keys under
-`/supplychain/...`).
+This applies the signing, event-listener and policy-runner roles, the `SupplyChain`, the `GitHubWebhook` and
+the `SupplyChainPolicy`.
 
-`config/samples` applies:
-- `SupplyChain` CR
-- `GitHubWebhook` CR
-- `SupplyChainPolicy` CR, and the role its `supply-chain-policy-runner` ServiceAccount needs
+Check:
+
+```bash
+kubectl get supplychain,supplychainpolicy,githubwebhook -n default
+kubectl get clusterimagepolicies,trustroots
+```
 
 ---
 
-## Webhook Setup (Tailscale Funnel)
+## Triggering builds from a push
 
-The `GitHubWebhook` controller auto-registers the webhook with GitHub. The `hookURL` must be publicly reachable. We use Tailscale Funnel to expose the in-cluster EventListener without a cloud load balancer.
-
-### Setup
-
-```bash
-# Expose the nginx ingress via Tailscale Funnel
-tailscale serve --bg --https=443 http://<metallb-ingress-ip>
-tailscale funnel --bg 443
-```
-
-Set `spec.webhookHost` in the `SupplyChain` CR to your Tailscale hostname:
-
-```yaml
-spec:
-  webhookHost: your-machine.tailf8145.ts.net
-```
-
-The controller automatically updates the EventListener Ingress host and the `GitHubWebhook` CR uses the same URL for webhook registration.
-
-### Persistence (systemd)
-
-To survive reboots, create a systemd service that bridges the MetalLB IP to localhost:
+GitHub has to reach the EventListener. On a local cluster, [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+gives it a public hostname without a cloud load balancer.
 
 ```bash
+# Bridge a local port to the ingress address assigned by MetalLB
 sudo tee /etc/systemd/system/kind-ingress-bridge.service <<EOF
 [Unit]
 Description=Bridge localhost to kind ingress-nginx
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:8888,fork,reuseaddr TCP:<metallb-ip>:80
+ExecStart=/usr/bin/socat TCP-LISTEN:8888,fork,reuseaddr TCP:<metallb-ingress-ip>:80
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
 sudo systemctl enable --now kind-ingress-bridge
+
+# Publish it
+sudo tailscale up
 tailscale funnel --bg 8888
 ```
+
+Set that hostname as `spec.webhookHost` on the `SupplyChain` and as `spec.hookURL` on the `GitHubWebhook`. The
+`GitHubWebhook` then registers the webhook, and every push creates an `ImageBuild` named
+`<supplychain>-<branch>-<commit-sha>`.
+
+> **Funnel publishes the whole ingress.** The Tekton Dashboard (`/dashboard`) and SonarQube (`/sonarqube`) are
+> served on the same hostname and become reachable from the internet. The dashboard has no login.
+
+> **Branch names containing `/`** cannot trigger a build yet: the branch is part of the build's name.
 
 ---
 
 ## Usage
 
-### SupplyChain CR
+### SupplyChain
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -240,14 +336,14 @@ spec:
     registry: docker.io
     name: nkanyezisolutions/for-kaniko-app
     tagStrategy: git-sha
-    cloneSecretRef: github-ssh-credentials
-    registrySecretRef: registry-credentials
+    cloneSecret: github-ssh-credentials
+    registrySecret: registry-credentials
   steps:
     trivy: true
     sign: true
     attest: true
     sonarQube:
-      serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000
+      serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token
       projectKey: ntlaletsi70_for-kaniko-app
   signing:
@@ -256,7 +352,7 @@ spec:
     ctLogURL: http://ctlog.ctlog-system.svc/fulcio
 ```
 
-### GitHubWebhook CR
+### GitHubWebhook
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -266,20 +362,15 @@ metadata:
   namespace: default
 spec:
   repository: ntlaletsi70/for-kaniko-app
-  supplyChainRef: for-kaniko-app
+  supplyChainRef:
+    name: for-kaniko-app
   hookURL: https://your-machine.tailf8145.ts.net
-  secretRef: github-app-credentials
+  events: [push]
+  secretRef:
+    name: github-app-credentials
 ```
 
-### Push a commit — builds fire automatically
-
-```bash
-kubectl get imagebuilds -n default -w
-```
-
-Phase transitions: `Pending` → `Running` → `Succeeded`
-
-### Manually trigger a build
+### Trigger a build by hand
 
 ```yaml
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -296,136 +387,75 @@ spec:
   imageTag: manual-001
 ```
 
-### Inspect results
+### Follow a build
 
 ```bash
-# Build status
-kubectl get imagebuilds -n default
-kubectl describe imagebuild <name>
-
-# Signing audit record
-kubectl get imagesignatures -n default
-
-# Durable build result (survives PipelineRun pruning)
-kubectl get imagebuildresults -n default
-
-# PipelineRun logs
-kubectl get pipelineruns -n default
+kubectl get imagebuilds -n default -w            # Pending -> Running -> Succeeded | Failed
+kubectl describe imagebuild <name>               # each step and how far it got
+kubectl get imagesignatures -n default           # who signed, Rekor index
+kubectl get imagebuildresults -n default         # digest, policy verification
 tkn pipelinerun logs <name> -f
 ```
 
-### Verify the signed image
+The Tekton Dashboard, without the public hostname:
 
 ```bash
-cosign verify \
-  --certificate-identity-regexp=".*" \
-  --certificate-oidc-issuer="https://kubernetes.default.svc.cluster.local" \
-  docker.io/nkanyezisolutions/for-kaniko-app:<sha>
+kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097   # http://localhost:9097
 ```
 
-### Enforce the signature at admission (SupplyChainPolicy)
+### Read the results
 
-`SupplyChainPolicy` is the admission side of a `SupplyChain`. It renders a sigstore
-[policy-controller](https://docs.sigstore.dev/policy-controller/overview/) `TrustRoot` and two
-`ClusterImagePolicies`, so only images that SupplyChain signed and attested are admitted.
+The last step of a successful build prints what it verified:
 
-```yaml
-apiVersion: supplychain.blanketops.dev/v1alpha1
-kind: SupplyChainPolicy
-metadata:
-  name: for-kaniko-app
-spec:
-  supplyChainRef:
-    name: for-kaniko-app
-  mode: enforce   # or warn
-  serviceAccountName: supply-chain-policy-runner   # default
-  signers:        # optional: defaults to the SupplyChain's ServiceAccount
-  - serviceAccountName: supply-chain-runner
-  trustRoot:      # optional: defaults to the SupplyChain's endpoints and the trust anchor ConfigMap
-    fulcio:
-      url: http://fulcio-server.fulcio-system.svc.cluster.local
-      pemRef: {name: blanketops-sigstore-roots, key: fulcio-root.pem}
-    rekor:
-      url: http://rekor-server.rekor-system.svc.cluster.local
-      pemRef: {name: blanketops-sigstore-roots, key: rekor.pub}
-    ctLog:
-      url: http://ctlog.ctlog-system.svc/fulcio
-      pemRef: {name: blanketops-sigstore-roots, key: ctfe.pub}
+```
+Supply chain policy verification
+  Image:          docker.io/nkanyezisolutions/for-kaniko-app:<sha>@sha256:...
+  Signer:         https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner
+  Issuer:         https://kubernetes.default.svc.cluster.local
+  Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)
+  Authorization:  verified (scope, intent, output allowed)
+  Rekor:          http://rekor-server.rekor-system.svc.cluster.local
+  Result:         PASS
 ```
 
-Like a build, a policy is gated on three SubjectAccessReviews. Its ServiceAccount (`supply-chain-policy-runner`
-by default, created by the controller) must pass all three before anything is rendered, and the verdicts are
-recorded in `status.authorization`:
+The same outcome is recorded on the `ImageBuildResult`, under `status.buildResults`:
 
-| Proof | Resource | Verb | Meaning |
-|-------|----------|------|---------|
-| Scope | `supplychains` | `get` | SA can read the SupplyChain it sets policy for |
-| Intent | `supplychainpolicies` | `create` | SA may declare admission policy for it |
-| Output | `clusterimagepolicies` (`policy.sigstore.dev`) | `create` | SA may produce the admission policies |
-
-Grant them with `config/samples/supplychain_v1alpha1_policyrole.yaml`. Until then the policy stays
-`Ready=False` with reason `AuthorizationDenied`; policies that were already rendered are left in place.
-
-Only `supplyChainRef` is required. `signers` and `trustRoot` default to what the SupplyChain signs with; state
-them to pin them, to accept more than one identity, or to trust a different sigstore.
-
-`status` reports what was resolved: the signers, the three endpoints, and `trustAnchors`, the SHA-256
-fingerprints of the Fulcio root and the two log keys in the rendered `TrustRoot`. If a signed image is rejected
-with "certificate signed by unknown authority", compare `status.trustAnchors.fulcioRoot` with the root Fulcio is
-serving: they differ when Fulcio's CA was regenerated after the trust anchors were collected.
-An image matching the SupplyChain's repository is admitted only if all of this holds:
-
-| Check | Enforced by |
+| Field | Meaning |
 |---|---|
-| Signed keylessly, with a Fulcio certificate chaining to this cluster's Fulcio root | `<namespace>-<name>` policy + `TrustRoot` |
-| Certificate issued to the SupplyChain's ServiceAccount by the cluster OIDC issuer | `identities` on both policies |
-| Certificate carries a CT log proof, and the signature is recorded in Rekor | `TrustRoot` CT log and Rekor keys |
-| Carries an authorization attestation, signed the same way, in which the ServiceAccount passed all three SubjectAccessReviews (scope, intent, output) | `<namespace>-<name>-authorization` policy |
-
-Where each input comes from:
-
-| Policy input | Source |
-|---|---|
-| Image glob | `SupplyChain.spec.image` (`registry/name**`) |
-| Signers | `spec.signers`, else `SupplyChain.spec.serviceAccountName` + the cluster OIDC issuer |
-| Fulcio / Rekor / CT log URLs | `spec.trustRoot.*.url`, else `SupplyChain.spec.signing` |
-| Fulcio root, Rekor key, CT log key | `spec.trustRoot.*.pemRef`, else the `blanketops-sigstore-roots` ConfigMap in the same namespace |
-
-`supplychain install` installs policy-controller into `cosign-system`. It only enforces in namespaces
-labelled `policy.sigstore.dev/include=true`, so nothing is checked until you opt a namespace in:
+| `commit`, `committerDate`, `repoURL` | What was built |
+| `imageURL`, `imageDigest` | What was published. Empty if the build stopped before the push. |
+| `trivyScanSummary`, `trivyCriticalCount`, `trivyHighCount`, `trivyTotalCount` | Scan outcome. Recorded even when the scan stops the build. |
+| `policyVerification` | `PASS` when the last step verified the signature and the attestation |
+| `verifiedSigner` | The identity they were verified against |
 
 ```bash
-kubectl label namespace <workload-namespace> policy.sigstore.dev/include=true
+kubectl get imagebuildresult <name> -n default \
+  -o custom-columns='PHASE:.status.phase,POLICY:.status.buildResults.policyVerification,CRITICAL:.status.buildResults.trivyCriticalCount,HIGH:.status.buildResults.trivyHighCount'
 ```
+
+### Deploy the image
+
+In a namespace labelled `policy.sigstore.dev/include=true`:
 
 ```bash
-kubectl get supplychainpolicies -n default -o wide
-kubectl get clusterimagepolicies,trustroots
+kubectl run app --image=docker.io/nkanyezisolutions/for-kaniko-app:<sha>
 ```
 
-### CLI commands
-
-```bash
-# Install all dependencies
-supplychain install
-
-# Bootstrap SonarQube (run once after install)
-supplychain init-sonarqube --new-password <password>
-
-# Check dependency status
-supplychain status
-
-# Remove all dependencies
-supplychain uninstall
-
-# Open supply chain dashboard
-supplychain observe
-
-# Open RBAC audit dashboard
-supplychain observe rbac
-```
+An image the SupplyChain built is admitted. Anything else under that repository is rejected, and the message
+names the policy that refused it.
 
 ---
+
+## CLI
+
+```bash
+supplychain install --webhook-host <host>        # install the dependencies
+supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube (see the limitation above)
+supplychain status                               # check the dependencies
+supplychain uninstall                            # remove them
+supplychain observe                              # supply chain dashboard
+supplychain observe rbac                         # RBAC audit dashboard
+```
 
 ## Uninstall
 
@@ -435,52 +465,87 @@ make uninstall
 supplychain uninstall
 ```
 
+`supplychain uninstall` removes the policy-controller CRDs, which deletes every `ClusterImagePolicy` and
+`TrustRoot` with them.
+
 ---
 
-## API Group
+## Troubleshooting
 
-`supplychain.blanketops.dev/v1alpha1`
+**The installer stalls or a setup Job fails.** Image pulls dominate install time. The kubelet pulls one image
+at a time by default; on kind, allow parallel pulls by adding `serializeImagePulls: false` and
+`maxParallelImagePulls: 8` to `/var/lib/kubelet/config.yaml` on the node and restarting the kubelet. The
+sigstore setup Jobs give up after six attempts; if one ran before the service it needs was up (for example
+`rekor-trillian-createdb` before MySQL), delete it and re-apply it from `dependencies/`.
 
-**Resources:** `SupplyChain`, `GitHubWebhook`, `ImageBuild`, `ImageSignature`, `ImageBuildResult`, `SupplyChainPolicy`
+**A signed image is rejected with "certificate signed by unknown authority".** The policy trusts a Fulcio root
+that is not the one that signed. Compare the two:
+
+```bash
+kubectl get supplychainpolicy <name> -o jsonpath='{.status.trustAnchors.fulcioRoot}'
+curl -s http://<fulcio>/api/v1/rootCert | openssl x509 -outform DER | sha256sum
+```
+
+They differ when Fulcio's CA was regenerated after the trust anchors were collected. That happens if the
+installer is run again after the setup Jobs have been cleaned up: the Jobs are re-created and generate new keys
+while Fulcio and the CT log keep the old ones in memory. Restart `fulcio-server` and `ctlog`, and make sure the
+CT log's trusted root (`ctlog-secret`, key `fulcio-0`) is the current Fulcio root.
+
+**Fulcio returns 500 "Error entering certificate in CTL".** Same cause, seen from the other side: the CT log
+does not trust Fulcio's current root.
+
+**SonarQube restarts with "No shard available".** Its Elasticsearch refuses to allocate indexes when the disk
+is more than 90% full. Free space on the node's disk.
+
+**A build fails at `vulnerability-scan-trivy`.** If the message is a timeout, the scanner image (about 1 GB)
+was still downloading; the next build uses the cached image. If it reports critical vulnerabilities, that is
+the gate: update the base image.
+
+**A build fails at `git-clone` with "Permission denied (publickey)".** The key in the store cannot read the
+repository. Remember the synced Secret has to be deleted after the store changes.
+
+**A policy is `Ready=False`.** The reason says which input is missing: `AuthorizationDenied`,
+`SupplyChainNotFound`, `SigningDisabled`, `TrustAnchorsNotFound`, `TrustAnchorsInvalid`,
+`PolicyControllerNotInstalled` or `ApplyFailed`.
+
+---
+
+## Development
+
+```bash
+make manifests generate   # after changing *_types.go or kubebuilder markers
+make test                 # unit and controller tests (envtest)
+make test-e2e             # creates its own kind cluster; allow 15-30 minutes
+```
+
+The e2e suite deploys the operator and the real policy-controller, and checks that a `SupplyChainPolicy` is
+rendered, that an unsigned image is rejected, that warn mode admits it, and that deleting the policy cleans up.
+It has no Fulcio or Rekor, so it does not cover a signed image being admitted; that path is exercised by a real
+build.
 
 ---
 
 ## Part of BlanketOps
 
-This operator is one component of the BlanketOps platform:
-
 - [blanketops-environments-controller](https://github.com/ntlaletsi70) — environment orchestration
 - [blanketops-environments-supply-chain](https://github.com/ntlaletsi70/secure-software-supply-chain) — supply chain pipeline (this repo)
 - [blanketops-zenith-runners-pool](https://github.com/ntlaletsi70) — GitHub Actions self-hosted runners
 
----
-
 ## Acknowledgements
 
-- [Tekton](https://tekton.dev)
-- [Tekton Triggers](https://tekton.dev/docs/triggers)
-- [Tekton Chains](https://tekton.dev/docs/chains)
-- [Cosign / Sigstore](https://sigstore.dev)
-- [Fulcio](https://github.com/sigstore/fulcio)
-- [Rekor](https://github.com/sigstore/rekor)
-- [Buildah](https://buildah.io)
-- [Skopeo](https://github.com/containers/skopeo)
-- [Trivy](https://aquasecurity.github.io/trivy)
-- [SonarQube](https://www.sonarqube.org)
-- [Policy Controller](https://github.com/sigstore/policy-controller)
-- [Kubebuilder](https://book.kubebuilder.io)
-- [External Secrets Operator](https://external-secrets.io)
-- [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+[Tekton](https://tekton.dev) ·
+[Tekton Triggers](https://tekton.dev/docs/triggers) ·
+[Tekton Chains](https://tekton.dev/docs/chains) ·
+[Sigstore](https://sigstore.dev) ·
+[Fulcio](https://github.com/sigstore/fulcio) ·
+[Rekor](https://github.com/sigstore/rekor) ·
+[Policy Controller](https://github.com/sigstore/policy-controller) ·
+[Buildah](https://buildah.io) ·
+[Skopeo](https://github.com/containers/skopeo) ·
+[Trivy](https://aquasecurity.github.io/trivy) ·
+[SonarQube](https://www.sonarqube.org) ·
+[Kubebuilder](https://book.kubebuilder.io) ·
+[External Secrets Operator](https://external-secrets.io) ·
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
 
----
-
-## Demo
-
-| Demo | Description |
-|------|-------------|
-| Full Pipeline | GitHub push → ImageBuild → PipelineRun → Signed image |
-| Setup | Fresh cluster setup: install deps, apply SupplyChain CR |
-| Webhook Automation | GitHubWebhook CR: auto-register → push → pipeline fires |
-| Signing Verification | Verify signed image with cosign + Rekor transparency log |
-
-*See [`demo/`](demo/) for scripts and tape files.*# secure-software-supplychain
+See [`demo/`](demo/) for a recorded walkthrough.

@@ -190,6 +190,31 @@ func TestNoVerifyWithoutSigning(t *testing.T) {
 	}
 }
 
+// An image with critical vulnerabilities must not reach the registry, so the
+// scan runs on the build archive and the push waits for it.
+func TestScansBeforePushing(t *testing.T) {
+	sc := &supplyv1alpha1.SupplyChain{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+		Spec: supplyv1alpha1.SupplyChainSpec{
+			Image: supplyv1alpha1.ImageSpec{Registry: "docker.io", Name: "org/app"},
+			Steps: supplyv1alpha1.StepsSpec{Trivy: true},
+		},
+	}
+	ib := &supplyv1alpha1.ImageBuild{ObjectMeta: metav1.ObjectMeta{Name: "build", Namespace: "default"}}
+	pr := BuildPipelineRun("run", "default", sc, ib, "docker.io/org/app:tag", nil)
+
+	scan, push := findTask(t, pr, stepTrivy), findTask(t, pr, stepPushImage)
+	if len(scan.RunAfter) != 1 || scan.RunAfter[0] != stepBuildImage {
+		t.Errorf("scan runs after %v, want the build %q", scan.RunAfter, stepBuildImage)
+	}
+	if len(push.RunAfter) != 1 || push.RunAfter[0] != stepTrivy {
+		t.Errorf("push runs after %v, want the scan %q", push.RunAfter, stepTrivy)
+	}
+	if got := param(t, scan.Params, "IMAGE_TAR"); got != imageArchive {
+		t.Errorf("scan IMAGE_TAR = %q, want the build archive %q", got, imageArchive)
+	}
+}
+
 func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 	sign := findTask(t, testPipelineRun(t), stepSign)
 

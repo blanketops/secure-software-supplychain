@@ -18,6 +18,8 @@ spec:
     The default TRIVY_IMAGE is a custom image with the vulnerability DB pre-baked at build time (docker.io/nkanyezisolutions/trivy-db:latest). This eliminates the 91MB + 861MB DB downloads on every pipeline run.
 
     Counts are extracted from the Trivy table output (Total: N (HIGH: N, CRITICAL: N)) rather than SARIF level fields, which vary across Trivy versions.
+
+    The task fails when any CRITICAL vulnerability is found, so the image is never signed or attested. HIGH findings are reported but do not fail it. The results and the SARIF report are written before the task fails.
   workspaces:
   - name: manifest-dir
     description: Workspace for source and SARIF report output.
@@ -30,6 +32,13 @@ spec:
     type: string
   - name: IMAGE_PATH
     description: Image or path to be scanned by trivy.
+    type: string
+  - name: IMAGE_TAR
+    default: ""
+    description: |
+      Image archive to scan instead of pulling IMAGE_PATH, relative to the
+      manifest-dir workspace. Lets the image be scanned before it is pushed,
+      so one with critical vulnerabilities is never published.
     type: string
   - name: SEVERITY
     default: "HIGH,CRITICAL"
@@ -66,7 +75,16 @@ spec:
       # --skip-db-update prevents any network calls during the scan.
       CACHE_DIR="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy}"
       echo "Trivy cache dir: $CACHE_DIR"
-      echo "Running trivy scan on $(params.IMAGE_PATH)"
+
+      # ── What to scan ───────────────────────────────────────────────────
+      # The local build archive when one is given, else the registry image.
+      if [ -n "$(params.IMAGE_TAR)" ]; then
+        TARGET="--input $(params.IMAGE_TAR)"
+        echo "Running trivy scan on archive $(params.IMAGE_TAR) (built as $(params.IMAGE_PATH))"
+      else
+        TARGET="$(params.IMAGE_PATH)"
+        echo "Running trivy scan on $(params.IMAGE_PATH)"
+      fi
 
       # ── SARIF scan — for structured report output ──────────────────────
       trivy image \
@@ -79,7 +97,7 @@ spec:
         --timeout 10m \
         --format sarif \
         --output "$SARIF_OUTPUT" \
-        $(params.IMAGE_PATH)
+        $TARGET
 
       # ── Table scan — capture output for count extraction ───────────────
       # Trivy table output includes a summary line:
@@ -94,7 +112,7 @@ spec:
         --severity $(params.SEVERITY) \
         --scanners vuln \
         --timeout 10m \
-        $(params.IMAGE_PATH) 2>&1)
+        $TARGET 2>&1)
 
       echo "$SCAN_OUTPUT"
 
@@ -125,3 +143,12 @@ spec:
       printf '%s' "$SARIF_OUTPUT" > $(results.TRIVY_SARIF_PATH.path)
 
       echo "Scan complete — SUMMARY=$(cat $(results.TRIVY_SCAN_SUMMARY.path))"
+
+      # ── Gate ───────────────────────────────────────────────────────────
+      # Runs last, so the counts and the SARIF report above are recorded
+      # even when the build is stopped here.
+      if [ "$critical" -gt 0 ]; then
+        echo "FAILED: $critical CRITICAL vulnerabilities found in $(params.IMAGE_PATH)."
+        echo "The image will not be signed. See $SARIF_OUTPUT for details."
+        exit 1
+      fi

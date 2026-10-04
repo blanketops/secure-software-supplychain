@@ -31,7 +31,7 @@ This setup will demonstrate the following tools:
 - [**Shipwright**](https://shipwright.io/): A framework for building container images on Kubernetes, providing a consistent API across build strategies.
 - [**Cloud Native Buildpacks**](https://buildpacks.io/): Builds OCI-compliant container images from source without requiring a Dockerfile (unless you really have to).
 - [**SonarQube**](https://www.sonarsource.com/products/sonarqube/): Performs static code analysis as a quality gate before the image is pushed.
-- [**Trivy**](https://aquasecurity.github.io/trivy/): Scans the built image for known vulnerabilities. Configured to fail the pipeline on HIGH and CRITICAL findings.
+- [**Trivy**](https://aquasecurity.github.io/trivy/): Scans the built image for known vulnerabilities. Fails the pipeline when any CRITICAL vulnerability is found; HIGH findings are reported.
 - [**Cosign**](https://github.com/sigstore/cosign) + [**Fulcio**](https://github.com/sigstore/fulcio) + [**Rekor**](https://github.com/sigstore/rekor): Signs the image using keyless signing via the public Sigstore infrastructure. No key management required — Fulcio issues a short-lived certificate and Rekor records the signature to a public transparency log.
 - [**Tekton Chains**](https://tekton.dev/docs/chains/): Generates a SLSA provenance attestation for each build, recording what was built, from what source, and by what pipeline.
 - [**Policy Controller**](https://docs.sigstore.dev/policy-controller/overview/): Verifies at admission that an image was signed by its supply chain before it is allowed to run.
