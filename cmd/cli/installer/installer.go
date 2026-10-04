@@ -60,6 +60,13 @@ const (
 	// sigstore trust anchor configmap — mounted by signTask and any verifier.
 	sigstoreRootsName = "blanketops-sigstore-roots"
 
+	// readyTimeout bounds each wait for a dependency to come up. It is mostly
+	// image pulls, which on a slow connection take far longer than the workload
+	// needs to start. A wait that gives up too early forces a re-run, and a
+	// re-run re-creates the sigstore setup Jobs, which regenerate keys the
+	// running services have already loaded.
+	readyTimeout = 30 * time.Minute
+
 	// ctlog secret coords.
 	ctfePublicKeySecret = "ctlog-public-key"
 	ctfePublicKeyNS     = "ctlog-system"
@@ -114,7 +121,7 @@ var installOrder = []step{
 			// 1. Wait for Chains controller before touching its config.
 			waitSp := newSpinner("Waiting for Tekton Chains to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "tekton-chains", "tekton-chains-controller", 3*time.Minute); err != nil {
+			if err := i.waitForDeployment(ctx, "tekton-chains", "tekton-chains-controller", readyTimeout); err != nil {
 				waitSp.fail("Tekton Chains not ready")
 				return err
 			}
@@ -152,7 +159,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for Policy Controller to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", 3*time.Minute); err != nil {
+			if err := i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", readyTimeout); err != nil {
 				waitSp.fail("Policy Controller not ready")
 				return err
 			}
@@ -188,7 +195,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for NGINX Ingress Controller to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "ingress-nginx", "ingress-nginx-controller", 2*time.Minute); err != nil {
+			if err := i.waitForDeployment(ctx, "ingress-nginx", "ingress-nginx-controller", readyTimeout); err != nil {
 				waitSp.fail("NGINX Ingress Controller not ready")
 				return err
 			}
@@ -467,7 +474,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// still be starting when this PostHook fires.
 	rekorSp := newSpinner("Waiting for Rekor to be ready...")
 	rekorSp.start()
-	if err := i.waitForDeployment(ctx, "rekor-system", "rekor-server", 3*time.Minute); err != nil {
+	if err := i.waitForDeployment(ctx, "rekor-system", "rekor-server", readyTimeout); err != nil {
 		rekorSp.fail("Rekor not ready")
 		return err
 	}
@@ -476,7 +483,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// Wait for Fulcio to be ready too.
 	fulcioSp := newSpinner("Waiting for Fulcio to be ready...")
 	fulcioSp.start()
-	if err := i.waitForDeployment(ctx, "fulcio-system", "fulcio-server", 3*time.Minute); err != nil {
+	if err := i.waitForDeployment(ctx, "fulcio-system", "fulcio-server", readyTimeout); err != nil {
 		fulcioSp.fail("Fulcio not ready")
 		return err
 	}
@@ -485,7 +492,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// ctlog-public-key is created by a post-install Job after ctlog starts.
 	ctlogSp := newSpinner("Waiting for ctlog-public-key secret...")
 	ctlogSp.start()
-	if err := i.waitForSecret(ctx, ctfePublicKeyNS, ctfePublicKeySecret, 3*time.Minute); err != nil {
+	if err := i.waitForSecret(ctx, ctfePublicKeyNS, ctfePublicKeySecret, readyTimeout); err != nil {
 		ctlogSp.fail("ctlog-public-key secret not found")
 		return err
 	}
@@ -494,7 +501,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// Also wait for fulcio-pub-key — created by a Job after Fulcio starts.
 	fulcioPubSp := newSpinner("Waiting for fulcio-pub-key secret...")
 	fulcioPubSp.start()
-	if err := i.waitForSecret(ctx, "fulcio-system", "fulcio-pub-key", 3*time.Minute); err != nil {
+	if err := i.waitForSecret(ctx, "fulcio-system", "fulcio-pub-key", readyTimeout); err != nil {
 		fulcioPubSp.fail("fulcio-pub-key secret not found")
 		return err
 	}
