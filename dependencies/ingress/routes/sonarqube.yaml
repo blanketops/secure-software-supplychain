@@ -9,7 +9,9 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - host: WEBHOOK_HOST
+  # Not the webhook host: that one is published to the internet, and this UI
+  # must not be. UI_HOST is replaced with --ui-host at install time.
+  - host: UI_HOST
     http:
       paths:
       - path: /sonarqube

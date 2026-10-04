@@ -201,7 +201,7 @@ Tested on a [kind](https://kind.sigs.k8s.io/) cluster.
 
 ```bash
 go build -o bin/supplychain ./cmd/cli
-./bin/supplychain install --webhook-host <public-hostname>
+./bin/supplychain install --webhook-host <public-hostname> [--ui-host <private-hostname>]
 ```
 
 This applies, in order: MetalLB, Tekton Pipelines, Triggers, Interceptors, Fulcio (with its CT log), Rekor,
@@ -311,8 +311,16 @@ Set that hostname as `spec.webhookHost` on the `SupplyChain` and as `spec.hookUR
 `GitHubWebhook` then registers the webhook, and every push creates an `ImageBuild` named
 `<supplychain>-<branch>-<commit-sha>`.
 
-> **Funnel publishes the whole ingress.** The Tekton Dashboard (`/dashboard`) and SonarQube (`/sonarqube`) are
-> served on the same hostname and become reachable from the internet. The dashboard has no login.
+Funnel publishes everything served on that hostname, so only the webhook is routed there. The Tekton Dashboard
+and SonarQube have ingresses of their own on a separate hostname (`--ui-host`, default `supplychain.localhost`)
+that is only reachable from the machine itself:
+
+```
+http://supplychain.localhost:8888/dashboard/
+http://supplychain.localhost:8888/sonarqube/
+```
+
+Do not set `--ui-host` to the webhook host: the dashboard has no login.
 
 > **Branch names containing `/`** cannot trigger a build yet: the branch is part of the build's name.
 
@@ -397,7 +405,8 @@ kubectl get imagebuildresults -n default         # digest, policy verification
 tkn pipelinerun logs <name> -f
 ```
 
-The Tekton Dashboard, without the public hostname:
+The Tekton Dashboard is at `http://supplychain.localhost:8888/dashboard/` once the ingress bridge is running
+(see [Triggering builds from a push](#triggering-builds-from-a-push)), or without it:
 
 ```bash
 kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097   # http://localhost:9097
@@ -449,7 +458,7 @@ names the policy that refused it.
 ## CLI
 
 ```bash
-supplychain install --webhook-host <host>        # install the dependencies
+supplychain install --webhook-host <host>        # install the dependencies (--ui-host for the UIs)
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube (see the limitation above)
 supplychain status                               # check the dependencies
 supplychain uninstall                            # remove them

@@ -57,6 +57,15 @@ const (
 	// with the actual public hostname (e.g. Tailscale Funnel URL).
 	webhookHostPlaceholder = "WEBHOOK_HOST"
 
+	// uiHostPlaceholder is replaced in the ingress routes of the hosted UIs
+	// (Tekton Dashboard, SonarQube). They get a hostname of their own so that
+	// publishing the webhook host does not publish them with it.
+	uiHostPlaceholder = "UI_HOST"
+
+	// DefaultUIHost resolves to the local machine in browsers and most
+	// resolvers, and is never routable from outside it.
+	DefaultUIHost = "supplychain.localhost"
+
 	// sigstore trust anchor configmap — mounted by signTask and any verifier.
 	sigstoreRootsName = "blanketops-sigstore-roots"
 
@@ -205,7 +214,7 @@ var installOrder = []step{
 	},
 	{
 		// Ingress routes are applied after the controller is ready.
-		// WEBHOOK_HOST placeholder is substituted with --webhook-host flag value.
+		// UI_HOST is substituted with the --ui-host flag value.
 		Name:  "Ingress Routes",
 		Paths: []string{"dependencies/ingress/routes"},
 	},
@@ -250,6 +259,7 @@ type Installer struct {
 	mapper      meta.RESTMapper
 	dryRun      bool
 	webhookHost string
+	uiHost      string
 	// restConfig is kept for operations that need a raw REST client
 	// (e.g. reading pod logs), where the dynamic client is insufficient.
 	restConfig *rest.Config
@@ -257,11 +267,16 @@ type Installer struct {
 
 // New creates an Installer from a kubeconfig path.
 func New(kubeconfig string, dryRun bool) (*Installer, error) {
-	return NewWithOptions(kubeconfig, dryRun, "")
+	return NewWithOptions(kubeconfig, dryRun, "", "")
 }
 
-// NewWithOptions creates an Installer with a webhook host for ingress substitution.
-func NewWithOptions(kubeconfig string, dryRun bool, webhookHost string) (*Installer, error) {
+// NewWithOptions creates an Installer with the hostnames to substitute into the
+// ingress manifests: the public webhook host, and the host the UIs are served
+// on (DefaultUIHost when empty).
+func NewWithOptions(kubeconfig string, dryRun bool, webhookHost, uiHost string) (*Installer, error) {
+	if uiHost == "" {
+		uiHost = DefaultUIHost
+	}
 	config, err := buildConfig(kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
@@ -285,6 +300,7 @@ func NewWithOptions(kubeconfig string, dryRun bool, webhookHost string) (*Instal
 		mapper:      mapper,
 		dryRun:      dryRun,
 		webhookHost: webhookHost,
+		uiHost:      uiHost,
 		restConfig:  config,
 	}, nil
 }
@@ -303,6 +319,7 @@ func (i *Installer) Install(ctx context.Context) error {
 		fmt.Println("   ⚠  No --webhook-host set — ingress routes will use WEBHOOK_HOST placeholder.")
 		fmt.Println("      Run with --webhook-host <host> to configure ingress routing.")
 	}
+	fmt.Printf("   UI host:      %s (Tekton Dashboard, SonarQube)\n", i.uiHost)
 	fmt.Println()
 
 	for idx, s := range installOrder {
@@ -881,6 +898,7 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 // substituteManifest replaces known placeholders in manifest data.
 // WEBHOOK_HOST is replaced with the configured webhook host.
 func (i *Installer) substituteManifest(data []byte) []byte {
+	data = bytes.ReplaceAll(data, []byte(uiHostPlaceholder), []byte(i.uiHost))
 	if i.webhookHost == "" {
 		return data
 	}

@@ -48,6 +48,7 @@ func installCmd() *cobra.Command {
 	var kubeconfig string
 	var dryRun bool
 	var webhookHost string
+	var uiHost string
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -70,7 +71,7 @@ Example:
   supplychain install --webhook-host pop-os.tailf8145.ts.net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			i, err := installer.NewWithOptions(kubeconfig, dryRun, webhookHost)
+			i, err := installer.NewWithOptions(kubeconfig, dryRun, webhookHost, uiHost)
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
 			}
@@ -81,6 +82,8 @@ Example:
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")
 	cmd.Flags().StringVar(&webhookHost, "webhook-host", "", "Public hostname for ingress routing (e.g. pop-os.tailf8145.ts.net)")
+	cmd.Flags().StringVar(&uiHost, "ui-host", installer.DefaultUIHost,
+		"Hostname the Tekton Dashboard and SonarQube are served on; keep it different from --webhook-host so they are not published with the webhook")
 	return cmd
 }
 
