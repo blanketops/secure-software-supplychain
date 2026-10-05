@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire-server
+  labels:
+    # The agent and the CSI driver mount host paths.
+    pod-security.kubernetes.io/enforce: privileged

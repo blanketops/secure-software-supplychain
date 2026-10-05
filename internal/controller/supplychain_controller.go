@@ -24,15 +24,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/events"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/triggers"
 )
@@ -62,6 +70,7 @@ type SupplyChainReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterstaticentries,verbs=get;create;update;patch;delete
 
 func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues(
@@ -105,15 +114,20 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// ── ServiceAccount ────────────────────────────────────────────────────
 	// Must exist before the EventListener deployment uses it.
 	// Owned by the SupplyChain — not by individual ImageBuilds.
-	saName := sc.Spec.ServiceAccountName
-	if saName == "" {
-		saName = "supply-chain-runner"
-	}
+	saName := runnerServiceAccount(&sc)
 	if err := r.ensureServiceAccount(ctx, &sc, saName); err != nil {
 		logger.Error(err, "failed to ensure ServiceAccount", "name", saName)
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 	logger.Info("ServiceAccount ready", "name", saName)
+
+	// ── Signing identity ──────────────────────────────────────────────────
+	// Under SPIFFE the runner's identity is registered here, by the authority,
+	// so it exists before any build pod asks for it.
+	if err := r.ensureSigningIdentity(ctx, &sc, saName); err != nil {
+		logger.Error(err, "Failed to register signing identity", "serviceAccount", saName)
+		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
 
 	// ── Trigger layer ─────────────────────────────────────────────────────
 	if err := triggers.EnsureTriggerBinding(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
@@ -209,6 +223,64 @@ func (r *SupplyChainReconciler) ensureServiceAccount(
 	}
 	logger.Info("Adding registry credentials to ServiceAccount", "name", name)
 	return r.Update(ctx, &existing)
+}
+
+func runnerServiceAccount(sc *supplyv1alpha1.SupplyChain) string {
+	if sc.Spec.ServiceAccountName != "" {
+		return sc.Spec.ServiceAccountName
+	}
+	return "supply-chain-runner"
+}
+
+// ensureSigningIdentity registers the runner ServiceAccount with SPIRE when
+// the cluster signs with SPIFFE identities. Under the Kubernetes identity the
+// ServiceAccount token is the identity and there is nothing to register.
+func (r *SupplyChainReconciler) ensureSigningIdentity(
+	ctx context.Context,
+	sc *supplyv1alpha1.SupplyChain,
+	saName string,
+) error {
+	identity, err := signing.LoadIdentity(ctx, r.Client)
+	if err != nil {
+		return err
+	}
+	if !identity.IsSPIFFE() {
+		return nil
+	}
+	entry := signing.WorkloadEntry(identity, sc.Namespace, saName)
+	err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(entry),
+		client.ForceOwnership, client.FieldOwner("supplychain-controller"))
+	if err != nil {
+		return fmt.Errorf("registering SPIFFE identity %s: %w", identity.Subject(sc.Namespace, saName), err)
+	}
+	return nil
+}
+
+// releaseSigningIdentity removes the runner's SPIRE registration unless
+// another SupplyChain in the namespace builds with the same ServiceAccount.
+func (r *SupplyChainReconciler) releaseSigningIdentity(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {
+	saName := runnerServiceAccount(sc)
+
+	var list supplyv1alpha1.SupplyChainList
+	if err := r.List(ctx, &list, client.InNamespace(sc.Namespace)); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		other := &list.Items[i]
+		if other.Name != sc.Name && other.DeletionTimestamp.IsZero() && runnerServiceAccount(other) == saName {
+			return nil
+		}
+	}
+
+	entry := &unstructured.Unstructured{}
+	entry.SetGroupVersionKind(signing.ClusterStaticEntryGVK)
+	entry.SetName(signing.WorkloadEntryName(sc.Namespace, saName))
+	err := r.Delete(ctx, entry)
+	// No SPIRE in this cluster means there was never anything to remove.
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil
+	}
+	return err
 }
 
 func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {
@@ -331,6 +403,9 @@ func (r *SupplyChainReconciler) enforceRepoUniqueness(ctx context.Context, sc *s
 }
 
 func (r *SupplyChainReconciler) handleDeletion(ctx context.Context, sc *supplyv1alpha1.SupplyChain) (ctrl.Result, error) {
+	if err := r.releaseSigningIdentity(ctx, sc); err != nil {
+		return ctrl.Result{}, err
+	}
 	controllerutil.RemoveFinalizer(sc, supplyChainFinalizer)
 	if err := r.Update(ctx, sc); err != nil {
 		return ctrl.Result{}, err
@@ -359,5 +434,29 @@ func (r *SupplyChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&triggersv1beta1.EventListener{}).
 		Owns(&triggersv1beta1.TriggerBinding{}).
 		Owns(&triggersv1beta1.TriggerTemplate{}).
+		// The signing identity comes from Chains' and Tekton's SPIRE config;
+		// when either changes, every SupplyChain's registration is revisited.
+		Watches(&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.supplyChainsForSigningConfig),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isSigningConfig))).
 		Complete(r)
+}
+
+func isSigningConfig(obj client.Object) bool {
+	key := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+	return key == types.NamespacedName{Namespace: signing.ChainsConfigNamespace, Name: signing.ChainsConfigName} ||
+		key == types.NamespacedName{Namespace: signing.SpireConfigNamespace, Name: signing.SpireConfigName}
+}
+
+func (r *SupplyChainReconciler) supplyChainsForSigningConfig(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list supplyv1alpha1.SupplyChainList
+	if err := r.List(ctx, &list); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list SupplyChains")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+	}
+	return requests
 }

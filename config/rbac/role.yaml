@@ -69,6 +69,16 @@ rules:
   - update
   - watch
 - apiGroups:
+  - spire.spiffe.io
+  resources:
+  - clusterstaticentries
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
   - supplychain.blanketops.dev
   resources:
   - githubwebhooks

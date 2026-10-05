@@ -708,7 +708,11 @@ spec:
             - "--redis_server.address=rekor-redis"
             - "--redis_server.port=6379"
             - "--rekor_server.address=0.0.0.0"
-            - "--rekor_server.signer=memory"
+            # Not the chart's "memory": that makes a new signing key every time
+            # the pod starts, after which nothing signed before verifies and the
+            # stored trust anchor no longer matches. The installer creates the
+            # key once, in the rekor-signing-key Secret.
+            - "--rekor_server.signer=/var/run/rekor-signer/key.pem"
             - "--enable_retrieve_api=true"
             - "--trillian_log_server.tlog_id=$(TREE_ID)"
             - "--enable_attestation_storage"
@@ -723,6 +727,9 @@ spec:
               mountPath: /sharding
             - name: storage
               mountPath: /var/run/attestations
+            - name: signing-key
+              mountPath: /var/run/rekor-signer
+              readOnly: true
           livenessProbe:
             failureThreshold: 3
             httpGet:
@@ -753,6 +760,9 @@ spec:
         - name: storage
           persistentVolumeClaim:
             claimName: rekor-server
+        - name: signing-key
+          secret:
+            secretName: rekor-signing-key
 ---
 # Source: rekor/charts/trillian/templates/createdb/createdb-job.yaml
 apiVersion: batch/v1

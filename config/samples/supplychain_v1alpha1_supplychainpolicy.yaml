@@ -27,11 +27,14 @@ spec:
   # three authorization proofs (scope, intent, output).
   # Optional: defaults to the SupplyChain's ServiceAccount.
   signers:
+  # Named by ServiceAccount, so the certificate subject and issuer follow the
+  # cluster's signing identity: a Kubernetes token subject, or a SPIFFE ID when
+  # the stack was installed with --signing-identity spiffe.
   - serviceAccountName: supply-chain-runner
-    issuer: https://kubernetes.default.svc.cluster.local
-  # A signer outside this namespace is stated by its certificate subject:
-  # - subject: https://kubernetes.io/namespaces/release/serviceaccounts/release-signer
-  #   issuer: https://kubernetes.default.svc.cluster.local
+  # A signer outside this namespace is stated by its exact certificate subject
+  # and issuer, which pins it regardless of the cluster's signing identity:
+  # - subject: spiffe://blanketops.dev/ns/release/sa/release-signer
+  #   issuer: http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
 
   # The sigstore instance signatures and attestations are verified against.
   # Rendered as the policy-controller TrustRoot.

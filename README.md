@@ -62,6 +62,56 @@ API group: `supplychain.blanketops.dev/v1alpha1`
 
 ---
 
+## Who decides what
+
+Three places hold the configuration, and each has one job:
+
+| | Role | What it decides |
+|---|---|---|
+| Tekton Chains config | **Centre** | The signing configuration of the cluster: Fulcio, Rekor, the OIDC issuer, the identity provider, the provenance format. The installer writes it, Chains signs provenance from it, and the operator reads the same values for the pipeline's signatures and for the admission policy. |
+| `SupplyChain` | **Authority** | Who may build and sign for a repository: the ServiceAccount, checked by three SubjectAccessReviews before every build. |
+| `SupplyChainPolicy` | **Trust** | What is trusted at admission: which signers, under which sigstore. |
+
+### Signing identity: Kubernetes or SPIFFE
+
+How a workload proves who it is to Fulcio is a cluster-wide choice, made at install time:
+
+| `--signing-identity` | Credential | Name in the certificate |
+|---|---|---|
+| `kubernetes` (default) | A projected ServiceAccount token | `https://kubernetes.io/namespaces/<ns>/serviceaccounts/<sa>` |
+| `spiffe` | A JWT-SVID from [SPIRE](https://spiffe.io), fetched over the SPIFFE Workload API | `spiffe://<trust-domain>/ns/<ns>/sa/<sa>` |
+
+With `spiffe`, the installer also installs SPIRE (server, agent, CSI driver, OIDC discovery), tells Fulcio to accept
+identities from the trust domain, and gives Tekton Chains the Workload API socket. The pipeline's sign, attest and
+verify steps and the default signers of every `SupplyChainPolicy` follow, because they all read the identity from
+the Chains config (`signers.x509.fulcio.provider` and `.issuer`) and the trust domain from Tekton's `config-spire`.
+
+The three authorization proofs are unaffected: they are about the Kubernetes ServiceAccount the API server
+reviewed, whatever name the certificate carries.
+
+Under `spiffe` the `SupplyChain` controller registers its build ServiceAccount with SPIRE ahead of time (a
+`ClusterStaticEntry`), so the identity exists before a build pod asks for it.
+
+### Two tiers of proof
+
+Every image a build produces carries proof from two independent identities, and both are required:
+
+| Tier | Identity | What it adds to the image |
+|---|---|---|
+| Authority | The `SupplyChain`'s build ServiceAccount | A signature, and an attestation of the three authorization proofs |
+| Centre | Tekton Chains' controller | A signature, and SLSA v1.0 provenance of the run |
+
+Chains signs first, as soon as the push completes; the build's sign step waits for that signature before adding
+its own, because both are stored under the same registry tag. The last pipeline step verifies all four, and a
+`SupplyChainPolicy` renders four `ClusterImagePolicy` objects (`<ns>-<name>`, `-authorization`, `-chains`,
+`-provenance`). An image must pass every one of them to be admitted, so neither identity can vouch for an image
+on its own.
+
+> **Status.** Both identities have been run end to end on a cluster. With `spiffe`: Fulcio issued SPIFFE
+> certificates to the build and to Chains, the pipeline verified both tiers, and admission accepted the image
+> while rejecting one that carried only Chains' signature and one that was unsigned. The Chains tier has not
+> been run under the `kubernetes` identity.
+
 ## How a build is authorized
 
 Before a build starts, the `ImageBuild` controller runs three gates in order.
@@ -201,7 +251,8 @@ Tested on a [kind](https://kind.sigs.k8s.io/) cluster.
 
 ```bash
 go build -o bin/supplychain ./cmd/cli
-./bin/supplychain install --webhook-host <public-hostname> [--ui-host <private-hostname>]
+./bin/supplychain install --webhook-host <public-hostname> [--ui-host <private-hostname>] \
+  [--signing-identity spiffe --trust-domain <domain>]
 ```
 
 This applies, in order: MetalLB, Tekton Pipelines, Triggers, Interceptors, Fulcio (with its CT log), Rekor,

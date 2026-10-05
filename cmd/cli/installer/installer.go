@@ -102,7 +102,16 @@ type step struct {
 	Paths    []string
 	PreHook  func(ctx context.Context, i *Installer) error
 	PostHook func(ctx context.Context, i *Installer) error
+	// Skip leaves the step out of this install, for example SPIRE when the
+	// signing identity is not SPIFFE.
+	Skip func(i *Installer) bool
+	// RegistersCRDs makes the installer re-read the API after the step, so the
+	// kinds it defined can be applied by the steps that follow.
+	RegistersCRDs bool
 }
+
+// onlyForSPIFFE skips a step unless the signing identity is SPIFFE.
+func onlyForSPIFFE(i *Installer) bool { return !i.spiffe() }
 
 // installOrder defines the sequence in which dependencies are applied.
 var installOrder = []step{
@@ -123,12 +132,86 @@ var installOrder = []step{
 		Paths: []string{"dependencies/tekton/triggers/interceptors"},
 	},
 	{
+		Name:          "SPIRE CRDs",
+		Paths:         []string{"dependencies/spire/crds"},
+		Skip:          onlyForSPIFFE,
+		RegistersCRDs: true,
+	},
+	{
+		// SPIRE issues the SPIFFE identities workloads sign with. It comes
+		// before Fulcio, which has to be able to reach its OIDC discovery.
+		Name:  "SPIRE",
+		Paths: []string{"dependencies/spire/release"},
+		Skip:  onlyForSPIFFE,
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for the SPIRE server to be ready...")
+			waitSp.start()
+			if err := i.waitForStatefulSet(ctx, spireNamespace, "spire-server", readyTimeout); err != nil {
+				waitSp.fail("SPIRE server not ready")
+				return err
+			}
+			waitSp.succeed("SPIRE server ready")
+			return nil
+		},
+	},
+	{
+		// Which pods get which SPIFFE ID. Applied once the server, which
+		// validates and reconciles them, is up.
+		Name:  "SPIRE Identities",
+		Paths: []string{"dependencies/spire/identities"},
+		Skip:  onlyForSPIFFE,
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for SPIRE OIDC discovery to be ready...")
+			waitSp.start()
+			if err := i.waitForDeployment(ctx, spireNamespace, "spire-spiffe-oidc-discovery-provider", readyTimeout); err != nil {
+				waitSp.fail("SPIRE OIDC discovery not ready")
+				return err
+			}
+			waitSp.succeed("SPIRE OIDC discovery ready")
+			return nil
+		},
+	},
+	{
 		Name:  "Fulcio",
 		Paths: []string{"dependencies/sigstore/fulcio"},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			if !i.spiffe() {
+				return nil
+			}
+			cfgSp := newSpinner("Configuring Fulcio to accept SPIFFE identities...")
+			cfgSp.start()
+			if err := i.configureFulcioIssuers(ctx); err != nil {
+				cfgSp.fail("Failed to configure Fulcio issuers")
+				return err
+			}
+			cfgSp.succeed("Fulcio accepts identities from " + i.opts.TrustDomain)
+			return nil
+		},
 	},
 	{
 		Name:  "Rekor",
 		Paths: []string{"dependencies/sigstore/rekor"},
+		// Rekor's pod mounts its signing key, so the key has to be there first.
+		PreHook: func(ctx context.Context, i *Installer) error {
+			return i.ensureRekorSigningKey(ctx)
+		},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			// Trillian's database is created by a Job that only retries a few
+			// times; on a slow connection MySQL is not up before it gives up.
+			dbSp := newSpinner("Waiting for the Trillian database...")
+			dbSp.start()
+			if err := i.waitForDeployment(ctx, "trillian-system", "trillian-mysql", readyTimeout); err != nil {
+				dbSp.fail("Trillian MySQL not ready")
+				return err
+			}
+			if err := i.ensureJobSucceeded(ctx, "dependencies/sigstore/rekor",
+				"trillian-system", "rekor-trillian-createdb", readyTimeout); err != nil {
+				dbSp.fail("Trillian database was not created")
+				return err
+			}
+			dbSp.succeed("Trillian database ready")
+			return nil
+		},
 	},
 	{
 		Name:  "Tekton Chains",
@@ -151,6 +234,23 @@ var installOrder = []step{
 				return err
 			}
 			cfgSp.succeed("chains-config applied")
+
+			// With SPIFFE, Chains signs as its SPIFFE identity: give it the
+			// Workload API socket, and record the trust domain where the
+			// operator reads it.
+			if i.spiffe() {
+				idSp := newSpinner("Giving Tekton Chains its SPIFFE identity...")
+				idSp.start()
+				if err := i.giveChainsSPIFFEIdentity(ctx); err != nil {
+					idSp.fail("Failed to mount the SPIFFE socket into Tekton Chains")
+					return err
+				}
+				if err := i.applyTektonSpireConfig(ctx); err != nil {
+					idSp.fail("Failed to record the trust domain")
+					return err
+				}
+				idSp.succeed("Tekton Chains signs as spiffe://" + i.opts.TrustDomain + "/ns/tekton-chains/sa/tekton-chains-controller")
+			}
 
 			// 3. Collect the three in-cluster sigstore trust anchors and
 			//    create blanketops-sigstore-roots in all required namespaces.
@@ -216,7 +316,8 @@ var installOrder = []step{
 				return err
 			}
 			waitSp.succeed("NGINX Ingress Controller ready")
-			return nil
+			// A re-applied manifest drops the webhook's CA; put it back.
+			return i.ensureIngressWebhookCA(ctx)
 		},
 	},
 	{
@@ -267,6 +368,7 @@ type Installer struct {
 	dryRun      bool
 	webhookHost string
 	uiHost      string
+	opts        Options
 	// restConfig is kept for operations that need a raw REST client
 	// (e.g. reading pod logs), where the dynamic client is insufficient.
 	restConfig *rest.Config
@@ -274,16 +376,16 @@ type Installer struct {
 
 // New creates an Installer from a kubeconfig path.
 func New(kubeconfig string, dryRun bool) (*Installer, error) {
-	return NewWithOptions(kubeconfig, dryRun, "", "")
+	return NewWithOptions(kubeconfig, dryRun, Options{})
 }
 
-// NewWithOptions creates an Installer with the hostnames to substitute into the
-// ingress manifests: the public webhook host, and the host the UIs are served
-// on (DefaultUIHost when empty).
-func NewWithOptions(kubeconfig string, dryRun bool, webhookHost, uiHost string) (*Installer, error) {
-	if uiHost == "" {
-		uiHost = DefaultUIHost
+// NewWithOptions creates an Installer. Empty options take their defaults: the
+// UIs on DefaultUIHost, and the Kubernetes signing identity.
+func NewWithOptions(kubeconfig string, dryRun bool, opts Options) (*Installer, error) {
+	if err := opts.defaultAndValidate(); err != nil {
+		return nil, err
 	}
+	webhookHost, uiHost := opts.WebhookHost, opts.UIHost
 	config, err := buildConfig(kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
@@ -308,6 +410,7 @@ func NewWithOptions(kubeconfig string, dryRun bool, webhookHost, uiHost string) 
 		dryRun:      dryRun,
 		webhookHost: webhookHost,
 		uiHost:      uiHost,
+		opts:        opts,
 		restConfig:  config,
 	}, nil
 }
@@ -327,10 +430,23 @@ func (i *Installer) Install(ctx context.Context) error {
 		fmt.Println("      Run with --webhook-host <host> to configure ingress routing.")
 	}
 	fmt.Printf("   UI host:      %s (Tekton Dashboard, SonarQube)\n", i.uiHost)
+	if i.spiffe() {
+		fmt.Printf("   Identity:     SPIFFE, trust domain %s\n", i.opts.TrustDomain)
+	} else {
+		fmt.Println("   Identity:     Kubernetes ServiceAccount tokens")
+	}
 	fmt.Println()
 
-	for idx, s := range installOrder {
-		fmt.Printf("[%d/%d] %s\n", idx+1, len(installOrder), s.Name)
+	steps, err := i.stepsToRun()
+	if err != nil {
+		return err
+	}
+	if i.opts.FromStep != "" {
+		fmt.Printf("   Resuming from: %s\n\n", steps[0].Name)
+	}
+
+	for idx, s := range steps {
+		fmt.Printf("[%d/%d] %s\n", idx+1, len(steps), s.Name)
 
 		if s.PreHook != nil && !i.dryRun {
 			if err := s.PreHook(ctx, i); err != nil {
@@ -369,6 +485,17 @@ func (i *Installer) Install(ctx context.Context) error {
 			}
 		}
 
+		if s.RegistersCRDs && !i.dryRun {
+			waitSp := newSpinner(fmt.Sprintf("Waiting for the %s to register...", s.Name))
+			waitSp.start()
+			time.Sleep(10 * time.Second)
+			if err := i.refreshMapper(); err != nil {
+				waitSp.fail("failed to refresh API discovery")
+				return fmt.Errorf("failed to refresh API discovery: %w", err)
+			}
+			waitSp.succeed(s.Name + " registered")
+		}
+
 		if s.Name == "Tekton Pipelines" && !i.dryRun {
 			waitSp := newSpinner("Waiting for Tekton CRDs to register...")
 			waitSp.start()
@@ -402,6 +529,61 @@ func (i *Installer) Install(ctx context.Context) error {
 	fmt.Println("  4. Apply a SupplyChain CR")
 	fmt.Println()
 	return nil
+}
+
+// stepsToRun is the install order for this run: the steps that apply to the
+// chosen signing identity, starting at Options.FromStep when one is given.
+func (i *Installer) stepsToRun() ([]step, error) {
+	var steps []step
+	for _, s := range installOrder {
+		if s.Skip == nil || !s.Skip(i) {
+			steps = append(steps, s)
+		}
+	}
+	if i.opts.FromStep == "" {
+		return steps, nil
+	}
+	names := make([]string, 0, len(steps))
+	for idx, s := range steps {
+		if strings.EqualFold(s.Name, i.opts.FromStep) {
+			return steps[idx:], nil
+		}
+		names = append(names, s.Name)
+	}
+	return nil, fmt.Errorf("no step %q; the steps are: %s", i.opts.FromStep, strings.Join(names, ", "))
+}
+
+// keyJobs are the setup Jobs that generate key material, and the Secret each
+// one writes it to.
+var keyJobs = map[string]string{
+	"fulcio-system/fulcio-createcerts":         "fulcio-server-secret",
+	"ctlog-system/fulcio-ctlog-createctconfig": "ctlog-secret",
+}
+
+// keyJobAlreadyRan reports whether obj is a key-generating Job whose keys
+// already exist.
+//
+// Finished Jobs are removed by their TTL, so on a later run the Job is simply
+// missing. Creating it again would generate new keys while Fulcio and the CT
+// log keep serving with the ones they loaded at startup, and the trust anchors
+// would then be collected from keys nothing signs with.
+func (i *Installer) keyJobAlreadyRan(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+	if obj.GetKind() != "Job" {
+		return false, nil
+	}
+	secret, isKeyJob := keyJobs[obj.GetNamespace()+"/"+obj.GetName()]
+	if !isKeyJob {
+		return false, nil
+	}
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	_, err := i.dynamic.Resource(secretGVR).Namespace(obj.GetNamespace()).Get(ctx, secret, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checking for %s/%s: %w", obj.GetNamespace(), secret, err)
+	}
+	return true, nil
 }
 
 // Uninstall removes all supply chain dependencies in reverse order.
@@ -513,6 +695,13 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	}
 	fulcioSp.succeed("Fulcio ready")
 
+	// The CT log's keys and config are written by a setup Job that needs Fulcio
+	// and only retries a few times; make sure it ran to completion.
+	if err := i.ensureJobSucceeded(ctx, "dependencies/sigstore/fulcio",
+		"ctlog-system", "fulcio-ctlog-createctconfig", readyTimeout); err != nil {
+		return fmt.Errorf("CT log config was not created: %w", err)
+	}
+
 	// ctlog-public-key is created by a post-install Job after ctlog starts.
 	ctlogSp := newSpinner("Waiting for ctlog-public-key secret...")
 	ctlogSp.start()
@@ -547,7 +736,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch Rekor public key: %w", err)
 	}
 
-	cmData := map[string]interface{}{
+	cmData := map[string]any{
 		"fulcio-root.pem": string(fulcioRoot),
 		"ctfe.pub":        string(ctfePub),
 		"rekor.pub":       string(rekorPub),
@@ -556,13 +745,13 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
 	for _, ns := range sigstoreRootsNamespaces {
 		cm := &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name":      sigstoreRootsName,
 					"namespace": ns,
-					"labels": map[string]interface{}{
+					"labels": map[string]any{
 						"blanketops.dev/managed": "true",
 					},
 				},
@@ -624,24 +813,24 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 	time.Sleep(2 * time.Second)
 
 	job := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      jobName,
 				"namespace": jobNS,
-				"labels":    map[string]interface{}{"blanketops.dev/managed": "true"},
+				"labels":    map[string]any{"blanketops.dev/managed": "true"},
 			},
-			"spec": map[string]interface{}{
+			"spec": map[string]any{
 				"ttlSecondsAfterFinished": int64(30),
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
+				"template": map[string]any{
+					"spec": map[string]any{
 						"restartPolicy": "Never",
-						"containers": []interface{}{
-							map[string]interface{}{
+						"containers": []any{
+							map[string]any{
 								"name":  "fetch",
 								"image": "curlimages/curl:latest",
-								"command": []interface{}{
+								"command": []any{
 									"curl", "-sf",
 									"http://rekor-server.rekor-system.svc.cluster.local/api/v1/log/publicKey",
 								},
@@ -720,7 +909,7 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 // chainsConfig is the Tekton Chains configuration for this stack: keyless
 // signing against the in-cluster Fulcio and Rekor, with SLSA v1.0 provenance
 // stored next to the image it describes.
-func chainsConfig() map[string]interface{} {
+func chainsConfig(opts Options) map[string]any {
 	const (
 		// slsa/v2alpha4 is Chains' name for SLSA v1.0 provenance. "in-toto" and
 		// "slsa/v1" are both the older v0.2 predicate.
@@ -728,7 +917,7 @@ func chainsConfig() map[string]interface{} {
 		fulcioURL        = "http://fulcio-server.fulcio-system.svc.cluster.local"
 		rekorURL         = "http://rekor-server.rekor-system.svc.cluster.local"
 	)
-	return map[string]interface{}{
+	config := map[string]any{
 		"artifacts.taskrun.format":                     provenanceFormat,
 		"artifacts.taskrun.storage":                    "oci",
 		"artifacts.taskrun.signer":                     "x509",
@@ -746,14 +935,22 @@ func chainsConfig() map[string]interface{} {
 		"builddefinition.buildtype":   "https://tekton.dev/chains/v2/slsa",
 		"signers.x509.fulcio.enabled": "true",
 		"signers.x509.fulcio.address": fulcioURL,
-		"signers.x509.fulcio.issuer":  signerOIDCIssuer,
+		"signers.x509.rekor.address":  rekorURL,
+		"transparency.enabled":        "true",
+		"transparency.url":            rekorURL,
+	}
+	if opts.SigningIdentity == IdentitySPIFFE {
+		// Chains asks the SPIFFE Workload API for a JWT-SVID and presents it
+		// to Fulcio, which verifies it against SPIRE's OIDC discovery.
+		config["signers.x509.fulcio.provider"] = "spiffe"
+		config["signers.x509.fulcio.issuer"] = spireOIDCIssuer
+	} else {
 		// The Chains controller is given a projected ServiceAccount token for
 		// the "sigstore" audience at this path; that token is its identity.
-		"signers.x509.identity.token.file": chainsIdentityTokenFile,
-		"signers.x509.rekor.address":       rekorURL,
-		"transparency.enabled":             "true",
-		"transparency.url":                 rekorURL,
+		config["signers.x509.fulcio.issuer"] = signerOIDCIssuer
+		config["signers.x509.identity.token.file"] = chainsIdentityTokenFile
 	}
+	return config
 }
 
 // applyChainsConfig overwrites the default chains-config ConfigMap with the
@@ -761,18 +958,18 @@ func chainsConfig() map[string]interface{} {
 func (i *Installer) applyChainsConfig(ctx context.Context) error {
 	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
 	cm := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "chains-config",
 				"namespace": "tekton-chains",
-				"labels": map[string]interface{}{
+				"labels": map[string]any{
 					"app.kubernetes.io/instance": "default",
 					"app.kubernetes.io/part-of":  "tekton-chains",
 				},
 			},
-			"data": chainsConfig(),
+			"data": chainsConfig(i.opts),
 		},
 	}
 	existing, err := i.dynamic.Resource(cmGVR).Namespace("tekton-chains").Get(ctx, "chains-config", metav1.GetOptions{})
@@ -813,15 +1010,15 @@ func (i *Installer) ensureResultsTLS(ctx context.Context) error {
 		return err
 	}
 	secret := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Secret",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      resultsTLSSecretName,
 				"namespace": resultsTLSNamespace,
 			},
 			"type": "kubernetes.io/tls",
-			"data": map[string]interface{}{
+			"data": map[string]any{
 				"tls.crt": certPEM,
 				"tls.key": keyPEM,
 			},
@@ -858,10 +1055,10 @@ func (i *Installer) ensureNamespace(ctx context.Context, name string) error {
 		return err
 	}
 	ns := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Namespace",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": name,
 			},
 		},
@@ -923,6 +1120,7 @@ func generateSelfSignedCert() (certPEM []byte, keyPEM []byte, err error) {
 // WEBHOOK_HOST is replaced with the configured webhook host.
 func (i *Installer) substituteManifest(data []byte) []byte {
 	data = bytes.ReplaceAll(data, []byte(uiHostPlaceholder), []byte(i.uiHost))
+	data = bytes.ReplaceAll(data, []byte(trustDomainPlaceholder), []byte(i.opts.TrustDomain))
 	if i.webhookHost == "" {
 		return data
 	}
@@ -1057,6 +1255,9 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	}
 	existing, err := dr.Get(ctx, obj.GetName(), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if done, err := i.keyJobAlreadyRan(ctx, obj); err != nil || done {
+			return err
+		}
 		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
 		return err
 	}

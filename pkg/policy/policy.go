@@ -44,6 +44,10 @@ const (
 	LabelPolicyName      = "blanketops.dev/supply-chain-policy"
 
 	hashAlgorithm = "sha-256"
+
+	// ProvenancePredicateType is the SLSA v1.0 provenance Tekton Chains
+	// attests with its slsa/v2alpha4 format.
+	ProvenancePredicateType = "https://slsa.dev/provenance/v1"
 )
 
 var (
@@ -89,6 +93,7 @@ func Render(
 	scp *supplyv1alpha1.SupplyChainPolicy,
 	sc *supplyv1alpha1.SupplyChain,
 	roots map[string]string,
+	identity signing.Identity,
 ) (*Rendered, error) {
 	name := ResourceName(scp)
 	endpoints := EndpointsFor(scp, sc)
@@ -102,7 +107,7 @@ func Render(
 	if serviceAccount == "" {
 		serviceAccount = "default"
 	}
-	signers := resolveSigners(scp, serviceAccount)
+	signers := resolveSigners(scp, serviceAccount, identity)
 	identities := make([]any, 0, len(signers))
 	for _, signer := range signers {
 		identities = append(identities, map[string]any{"issuer": signer.Issuer, "subject": signer.Subject})
@@ -118,8 +123,14 @@ func Render(
 	for _, glob := range images {
 		globs = append(globs, map[string]any{"glob": glob})
 	}
-	// authority is the set of keyless signers both policies trust.
-	authority := func(authorityName string) map[string]any {
+	// Tekton Chains signs every image a run produces, and its provenance, as
+	// itself. That identity comes from the cluster's signing configuration,
+	// not from the policy: it is the same for every SupplyChain.
+	chainsIdentities := []any{
+		map[string]any{"issuer": identity.Issuer, "subject": identity.ChainsSubject()},
+	}
+	// authority is a keyless signer verified against the policy's trust root.
+	authority := func(authorityName string, identities []any) map[string]any {
 		return map[string]any{
 			"name": authorityName,
 			"keyless": map[string]any{
@@ -137,7 +148,7 @@ func Render(
 		return map[string]any{"mode": mode, "images": globs, "authorities": []any{authority}}
 	}
 
-	authorized := authority("authorization")
+	authorized := authority("authorization", identities)
 	authorized["attestations"] = []any{
 		map[string]any{
 			"name":          "authorization",
@@ -149,11 +160,23 @@ func Render(
 		},
 	}
 
+	provenance := authority("provenance", chainsIdentities)
+	provenance["attestations"] = []any{
+		map[string]any{
+			"name":          "provenance",
+			"predicateType": ProvenancePredicateType,
+		},
+	}
+
+	// Policies that match an image must all pass, so these are four separate
+	// requirements: two from the build's own identity, two from Chains.
 	return &Rendered{
 		TrustRoot: newObject(TrustRootGVK, name, scp, trustRootSpec),
 		ClusterImagePolicies: []*unstructured.Unstructured{
-			newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature"))),
+			newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature", identities))),
 			newObject(ClusterImagePolicyGVK, name+"-authorization", scp, policySpec(authorized)),
+			newObject(ClusterImagePolicyGVK, name+"-chains", scp, policySpec(authority("chains", chainsIdentities))),
+			newObject(ClusterImagePolicyGVK, name+"-provenance", scp, policySpec(provenance)),
 		},
 		Images:    images,
 		Signers:   signers,
@@ -221,26 +244,31 @@ func fingerprint(pemData string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// resolveSigners turns spec.signers into certificate identities. With none
-// stated, the only signer is the ServiceAccount the SupplyChain's pipeline
-// signs with.
-func resolveSigners(scp *supplyv1alpha1.SupplyChainPolicy, supplyChainServiceAccount string) []supplyv1alpha1.SignerIdentity {
+// resolveSigners turns spec.signers into certificate identities, named the way
+// the cluster's signing identity names a ServiceAccount (a Kubernetes token
+// subject or a SPIFFE ID). With none stated, the only signer is the
+// ServiceAccount the SupplyChain's pipeline signs with.
+func resolveSigners(
+	scp *supplyv1alpha1.SupplyChainPolicy,
+	supplyChainServiceAccount string,
+	identity signing.Identity,
+) []supplyv1alpha1.SignerIdentity {
 	if len(scp.Spec.Signers) == 0 {
 		return []supplyv1alpha1.SignerIdentity{{
-			Issuer:  signing.KubernetesOIDCIssuer,
-			Subject: signing.ServiceAccountIdentity(scp.Namespace, supplyChainServiceAccount),
+			Issuer:  identity.Issuer,
+			Subject: identity.Subject(scp.Namespace, supplyChainServiceAccount),
 		}}
 	}
 	signers := make([]supplyv1alpha1.SignerIdentity, 0, len(scp.Spec.Signers))
 	for _, signer := range scp.Spec.Signers {
-		identity := supplyv1alpha1.SignerIdentity{Issuer: signer.Issuer, Subject: signer.Subject}
-		if identity.Issuer == "" {
-			identity.Issuer = signing.KubernetesOIDCIssuer
+		resolved := supplyv1alpha1.SignerIdentity{Issuer: signer.Issuer, Subject: signer.Subject}
+		if resolved.Issuer == "" {
+			resolved.Issuer = identity.Issuer
 		}
 		if signer.ServiceAccountName != "" {
-			identity.Subject = signing.ServiceAccountIdentity(scp.Namespace, signer.ServiceAccountName)
+			resolved.Subject = identity.Subject(scp.Namespace, signer.ServiceAccountName)
 		}
-		signers = append(signers, identity)
+		signers = append(signers, resolved)
 	}
 	return signers
 }

@@ -49,6 +49,9 @@ func installCmd() *cobra.Command {
 	var dryRun bool
 	var webhookHost string
 	var uiHost string
+	var signingIdentity string
+	var trustDomain string
+	var fromStep string
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -71,7 +74,13 @@ Example:
   supplychain install --webhook-host pop-os.tailf8145.ts.net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			i, err := installer.NewWithOptions(kubeconfig, dryRun, webhookHost, uiHost)
+			i, err := installer.NewWithOptions(kubeconfig, dryRun, installer.Options{
+				WebhookHost:     webhookHost,
+				UIHost:          uiHost,
+				SigningIdentity: signingIdentity,
+				TrustDomain:     trustDomain,
+				FromStep:        fromStep,
+			})
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
 			}
@@ -84,6 +93,12 @@ Example:
 	cmd.Flags().StringVar(&webhookHost, "webhook-host", "", "Public hostname for ingress routing (e.g. pop-os.tailf8145.ts.net)")
 	cmd.Flags().StringVar(&uiHost, "ui-host", installer.DefaultUIHost,
 		"Hostname the Tekton Dashboard and SonarQube are served on; keep it different from --webhook-host so they are not published with the webhook")
+	cmd.Flags().StringVar(&signingIdentity, "signing-identity", installer.IdentityKubernetes,
+		"How workloads identify themselves to Fulcio: \"kubernetes\" (ServiceAccount tokens) or \"spiffe\" (installs SPIRE; signatures carry SPIFFE IDs)")
+	cmd.Flags().StringVar(&trustDomain, "trust-domain", installer.DefaultTrustDomain,
+		"SPIFFE trust domain, used with --signing-identity spiffe")
+	cmd.Flags().StringVar(&fromStep, "from-step", "",
+		"Resume an interrupted install at this step (the name shown in the progress output, e.g. \"Tekton Chains\")")
 	return cmd
 }
 

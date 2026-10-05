@@ -231,7 +231,9 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
 		Expect(meta.IsStatusConditionTrue(scp.Status.Conditions, conditionReady)).To(BeTrue())
 		Expect(scp.Status.TrustRoot).To(Equal(renderedName))
-		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{renderedName, authorizationName}))
+		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{
+			renderedName, authorizationName, renderedName + "-chains", renderedName + "-provenance",
+		}))
 		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/nkanyezisolutions/policy-test-app**"))
 		Expect(scp.Status.Signers).To(Equal([]supplychainv1alpha1.SignerIdentity{{
 			Issuer:  signing.KubernetesOIDCIssuer,

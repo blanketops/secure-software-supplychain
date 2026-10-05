@@ -84,14 +84,15 @@ func fixtures(t *testing.T) (*supplyv1alpha1.SupplyChainPolicy, *supplyv1alpha1.
 func TestRender(t *testing.T) {
 	scp, sc, roots := fixtures(t)
 
-	got, err := Render(scp, sc, roots)
+	got, err := Render(scp, sc, roots, signing.KubernetesIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	const name = "team-a-app"
-	if len(got.ClusterImagePolicies) != 2 {
-		t.Fatalf("got %d ClusterImagePolicies, want signature and authorization", len(got.ClusterImagePolicies))
+	if len(got.ClusterImagePolicies) != 4 {
+		t.Fatalf("got %d ClusterImagePolicies, want signature, authorization, chains and provenance",
+			len(got.ClusterImagePolicies))
 	}
 	signature, authorization := got.ClusterImagePolicies[0], got.ClusterImagePolicies[1]
 	wantNames := map[*unstructured.Unstructured]string{
@@ -200,7 +201,7 @@ func TestRenderSignersAndRekor(t *testing.T) {
 		Rekor: &supplyv1alpha1.TrustedAuthority{URL: "http://rekor.pinned"},
 	}
 
-	got, err := Render(scp, sc, roots)
+	got, err := Render(scp, sc, roots, signing.KubernetesIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +216,9 @@ func TestRenderSignersAndRekor(t *testing.T) {
 		t.Errorf("Signers = %v, want %v", got.Signers, want)
 	}
 
-	// Both policies must trust exactly the stated signers and the pinned log.
-	for _, p := range got.ClusterImagePolicies {
+	// Both of the build's policies must trust exactly the stated signers and
+	// the pinned log. The Chains policies trust Chains, whatever the spec says.
+	for _, p := range got.ClusterImagePolicies[:2] {
 		authority := p.Object["spec"].(map[string]any)["authorities"].([]any)[0].(map[string]any)
 		identities := authority["keyless"].(map[string]any)["identities"].([]any)
 		if len(identities) != len(want) {
@@ -275,7 +277,7 @@ func TestTrustRoot(t *testing.T) {
 		t.Errorf("CT log source = %+v, want the default ConfigMap when only a URL is stated", got)
 	}
 
-	got, err := Render(scp, sc, roots)
+	got, err := Render(scp, sc, roots, signing.KubernetesIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,11 +304,53 @@ func TestFingerprintIgnoresWhitespace(t *testing.T) {
 	}
 }
 
+// Under SPIFFE the default signer, and a signer named by ServiceAccount, are
+// SPIFFE IDs issued under the configured issuer.
+func TestRenderWithSPIFFEIdentity(t *testing.T) {
+	scp, sc, roots := fixtures(t)
+	identity := signing.Identity{Provider: signing.ProviderSPIFFE, Issuer: "http://oidc.spire.svc", TrustDomain: "blanketops.dev"}
+
+	got, err := Render(scp, sc, roots, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []supplyv1alpha1.SignerIdentity{{
+		Issuer: "http://oidc.spire.svc", Subject: "spiffe://blanketops.dev/ns/team-a/sa/supply-chain-runner",
+	}}
+	if !reflect.DeepEqual(got.Signers, want) {
+		t.Errorf("default signers = %v, want %v", got.Signers, want)
+	}
+
+	scp.Spec.Signers = []supplyv1alpha1.PolicySigner{
+		{ServiceAccountName: "release-signer"},
+		{Subject: "someone@example.com", Issuer: "https://accounts.example.com"},
+	}
+	got, err = Render(scp, sc, roots, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []supplyv1alpha1.SignerIdentity{
+		{Issuer: "http://oidc.spire.svc", Subject: "spiffe://blanketops.dev/ns/team-a/sa/release-signer"},
+		{Issuer: "https://accounts.example.com", Subject: "someone@example.com"},
+	}
+	if !reflect.DeepEqual(got.Signers, want) {
+		t.Errorf("stated signers = %v, want %v", got.Signers, want)
+	}
+
+	// The authorization proofs are still about the Kubernetes principal: that
+	// is who the API server reviewed, whatever name the certificate carries.
+	authority := got.ClusterImagePolicies[1].Object["spec"].(map[string]any)["authorities"].([]any)[0].(map[string]any)
+	cue := authority["attestations"].([]any)[0].(map[string]any)["policy"].(map[string]any)["data"].(string)
+	if !strings.Contains(cue, `principal: "system:serviceaccount:team-a:supply-chain-runner"`) {
+		t.Errorf("authorization policy lost the Kubernetes principal:\n%s", cue)
+	}
+}
+
 func TestRenderMode(t *testing.T) {
 	scp, sc, roots := fixtures(t)
 	scp.Spec.Mode = "warn"
 
-	got, err := Render(scp, sc, roots)
+	got, err := Render(scp, sc, roots, signing.KubernetesIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +383,7 @@ func TestRenderRejectsBadTrustAnchors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			scp, sc, roots := fixtures(t)
 			tt.mutate(roots)
-			_, err := Render(scp, sc, roots)
+			_, err := Render(scp, sc, roots, signing.KubernetesIdentity())
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("err = %v, want it to mention %q", err, tt.wantErr)
 			}
@@ -363,5 +407,48 @@ func TestImageGlob(t *testing.T) {
 	}}
 	if got := ImageGlob(sc); got != "ghcr.io/org/app**" {
 		t.Errorf("ImageGlob = %q", got)
+	}
+}
+
+// Chains signs the image and its provenance as itself. Those are two more
+// requirements at admission, on top of the build's own signature and
+// authorization: a second tier that the SupplyChain's ServiceAccount cannot
+// satisfy on its own.
+func TestRenderRequiresChainsSignatureAndProvenance(t *testing.T) {
+	scp, sc, roots := fixtures(t)
+	identity := signing.Identity{
+		Provider: signing.ProviderSPIFFE, Issuer: "http://oidc.spire.svc", TrustDomain: "blanketops.dev",
+	}
+	got, err := Render(scp, sc, roots, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := ResourceName(scp)
+	byName := map[string]map[string]any{}
+	for _, p := range got.ClusterImagePolicies {
+		byName[p.GetName()] = p.Object["spec"].(map[string]any)["authorities"].([]any)[0].(map[string]any)
+	}
+
+	want := map[string]any{
+		"issuer":  "http://oidc.spire.svc",
+		"subject": "spiffe://blanketops.dev/ns/tekton-chains/sa/tekton-chains-controller",
+	}
+	for _, suffix := range []string{"-chains", "-provenance"} {
+		authority, ok := byName[name+suffix]
+		if !ok {
+			t.Fatalf("no ClusterImagePolicy %s%s", name, suffix)
+		}
+		identities := authority["keyless"].(map[string]any)["identities"].([]any)
+		if len(identities) != 1 || !reflect.DeepEqual(identities[0], want) {
+			t.Errorf("%s%s trusts %v, want only Chains: %v", name, suffix, identities, want)
+		}
+	}
+
+	if _, attests := byName[name+"-chains"]["attestations"]; attests {
+		t.Errorf("%s-chains should require a signature, not an attestation", name)
+	}
+	attestations := byName[name+"-provenance"]["attestations"].([]any)
+	if predicate := attestations[0].(map[string]any)["predicateType"]; predicate != ProvenancePredicateType {
+		t.Errorf("provenance predicateType = %v, want %s", predicate, ProvenancePredicateType)
 	}
 }

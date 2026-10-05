@@ -29,17 +29,20 @@ import (
 )
 
 const (
-	stepGitClone           = "git-clone"
-	stepAuthFulcio         = "authentication-fulcio"
-	stepSonarQube          = "code-scan-sonarqube"
-	stepBuildImage         = "build-image-buildah"
-	stepPushImage          = "push-image-docker"
-	stepTrivy              = "vulnerability-scan-trivy"
-	stepSign               = "sign-image-cosign"
-	stepAttest             = "attest-image-rekor-fulcio"
-	stepVerify             = "verify-image-policy"
-	cosignImage            = "gcr.io/projectsigstore/cosign:v2.2.3"
-	sigstoreRootsMountPath = "/etc/sigstore"
+	stepGitClone   = "git-clone"
+	stepAuthFulcio = "authentication-fulcio"
+	stepSonarQube  = "code-scan-sonarqube"
+	stepBuildImage = "build-image-buildah"
+	stepPushImage  = "push-image-docker"
+	stepTrivy      = "vulnerability-scan-trivy"
+	stepSign       = "sign-image-cosign"
+	stepAttest     = "attest-image-rekor-fulcio"
+	stepVerify     = "verify-image-policy"
+	cosignImage    = "gcr.io/projectsigstore/cosign:v2.2.3"
+	// provenancePredicateType is cosign's name for the SLSA v1.0 provenance
+	// Chains writes with the slsa/v2alpha4 format.
+	provenancePredicateType = "slsaprovenance1"
+	sigstoreRootsMountPath  = "/etc/sigstore"
 	// Steps of one task share /workspace.
 	authorizationPredicatePath = "/workspace/authorization-predicate.json"
 	authorizationPolicyPath    = "/workspace/authorization-policy.cue"
@@ -259,7 +262,7 @@ func buildTaskList(
 	// Step 9: verify — check the published image the way admission will.
 	// A build only succeeds if what it produced can actually be deployed.
 	if sc.Spec.Steps.Sign && sigCtx != nil {
-		tasks = append(tasks, verifyTask(sc, imageRef, last))
+		tasks = append(tasks, verifyTask(sc, imageRef, last, sigCtx.SigningIdentity()))
 	}
 
 	return tasks
@@ -480,7 +483,7 @@ func signTask(
 ) tektonv1.PipelineTask {
 	endpoints := signing.EndpointsFor(sc)
 
-	task := signImageTask(imageRef, runAfter, endpoints)
+	task := signImageTask(imageRef, runAfter, endpoints, sigCtx.SigningIdentity())
 	if sigCtx == nil {
 		return task
 	}
@@ -525,21 +528,73 @@ printf '%s' "${PREDICATE}" > ` + authorizationPredicatePath + `
 			Image:        sign.Image,
 			VolumeMounts: sign.VolumeMounts,
 			Env:          sign.Env,
-			Args: []string{
+			// Everything after "sign" is where and as whom to sign; the
+			// attestation is made the same way, so it reuses those arguments.
+			Args: append([]string{
 				"attest",
 				"--predicate=" + authorizationPredicatePath,
 				"--type=" + signing.AuthorizationPredicateType,
-				"--fulcio-url=$(params.FULCIO_URL)",
-				"--rekor-url=$(params.REKOR_URL)",
-				"--oidc-issuer=" + signing.KubernetesOIDCIssuer,
-				"--yes",
-				"$(params.IMAGE)@$(params.DIGEST)",
-			},
+			}, sign.Args[1:]...),
 		},
 	)
 }
 
-func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tektonv1.PipelineTask {
+// identitySource is what a cosign step needs in order to prove who it is to
+// Fulcio: the volume carrying its credential, where to mount it, and the
+// flags and environment that point cosign at it.
+type identitySource struct {
+	volume corev1.Volume
+	mount  corev1.VolumeMount
+	env    []corev1.EnvVar
+	flags  []string
+}
+
+func identitySourceFor(identity signing.Identity) identitySource {
+	if identity.IsSPIFFE() {
+		// The SPIFFE CSI driver exposes the node agent's Workload API socket;
+		// cosign asks it for a JWT-SVID. No token is mounted into the pod.
+		readOnly := true
+		return identitySource{
+			volume: corev1.Volume{
+				Name: "spiffe-workload-api",
+				VolumeSource: corev1.VolumeSource{
+					CSI: &corev1.CSIVolumeSource{Driver: signing.SPIFFECSIDriver, ReadOnly: &readOnly},
+				},
+			},
+			mount: corev1.VolumeMount{Name: "spiffe-workload-api", MountPath: signing.SPIFFESocketDir, ReadOnly: true},
+			env:   []corev1.EnvVar{{Name: signing.SPIFFESocketEnv, Value: signing.SPIFFESocketValue}},
+			flags: []string{"--oidc-provider=spiffe", "--oidc-issuer=" + identity.Issuer},
+		}
+	}
+	return identitySource{
+		volume: corev1.Volume{
+			Name: "oidc-info",
+			VolumeSource: corev1.VolumeSource{
+				Projected: &corev1.ProjectedVolumeSource{
+					Sources: []corev1.VolumeProjection{
+						{
+							ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+								Path:              "oidc-token",
+								ExpirationSeconds: int64Ptr(600),
+								Audience:          "sigstore",
+							},
+						},
+					},
+				},
+			},
+		},
+		mount: corev1.VolumeMount{Name: "oidc-info", MountPath: "/var/run/sigstore/cosign"},
+		env:   []corev1.EnvVar{{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"}},
+		flags: []string{"--oidc-issuer=" + identity.Issuer},
+	}
+}
+
+func signImageTask(
+	imageRef, runAfter string,
+	endpoints signing.Endpoints,
+	identity signing.Identity,
+) tektonv1.PipelineTask {
+	source := identitySourceFor(identity)
 	return tektonv1.PipelineTask{
 		Name:     stepSign,
 		RunAfter: after(runAfter),
@@ -558,22 +613,7 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 					{Name: "dockerconfig"},
 				},
 				Volumes: []corev1.Volume{
-					{
-						Name: "oidc-info",
-						VolumeSource: corev1.VolumeSource{
-							Projected: &corev1.ProjectedVolumeSource{
-								Sources: []corev1.VolumeProjection{
-									{
-										ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
-											Path:              "oidc-token",
-											ExpirationSeconds: int64Ptr(600),
-											Audience:          "sigstore",
-										},
-									},
-								},
-							},
-						},
-					},
+					source.volume,
 					{
 						// blanketops-sigstore-roots holds the three trust anchors
 						// for the in-cluster sigstore stack:
@@ -592,6 +632,7 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 					},
 				},
 				Steps: []tektonv1.Step{
+					awaitChainsSignatureStep(),
 					{
 						// Sign by digest — ensures Rekor indexes by the content hash.
 						// Cosign WARNING about tags goes away, and the retrieve API
@@ -600,25 +641,24 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 						Name:  "sign",
 						Image: cosignImage,
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: "oidc-info", MountPath: "/var/run/sigstore/cosign"},
+							source.mount,
 							{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath},
 						},
-						Env: []corev1.EnvVar{
+						Env: append([]corev1.EnvVar{
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
-							{Name: "SIGSTORE_ID_TOKEN_FILE", Value: "/var/run/sigstore/cosign/oidc-token"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
 							{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsFulcioKey},
 							{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/" + signing.RootsRekorKey},
 							{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsCTLogKey},
-						},
-						Args: []string{
+						}, source.env...),
+						Args: append(append([]string{
 							"sign",
 							"--fulcio-url=$(params.FULCIO_URL)",
 							"--rekor-url=$(params.REKOR_URL)",
-							"--oidc-issuer=" + signing.KubernetesOIDCIssuer,
+						}, source.flags...),
 							"--yes",
 							"$(params.IMAGE)@$(params.DIGEST)",
-						},
+						),
 					},
 				},
 			},
@@ -631,6 +671,41 @@ func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints) tekto
 		},
 	}
 }
+
+// awaitChainsSignatureStep holds the runner back until Tekton Chains has
+// signed the pushed image.
+//
+// Both sign the same digest, and cosign keeps all signatures of an image in
+// one registry tag that is read, extended and written back. Chains signs as
+// soon as the push task completes, which is when this task starts; written at
+// the same moment, one signature replaces the other. Chains stores its
+// provenance before its signature, so once the signature is there the runner
+// can add its own signature and attestation on top.
+func awaitChainsSignatureStep() tektonv1.Step {
+	return tektonv1.Step{
+		Name:  "await-chains-signature",
+		Image: "quay.io/skopeo/stable:latest",
+		Env: []corev1.EnvVar{
+			{Name: "IMAGE", Value: "$(params.IMAGE)"},
+			{Name: "DIGEST", Value: "$(params.DIGEST)"},
+		},
+		Script: `#!/bin/sh
+set -e
+signatures="docker://${IMAGE%:*}:$(printf '%s' "${DIGEST}" | tr ':' '-').sig"
+attempt=0
+until skopeo inspect --raw --authfile /workspace/dockerconfig/config.json "${signatures}" > /dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "${attempt}" -ge 60 ]; then
+    echo "ERROR: Tekton Chains did not sign ${IMAGE}@${DIGEST} within 5 minutes"
+    exit 1
+  fi
+  sleep 5
+done
+echo "Tekton Chains signed ${IMAGE}@${DIGEST}"
+`,
+	}
+}
+
 func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 	return tektonv1.PipelineTask{
 		Name:     stepAttest,
@@ -656,11 +731,11 @@ func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 						Image: "quay.io/skopeo/stable:latest",
 						Script: `#!/bin/sh
 set -e
+# --format, not grep: the JSON also lists a digest per layer.
 digest=$(skopeo inspect \
   --authfile /workspace/dockerconfig/config.json \
-  docker://$(params.IMAGE) \
-  | grep '"Digest"' \
-  | awk -F'"' '{print $4}')
+  --format '{{.Digest}}' \
+  docker://$(params.IMAGE))
 if [ -z "$digest" ]; then
   echo "ERROR: could not resolve digest for $(params.IMAGE)"
   exit 1
@@ -685,13 +760,17 @@ echo "IMAGE_DIGEST=${digest}"
 // the SupplyChain's ServiceAccount, with a Fulcio certificate chaining to the
 // trust anchors, a CT log proof and a Rekor entry; and the authorization
 // attestation must be signed the same way and show all three proofs allowed.
-func verifyTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tektonv1.PipelineTask {
+func verifyTask(
+	sc *supplyv1alpha1.SupplyChain,
+	imageRef, runAfter string,
+	as signing.Identity,
+) tektonv1.PipelineTask {
 	endpoints := signing.EndpointsFor(sc)
 	serviceAccount := sc.Spec.ServiceAccountName
 	if serviceAccount == "" {
 		serviceAccount = "default"
 	}
-	identity := signing.ServiceAccountIdentity(sc.Namespace, serviceAccount)
+	identity := as.Subject(sc.Namespace, serviceAccount)
 	policy := signing.AuthorizationPolicyCUE(authz.Principal(sc.Namespace, serviceAccount))
 
 	trust := []corev1.EnvVar{
@@ -703,7 +782,13 @@ func verifyTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tekto
 	roots := []corev1.VolumeMount{{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath}}
 	signer := []string{
 		"--certificate-identity=$(params.IDENTITY)",
-		"--certificate-oidc-issuer=" + signing.KubernetesOIDCIssuer,
+		"--certificate-oidc-issuer=" + as.Issuer,
+		"--rekor-url=$(params.REKOR_URL)",
+	}
+	// Chains signs the image and its provenance as itself: the second tier.
+	chains := []string{
+		"--certificate-identity=$(params.CHAINS_IDENTITY)",
+		"--certificate-oidc-issuer=" + as.Issuer,
 		"--rekor-url=$(params.REKOR_URL)",
 	}
 	const image = "$(params.IMAGE)@$(params.DIGEST)"
@@ -724,6 +809,7 @@ func verifyTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string) tekto
 					{Name: "DIGEST", Type: tektonv1.ParamTypeString},
 					{Name: "REKOR_URL", Type: tektonv1.ParamTypeString},
 					{Name: "IDENTITY", Type: tektonv1.ParamTypeString},
+					{Name: "CHAINS_IDENTITY", Type: tektonv1.ParamTypeString},
 					{Name: "AUTHORIZATION_POLICY", Type: tektonv1.ParamTypeString},
 				},
 				Workspaces: []tektonv1.WorkspaceDeclaration{{Name: "dockerconfig"}},
@@ -769,13 +855,31 @@ printf '%s' "${POLICY}" > ` + authorizationPolicyPath + `
 						}, signer...), image),
 					},
 					{
-						// Only reached when both verifications passed: a failing
+						Name:         "verify-chains-signature",
+						Image:        cosignImage,
+						VolumeMounts: roots,
+						Env:          trust,
+						Args:         append(append([]string{"verify"}, chains...), image),
+					},
+					{
+						Name:         "verify-provenance",
+						Image:        cosignImage,
+						VolumeMounts: roots,
+						Env:          trust,
+						Args: append(append([]string{
+							"verify-attestation",
+							"--type=" + provenancePredicateType,
+						}, chains...), image),
+					},
+					{
+						// Only reached when every verification passed: a failing
 						// step stops the task, so the results stay unset.
 						Name:  "report",
 						Image: "busybox:1.36",
 						Env: []corev1.EnvVar{
 							{Name: "IMAGE", Value: image},
 							{Name: "IDENTITY", Value: "$(params.IDENTITY)"},
+							{Name: "CHAINS_IDENTITY", Value: "$(params.CHAINS_IDENTITY)"},
 							{Name: "REKOR_URL", Value: "$(params.REKOR_URL)"},
 						},
 						Script: `#!/bin/sh
@@ -785,9 +889,11 @@ printf '%s' "${IDENTITY}" > $(results.VERIFIED_SIGNER.path)
 echo "Supply chain policy verification"
 echo "  Image:          ${IMAGE}"
 echo "  Signer:         ${IDENTITY}"
-echo "  Issuer:         ` + signing.KubernetesOIDCIssuer + `"
+echo "  Issuer:         ` + as.Issuer + `"
 echo "  Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)"
 echo "  Authorization:  verified (scope, intent, output allowed)"
+echo "  Chains signer:  ${CHAINS_IDENTITY}"
+echo "  Chains:         verified (image signature, SLSA provenance)"
 echo "  Rekor:          ${REKOR_URL}"
 echo "  Result:         PASS"
 `,
@@ -800,6 +906,7 @@ echo "  Result:         PASS"
 			str("DIGEST", "$(tasks."+stepPushImage+".results.IMAGE_DIGEST)"),
 			str("REKOR_URL", endpoints.RekorURL),
 			str("IDENTITY", identity),
+			str("CHAINS_IDENTITY", as.ChainsSubject()),
 			str("AUTHORIZATION_POLICY", policy),
 		},
 	}

@@ -56,6 +56,19 @@ type RunSigningContext struct {
 	// PrivateKey is the ephemeral ECDSA private key that matches the cert.
 	// Used for cosign signing, then discarded. Never persisted.
 	PrivateKey *ecdsa.PrivateKey
+
+	// Identity is how the pipeline's signing steps identify themselves to
+	// Fulcio, taken from the cluster's signing configuration. The zero value
+	// means the Kubernetes identity; use SigningIdentity to read it.
+	Identity Identity
+}
+
+// SigningIdentity is the identity the pipeline signs with.
+func (c *RunSigningContext) SigningIdentity() Identity {
+	if c == nil || c.Identity.Provider == "" {
+		return KubernetesIdentity()
+	}
+	return c.Identity
 }
 
 // EstablishSigningContext drives the full signing identity flow.

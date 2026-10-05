@@ -237,11 +237,21 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	}
 
 	// ── Gate 2: signing context (SAR → Token → Fulcio) ───────────────────
+	// Read how this cluster's workloads identify themselves to Fulcio before
+	// anything is signed: the pipeline, Chains and the admission policy all
+	// take it from the same configuration.
+	identity, err := signing.LoadIdentity(ctx, r.Client)
+	if err != nil {
+		return nil, nil, fmt.Errorf("signing configuration: %w", err)
+	}
+
 	sigCtx, err := r.Mediator.EstablishSigningContext(ctx, sc, ib)
 	if err != nil {
 		return nil, nil, fmt.Errorf("signing context: %w", err)
 	}
+	sigCtx.Identity = identity
 	logger.Info("signing context ready",
+		"identityProvider", identity.Provider,
 		"principal", sigCtx.ScopeProof.Principal,
 		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)

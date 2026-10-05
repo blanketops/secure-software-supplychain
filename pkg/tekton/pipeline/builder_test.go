@@ -30,6 +30,11 @@ import (
 
 func testPipelineRun(t *testing.T) *tektonv1.PipelineRun {
 	t.Helper()
+	return testPipelineRunAs(t, signing.Identity{})
+}
+
+func testPipelineRunAs(t *testing.T, identity signing.Identity) *tektonv1.PipelineRun {
+	t.Helper()
 	sc := &supplyv1alpha1.SupplyChain{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
 		Spec: supplyv1alpha1.SupplyChainSpec{
@@ -52,6 +57,7 @@ func testPipelineRun(t *testing.T) *tektonv1.PipelineRun {
 		ScopeProof:  proof("supplychains", "get"),
 		IntentProof: proof("imagebuilds", "create"),
 		OutputProof: proof("imagesignatures", "create"),
+		Identity:    identity,
 	}
 	return BuildPipelineRun("run", "default", sc, ib, "docker.io/org/app:tag", sigCtx)
 }
@@ -150,7 +156,7 @@ func TestVerifiesTheImageAgainstThePolicyLast(t *testing.T) {
 		t.Errorf("verify policy differs from the admission policy:\n%s", got)
 	}
 
-	steps := verify.TaskSpec.TaskSpec.Steps
+	steps := verify.TaskSpec.Steps
 	signature, authorization := strings.Join(steps[1].Args, " "), strings.Join(steps[2].Args, " ")
 	if !strings.HasPrefix(signature, "verify ") || !strings.HasPrefix(authorization, "verify-attestation ") {
 		t.Fatalf("verify steps run %q and %q", steps[1].Args[0], steps[2].Args[0])
@@ -184,6 +190,99 @@ func TestVerifiesTheImageAgainstThePolicyLast(t *testing.T) {
 		if want := "$(tasks." + stepVerify + ".results." + name + ")"; reported[name] != want {
 			t.Errorf("pipeline result %s = %q, want %q", name, reported[name], want)
 		}
+	}
+}
+
+// Under SPIFFE the cosign steps get their identity from the Workload API
+// socket, not from a ServiceAccount token, and everything downstream expects
+// the SPIFFE ID.
+func TestSignsWithSPIFFEIdentity(t *testing.T) {
+	pr := testPipelineRunAs(t, signing.Identity{
+		Provider: signing.ProviderSPIFFE, Issuer: "http://oidc.spire.svc", TrustDomain: "blanketops.dev",
+	})
+
+	sign := findTask(t, pr, stepSign).TaskSpec.TaskSpec
+	var csi, token bool
+	for _, volume := range sign.Volumes {
+		csi = csi || (volume.CSI != nil && volume.CSI.Driver == signing.SPIFFECSIDriver)
+		token = token || volume.Projected != nil
+	}
+	if !csi || token {
+		t.Errorf("sign task volumes: SPIFFE CSI=%v, projected token=%v; want the socket and no token", csi, token)
+	}
+	for _, step := range []tektonv1.Step{sign.Steps[1], sign.Steps[len(sign.Steps)-1]} {
+		args := strings.Join(step.Args, " ")
+		for _, want := range []string{"--oidc-provider=spiffe", "--oidc-issuer=http://oidc.spire.svc"} {
+			if !strings.Contains(args, want) {
+				t.Errorf("step %s args %q are missing %q", step.Name, args, want)
+			}
+		}
+		var socket bool
+		for _, env := range step.Env {
+			socket = socket || (env.Name == signing.SPIFFESocketEnv && env.Value == signing.SPIFFESocketValue)
+		}
+		if !socket {
+			t.Errorf("step %s does not point cosign at the Workload API socket", step.Name)
+		}
+	}
+
+	verify := findTask(t, pr, stepVerify)
+	if got, want := param(t, verify.Params, "IDENTITY"), "spiffe://blanketops.dev/ns/default/sa/supply-chain-runner"; got != want {
+		t.Errorf("verify IDENTITY = %q, want %q", got, want)
+	}
+	if args := strings.Join(verify.TaskSpec.TaskSpec.Steps[1].Args, " "); !strings.Contains(args,
+		"--certificate-oidc-issuer=http://oidc.spire.svc") {
+		t.Errorf("verify does not expect the SPIFFE issuer: %q", args)
+	}
+	if got, want := param(t, verify.Params, "CHAINS_IDENTITY"),
+		"spiffe://blanketops.dev/ns/tekton-chains/sa/tekton-chains-controller"; got != want {
+		t.Errorf("verify CHAINS_IDENTITY = %q, want %q", got, want)
+	}
+}
+
+// The runner and Chains write their signatures to the same registry tag, so
+// the runner has to wait for Chains; and the build is only verified when both
+// tiers are: the runner's signature and authorization, Chains' signature and
+// provenance.
+func TestRunnerSignsAfterChainsAndBothAreVerified(t *testing.T) {
+	pr := testPipelineRun(t)
+
+	sign := findTask(t, pr, stepSign).TaskSpec.TaskSpec
+	if first := sign.Steps[0]; first.Name != "await-chains-signature" || !strings.Contains(first.Script, ".sig") {
+		t.Errorf("sign task starts with %q, want it to wait for Chains' signature", first.Name)
+	}
+
+	steps := map[string]string{}
+	for _, step := range findTask(t, pr, stepVerify).TaskSpec.Steps {
+		steps[step.Name] = strings.Join(step.Args, " ")
+	}
+	for name, identity := range map[string]string{
+		"verify-signature":        "--certificate-identity=$(params.IDENTITY)",
+		"verify-authorization":    "--certificate-identity=$(params.IDENTITY)",
+		"verify-chains-signature": "--certificate-identity=$(params.CHAINS_IDENTITY)",
+		"verify-provenance":       "--certificate-identity=$(params.CHAINS_IDENTITY)",
+	} {
+		if !strings.Contains(steps[name], identity) {
+			t.Errorf("verify step %s args %q are missing %q", name, steps[name], identity)
+		}
+	}
+	if !strings.Contains(steps["verify-provenance"], "--type=slsaprovenance1") {
+		t.Errorf("verify-provenance does not check SLSA provenance: %q", steps["verify-provenance"])
+	}
+}
+
+// With the Kubernetes identity nothing about SPIFFE may appear: a CSI volume
+// for a driver that is not installed would keep the pod from starting.
+func TestKubernetesIdentityUsesNoSPIFFE(t *testing.T) {
+	sign := findTask(t, testPipelineRun(t), stepSign).TaskSpec.TaskSpec
+	for _, volume := range sign.Volumes {
+		if volume.CSI != nil {
+			t.Errorf("sign task mounts CSI volume %q under the Kubernetes identity", volume.Name)
+		}
+	}
+	if args := strings.Join(sign.Steps[1].Args, " "); strings.Contains(args, "--oidc-provider") ||
+		!strings.Contains(args, "--oidc-issuer="+signing.KubernetesOIDCIssuer) {
+		t.Errorf("sign args under the Kubernetes identity: %q", args)
 	}
 }
 
@@ -234,16 +333,16 @@ func TestScansBeforePushing(t *testing.T) {
 func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 	sign := findTask(t, testPipelineRun(t), stepSign)
 
-	steps := sign.TaskSpec.TaskSpec.Steps
+	steps := sign.TaskSpec.Steps
 	names := make([]string, 0, len(steps))
 	for _, step := range steps {
 		names = append(names, step.Name)
 	}
-	if got := strings.Join(names, ","); got != "sign,write-authorization-predicate,attest-authorization" {
+	if got := strings.Join(names, ","); got != "await-chains-signature,sign,write-authorization-predicate,attest-authorization" {
 		t.Fatalf("sign task steps = %s", got)
 	}
 
-	attest := strings.Join(steps[2].Args, " ")
+	attest := strings.Join(steps[3].Args, " ")
 	for _, want := range []string{
 		"attest",
 		"--type=" + signing.AuthorizationPredicateType,

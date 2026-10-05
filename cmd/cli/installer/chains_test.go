@@ -27,7 +27,7 @@ import (
 )
 
 func TestChainsConfig(t *testing.T) {
-	cfg := chainsConfig()
+	cfg := chainsConfig(Options{SigningIdentity: IdentityKubernetes})
 
 	// Provenance has to be findable next to the image, in the current format.
 	if repo, set := cfg["storage.oci.repository"]; set {
@@ -59,7 +59,7 @@ func TestChainsDeploymentMatchesConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var deployment *unstructured.Unstructured
-	for _, doc := range bytes.Split(data, []byte("\n---")) {
+	for doc := range bytes.SplitSeq(data, []byte("\n---")) {
 		obj := &unstructured.Unstructured{}
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
@@ -73,11 +73,11 @@ func TestChainsDeploymentMatchesConfig(t *testing.T) {
 	}
 
 	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
-	container := containers[0].(map[string]interface{})
+	container := containers[0].(map[string]any)
 
 	mounts := map[string]string{}
-	for _, m := range container["volumeMounts"].([]interface{}) {
-		mount := m.(map[string]interface{})
+	for _, m := range container["volumeMounts"].([]any) {
+		mount := m.(map[string]any)
 		mounts[mount["name"].(string)] = mount["mountPath"].(string)
 	}
 	if !strings.HasPrefix(chainsIdentityTokenFile, mounts["oidc-info"]+"/") {
@@ -89,8 +89,8 @@ func TestChainsDeploymentMatchesConfig(t *testing.T) {
 	}
 
 	env := map[string]string{}
-	for _, e := range container["env"].([]interface{}) {
-		v := e.(map[string]interface{})
+	for _, e := range container["env"].([]any) {
+		v := e.(map[string]any)
 		if value, ok := v["value"].(string); ok {
 			env[v["name"].(string)] = value
 		}
@@ -107,11 +107,11 @@ func TestChainsDeploymentMatchesConfig(t *testing.T) {
 
 	volumes, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "volumes")
 	for _, v := range volumes {
-		volume := v.(map[string]interface{})
+		volume := v.(map[string]any)
 		if volume["name"] != "sigstore-roots" {
 			continue
 		}
-		cm := volume["configMap"].(map[string]interface{})
+		cm := volume["configMap"].(map[string]any)
 		if cm["name"] != sigstoreRootsName {
 			t.Errorf("trust anchors come from ConfigMap %v, want %q", cm["name"], sigstoreRootsName)
 		}

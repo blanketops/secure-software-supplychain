@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +42,7 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/policy"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
 const (
@@ -133,7 +135,14 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			fmt.Sprintf("ConfigMap %q not found", missing))
 	}
 
-	rendered, err := policy.Render(&scp, &sc, roots)
+	// How signers are named comes from the cluster's signing configuration,
+	// the same place the pipeline and Chains take it from.
+	identity, err := signing.LoadIdentity(ctx, r.Client)
+	if err != nil {
+		return ctrl.Result{}, r.notReady(ctx, &scp, "SigningConfigInvalid", err.Error())
+	}
+
+	rendered, err := policy.Render(&scp, &sc, roots, identity)
 	if err != nil {
 		return ctrl.Result{}, r.notReady(ctx, &scp, "TrustAnchorsInvalid", err.Error())
 	}
@@ -241,9 +250,7 @@ func (r *SupplyChainPolicyReconciler) apply(
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		for k, v := range desired.GetLabels() {
-			labels[k] = v
-		}
+		maps.Copy(labels, desired.GetLabels())
 		obj.SetLabels(labels)
 		// policy-controller defaults fields on admission; leave an equal spec
 		// alone so the two controllers do not fight over it.
@@ -339,11 +346,22 @@ func emptyLike(desired *unstructured.Unstructured) *unstructured.Unstructured {
 }
 
 // policiesInNamespace requeues the SupplyChainPolicies that depend on obj:
-// those referencing a changed SupplyChain, or those whose trust anchors come
-// from a changed ConfigMap.
+// those referencing a changed SupplyChain, those whose trust anchors come from
+// a changed ConfigMap, or all of them when the signing configuration changes.
 func (r *SupplyChainPolicyReconciler) policiesInNamespace(ctx context.Context, obj client.Object) []reconcile.Request {
+	// The signing configuration lives in Tekton's namespaces and applies to
+	// every policy in the cluster.
+	_, isConfigMap := obj.(*corev1.ConfigMap)
+	signingConfig := isConfigMap &&
+		((obj.GetNamespace() == signing.ChainsConfigNamespace && obj.GetName() == signing.ChainsConfigName) ||
+			(obj.GetNamespace() == signing.SpireConfigNamespace && obj.GetName() == signing.SpireConfigName))
+	scope := []client.ListOption{client.InNamespace(obj.GetNamespace())}
+	if signingConfig {
+		scope = nil
+	}
+
 	var list supplychainv1alpha1.SupplyChainPolicyList
-	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+	if err := r.List(ctx, &list, scope...); err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list SupplyChainPolicies", "namespace", obj.GetNamespace())
 		return nil
 	}
@@ -353,7 +371,7 @@ func (r *SupplyChainPolicyReconciler) policiesInNamespace(ctx context.Context, o
 		if isSupplyChain && list.Items[i].Spec.SupplyChainRef.Name != obj.GetName() {
 			continue
 		}
-		if !isSupplyChain && !trustsConfigMap(&list.Items[i], obj.GetName()) {
+		if !isSupplyChain && !signingConfig && !trustsConfigMap(&list.Items[i], obj.GetName()) {
 			continue
 		}
 		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
