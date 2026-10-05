@@ -188,6 +188,113 @@ spec:
           status:
             description: status defines the observed state of SupplyChain
             properties:
+              authorization:
+                description: |-
+                  authorization holds the API server's answers to the three checks the
+                  build ServiceAccount must pass: it can read the SupplyChain, start
+                  builds for it, and record what it signs.
+                properties:
+                  intent:
+                    description: 'intent: the ServiceAccount may start builds.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                  output:
+                    description: 'output: the ServiceAccount may record what it signs.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                  scope:
+                    description: 'scope: the ServiceAccount can read the SupplyChain
+                      it builds for.'
+                    properties:
+                      allowed:
+                        description: allowed is the API server's verdict.
+                        type: boolean
+                      evaluatedAt:
+                        description: evaluatedAt is when the review was performed.
+                        format: date-time
+                        type: string
+                      group:
+                        description: group is the API group of the resource.
+                        type: string
+                      principal:
+                        description: principal is the identity that was reviewed.
+                        type: string
+                      reason:
+                        description: reason is the API server's explanation, if it
+                          gave one.
+                        type: string
+                      resource:
+                        description: resource is the resource the action targets.
+                        type: string
+                      verb:
+                        description: verb is the action.
+                        type: string
+                    required:
+                    - allowed
+                    - evaluatedAt
+                    - principal
+                    - resource
+                    - verb
+                    type: object
+                type: object
               conditions:
                 description: |-
                   INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
@@ -271,6 +378,13 @@ spec:
                 - Ready
                 - Degraded
                 - Error
+                - Unauthorized
+                type: string
+              signingIdentity:
+                description: |-
+                  signingIdentity is the SPIFFE ID registered for the build
+                  ServiceAccount. It is only registered while all three checks pass, and
+                  is empty when the cluster does not sign with SPIFFE identities.
                 type: string
             type: object
         required:

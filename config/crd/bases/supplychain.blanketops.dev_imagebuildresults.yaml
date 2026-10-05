@@ -212,6 +212,133 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              evidence:
+                description: |-
+                  Evidence is what vouches for the image: its signatures and attestations,
+                  the keys and identities behind them, and their transparency log entries.
+                properties:
+                  collectedAt:
+                    description: collectedAt is when the registry and the log were
+                      last read.
+                    format: date-time
+                    type: string
+                  complete:
+                    description: |-
+                      complete is true once Tekton Chains has finished with the run, so
+                      nothing more will be added to the image.
+                    type: boolean
+                  fulcioURL:
+                    description: fulcioURL is the certificate authority that issued
+                      the certificates.
+                    type: string
+                  message:
+                    description: message says what could not be collected, if anything.
+                    type: string
+                  provenanceLogEntry:
+                    description: |-
+                      provenanceLogEntry is where Tekton Chains logged the provenance of the
+                      whole run.
+                    type: string
+                  rekorURL:
+                    description: rekorURL is the transparency log the entries are
+                      in.
+                    type: string
+                  signatures:
+                    description: |-
+                      signatures lists every signature and attestation on the image, in the
+                      order the transparency log recorded them.
+                    items:
+                      description: |-
+                        SignatureRecord is one signature or attestation found on the built image, as
+                        it is stored in the registry next to it, together with where it was
+                        recorded in the transparency log.
+                      properties:
+                        certificateFingerprint:
+                          description: |-
+                            certificateFingerprint is the SHA-256 of the Fulcio certificate that
+                            binds the key to the subject.
+                          type: string
+                        integratedAt:
+                          description: integratedAt is when the log accepted the entry.
+                          format: date-time
+                          type: string
+                        issuer:
+                          description: issuer is the OIDC issuer Fulcio verified that
+                            identity against.
+                          type: string
+                        keyFingerprint:
+                          description: |-
+                            keyFingerprint is the SHA-256 of the public key that signed. The key
+                            was made for this one signature and its private half is gone.
+                          type: string
+                        kind:
+                          description: |-
+                            kind says whether this is a signature of the image or an attestation
+                            about it.
+                          enum:
+                          - Signature
+                          - Attestation
+                          type: string
+                        notAfter:
+                          format: date-time
+                          type: string
+                        notBefore:
+                          description: |-
+                            notBefore and notAfter are the validity of that certificate. The
+                            signature must have been logged inside it.
+                          format: date-time
+                          type: string
+                        predicateType:
+                          description: |-
+                            predicateType is what an attestation states, for example SLSA
+                            provenance or the build's authorization proofs. Empty for signatures.
+                          type: string
+                        rekorLogID:
+                          description: rekorLogID identifies the log, by the SHA-256
+                            of its public key.
+                          type: string
+                        rekorLogIndex:
+                          description: |-
+                            rekorLogIndex is the index of the entry in the transparency log. Unset
+                            when no entry was found.
+                          format: int64
+                          type: integer
+                        signedBy:
+                          description: |-
+                            signedBy is who made it: Build for the SupplyChain's ServiceAccount,
+                            Chains for Tekton Chains, Other for an identity that is neither.
+                          enum:
+                          - Build
+                          - Chains
+                          - Other
+                          type: string
+                        subject:
+                          description: subject is the identity in the signing certificate.
+                          type: string
+                      required:
+                      - kind
+                      - signedBy
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  trustAnchors:
+                    description: |-
+                      trustAnchors are the fingerprints of the Fulcio root, the Rekor key
+                      and the CT log key in use when the evidence was collected.
+                    properties:
+                      ctLogKey:
+                        description: ctLogKey is the SHA-256 of the CT log public
+                          key.
+                        type: string
+                      fulcioRoot:
+                        description: fulcioRoot is the SHA-256 of the Fulcio root
+                          certificate.
+                        type: string
+                      rekorKey:
+                        description: rekorKey is the SHA-256 of the Rekor public key.
+                        type: string
+                    type: object
+                type: object
               imageDigest:
                 description: |-
                   ImageDigest is the content-addressable digest of the built image.

@@ -87,6 +87,106 @@ type PipelineStepResults struct {
 	VerifiedSigner string `json:"verifiedSigner,omitempty"`
 }
 
+// SignatureRecord is one signature or attestation found on the built image, as
+// it is stored in the registry next to it, together with where it was
+// recorded in the transparency log.
+type SignatureRecord struct {
+	// kind says whether this is a signature of the image or an attestation
+	// about it.
+	// +kubebuilder:validation:Enum=Signature;Attestation
+	Kind string `json:"kind"`
+
+	// predicateType is what an attestation states, for example SLSA
+	// provenance or the build's authorization proofs. Empty for signatures.
+	// +optional
+	PredicateType string `json:"predicateType,omitempty"`
+
+	// signedBy is who made it: Build for the SupplyChain's ServiceAccount,
+	// Chains for Tekton Chains, Other for an identity that is neither.
+	// +kubebuilder:validation:Enum=Build;Chains;Other
+	SignedBy string `json:"signedBy"`
+
+	// subject is the identity in the signing certificate.
+	// +optional
+	Subject string `json:"subject,omitempty"`
+
+	// issuer is the OIDC issuer Fulcio verified that identity against.
+	// +optional
+	Issuer string `json:"issuer,omitempty"`
+
+	// keyFingerprint is the SHA-256 of the public key that signed. The key
+	// was made for this one signature and its private half is gone.
+	// +optional
+	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+
+	// certificateFingerprint is the SHA-256 of the Fulcio certificate that
+	// binds the key to the subject.
+	// +optional
+	CertificateFingerprint string `json:"certificateFingerprint,omitempty"`
+
+	// notBefore and notAfter are the validity of that certificate. The
+	// signature must have been logged inside it.
+	// +optional
+	NotBefore *metav1.Time `json:"notBefore,omitempty"`
+	// +optional
+	NotAfter *metav1.Time `json:"notAfter,omitempty"`
+
+	// rekorLogIndex is the index of the entry in the transparency log. Unset
+	// when no entry was found.
+	// +optional
+	RekorLogIndex *int64 `json:"rekorLogIndex,omitempty"`
+
+	// rekorLogID identifies the log, by the SHA-256 of its public key.
+	// +optional
+	RekorLogID string `json:"rekorLogID,omitempty"`
+
+	// integratedAt is when the log accepted the entry.
+	// +optional
+	IntegratedAt *metav1.Time `json:"integratedAt,omitempty"`
+}
+
+// BuildEvidence is everything that vouches for the built image: who signed
+// and attested it, with which keys, where that is logged, and which trust
+// anchors those claims are checked against.
+type BuildEvidence struct {
+	// signatures lists every signature and attestation on the image, in the
+	// order the transparency log recorded them.
+	// +optional
+	// +listType=atomic
+	Signatures []SignatureRecord `json:"signatures,omitempty"`
+
+	// fulcioURL is the certificate authority that issued the certificates.
+	// +optional
+	FulcioURL string `json:"fulcioURL,omitempty"`
+
+	// rekorURL is the transparency log the entries are in.
+	// +optional
+	RekorURL string `json:"rekorURL,omitempty"`
+
+	// trustAnchors are the fingerprints of the Fulcio root, the Rekor key
+	// and the CT log key in use when the evidence was collected.
+	// +optional
+	TrustAnchors *TrustAnchorFingerprints `json:"trustAnchors,omitempty"`
+
+	// provenanceLogEntry is where Tekton Chains logged the provenance of the
+	// whole run.
+	// +optional
+	ProvenanceLogEntry string `json:"provenanceLogEntry,omitempty"`
+
+	// complete is true once Tekton Chains has finished with the run, so
+	// nothing more will be added to the image.
+	// +optional
+	Complete bool `json:"complete,omitempty"`
+
+	// message says what could not be collected, if anything.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// collectedAt is when the registry and the log were last read.
+	// +optional
+	CollectedAt *metav1.Time `json:"collectedAt,omitempty"`
+}
+
 // ImageBuildResultSpec defines the desired state of ImageBuildResult.
 type ImageBuildResultSpec struct {
 	// ImageBuildRef references the ImageBuild that produced this result.
@@ -138,6 +238,11 @@ type ImageBuildResultStatus struct {
 	// Populated from PipelineRun results — covers git, build, security, attestation.
 	// +optional
 	BuildResults *PipelineStepResults `json:"buildResults,omitempty"`
+
+	// Evidence is what vouches for the image: its signatures and attestations,
+	// the keys and identities behind them, and their transparency log entries.
+	// +optional
+	Evidence *BuildEvidence `json:"evidence,omitempty"`
 }
 
 // +kubebuilder:object:root=true

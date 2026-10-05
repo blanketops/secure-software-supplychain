@@ -7,27 +7,25 @@
 #     --set spiffe-oidc-discovery-provider.tls.spire.enabled=false
 #
 # trust-domain.placeholder.invalid is replaced with --trust-domain at install time.
-# Only the ClusterSPIFFEID objects of that render: which pods get which SPIFFE ID.
+# Only the ClusterSPIFFEID objects of that render, minus the default one (see below).
 ---
-# Source: spire/charts/spire-server/templates/controller-manager-cluster-ids.yaml
+# The chart's "spire-server-spire-default" ClusterSPIFFEID is left out on
+# purpose. It gave every pod in the cluster a SPIFFE ID, and so a Fulcio
+# certificate, for the asking. Here an identity is something that is granted:
+# to Tekton Chains below, and to a SupplyChain's build ServiceAccount by the
+# operator, once that ServiceAccount has passed its three authorization
+# checks. The installer removes the default from clusters that have it.
 apiVersion: spire.spiffe.io/v1alpha1
-kind: ClusterSPIFFEID
+kind: ClusterStaticEntry
 metadata:
-  name: spire-server-spire-default
-  labels:
-    spire.spiffe.io/class-name: spire-server-spire
+  name: tekton-chains-controller
 spec:
   className: "spire-server-spire"
-  hint: default
-  spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
-  namespaceSelector:
-    matchExpressions:
-    - key: kubernetes.io/metadata.name
-      operator: NotIn
-      values:
-      - spire-server
-      - spire-system
-  fallback: true
+  spiffeID: "spiffe://trust-domain.placeholder.invalid/ns/tekton-chains/sa/tekton-chains-controller"
+  parentID: "spiffe://trust-domain.placeholder.invalid/supply-chain/nodes"
+  selectors:
+    - "k8s:ns:tekton-chains"
+    - "k8s:sa:tekton-chains-controller"
 ---
 # Source: spire/charts/spire-server/templates/controller-manager-cluster-ids.yaml
 apiVersion: spire.spiffe.io/v1alpha1

@@ -89,8 +89,20 @@ the Chains config (`signers.x509.fulcio.provider` and `.issuer`) and the trust d
 The three authorization proofs are unaffected: they are about the Kubernetes ServiceAccount the API server
 reviewed, whatever name the certificate carries.
 
-Under `spiffe` the `SupplyChain` controller registers its build ServiceAccount with SPIRE ahead of time (a
-`ClusterStaticEntry`), so the identity exists before a build pod asks for it.
+### An identity is granted, not default
+
+Under `spiffe` no pod has a SPIFFE identity unless one was registered for it. The installer leaves out SPIRE's
+default rule, which gives every pod in the cluster an identity, and registers exactly two kinds:
+
+| Who | Registered by | When |
+|---|---|---|
+| Tekton Chains' controller | The installer | At install |
+| A `SupplyChain`'s build ServiceAccount | The `SupplyChain` controller | Only while the ServiceAccount passes its three authorization checks |
+
+Fulcio certifies whatever SPIRE vouches for, so this is where the three SubjectAccessReviews gate signing itself:
+a ServiceAccount that may not read the `SupplyChain`, start builds and record signatures has no identity, and
+Fulcio issues it nothing. The checks are repeated every five minutes; when one fails the registration is removed
+and the `SupplyChain` reports `Unauthorized`, with the three answers in `status.authorization`.
 
 ### Two tiers of proof
 
@@ -106,6 +118,28 @@ its own, because both are stored under the same registry tag. The last pipeline 
 `SupplyChainPolicy` renders four `ClusterImagePolicy` objects (`<ns>-<name>`, `-authorization`, `-chains`,
 `-provenance`). An image must pass every one of them to be admitted, so neither identity can vouch for an image
 on its own.
+
+### What a build leaves behind
+
+`ImageBuildResult` is the record of a build. Besides the outcome of each step it holds the evidence for the
+image, read back from the registry and the transparency log once the build is over:
+
+```console
+$ kubectl get imagebuildresult for-kaniko-app-1 -o jsonpath='{.status.evidence}' | jq
+```
+
+| Field | What it says |
+|---|---|
+| `signatures[]` | Every signature and attestation on the image: `kind`, `predicateType`, `signedBy` (`Build`, `Chains` or `Other`), the certificate `subject` and `issuer`, the `keyFingerprint` and `certificateFingerprint`, and its transparency log entry (`rekorLogIndex`, `rekorLogID`, `integratedAt`) |
+| `trustAnchors` | Fingerprints of the Fulcio root, the Rekor key and the CT log key in use |
+| `provenanceLogEntry` | Where Chains logged the provenance of the whole run |
+| `complete` | True once Chains has finished with the run and nothing more will be added |
+
+The same record is published to Tekton as a `CustomRun` named `<pipelinerun>-result`, whose results are a summary
+of it, so a build's outcome and evidence can be read in Tekton next to the run that produced them
+(`kubectl get customrun -l blanketops.dev/supply-chain=<name>`). It is a run of its own and not a task of the
+build's pipeline: Tekton Chains only signs a `PipelineRun` whose children are all `TaskRun`s, and a custom task
+inside the pipeline would cost the run its provenance.
 
 > **Status.** Both identities have been run end to end on a cluster. With `spiffe`: Fulcio issued SPIFFE
 > certificates to the build and to Chains, the pipeline verified both tiers, and admission accepted the image

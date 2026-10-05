@@ -144,11 +144,34 @@ type SupplyChainStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Phase is the current lifecycle phase of the SupplyChain
-	// +kubebuilder:validation:Enum=Ready;Degraded;Error
+	// +kubebuilder:validation:Enum=Ready;Degraded;Error;Unauthorized
 	Phase string `json:"phase,omitempty"`
+	// authorization holds the API server's answers to the three checks the
+	// build ServiceAccount must pass: it can read the SupplyChain, start
+	// builds for it, and record what it signs.
+	// +optional
+	Authorization *SignerAuthorization `json:"authorization,omitempty"`
+	// signingIdentity is the SPIFFE ID registered for the build
+	// ServiceAccount. It is only registered while all three checks pass, and
+	// is empty when the cluster does not sign with SPIFFE identities.
+	// +optional
+	SigningIdentity string `json:"signingIdentity,omitempty"`
 	// LastImageBuild is the name of the most recent ImageBuild created
 	// +optional
 	LastImageBuild string `json:"lastImageBuild,omitempty"`
+}
+
+// SignerAuthorization holds the three proofs of the build ServiceAccount.
+type SignerAuthorization struct {
+	// scope: the ServiceAccount can read the SupplyChain it builds for.
+	// +optional
+	Scope *AuthorizationProof `json:"scope,omitempty"`
+	// intent: the ServiceAccount may start builds.
+	// +optional
+	Intent *AuthorizationProof `json:"intent,omitempty"`
+	// output: the ServiceAccount may record what it signs.
+	// +optional
+	Output *AuthorizationProof `json:"output,omitempty"`
 }
 
 // +kubebuilder:object:root=true

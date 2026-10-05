@@ -122,6 +122,7 @@ rules:
 - apiGroups:
   - tekton.dev
   resources:
+  - customruns
   - pipelineruns
   - pipelines
   - taskruns
@@ -134,6 +135,14 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - tekton.dev
+  resources:
+  - customruns/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - triggers.tekton.dev
   resources:

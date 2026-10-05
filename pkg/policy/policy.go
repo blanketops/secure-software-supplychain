@@ -20,10 +20,8 @@ limitations under the License.
 package policy
 
 import (
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"strings"
@@ -182,9 +180,9 @@ func Render(
 		Signers:   signers,
 		Endpoints: endpoints,
 		TrustAnchors: supplyv1alpha1.TrustAnchorFingerprints{
-			FulcioRoot: fingerprint(roots[signing.RootsFulcioKey]),
-			RekorKey:   fingerprint(roots[signing.RootsRekorKey]),
-			CTLogKey:   fingerprint(roots[signing.RootsCTLogKey]),
+			FulcioRoot: signing.Fingerprint(roots[signing.RootsFulcioKey]),
+			RekorKey:   signing.Fingerprint(roots[signing.RootsRekorKey]),
+			CTLogKey:   signing.Fingerprint(roots[signing.RootsCTLogKey]),
 		},
 	}, nil
 }
@@ -231,17 +229,6 @@ func TrustSources(scp *supplyv1alpha1.SupplyChainPolicy) map[string]supplyv1alph
 	override(signing.RootsRekorKey, trustRoot.Rekor)
 	override(signing.RootsCTLogKey, trustRoot.CTLog)
 	return sources
-}
-
-// fingerprint identifies a trust anchor by the SHA-256 of its first PEM
-// block's contents, so it does not change with whitespace or line endings.
-func fingerprint(pemData string) string {
-	data := []byte(strings.TrimSpace(pemData))
-	if block, _ := pem.Decode(data); block != nil {
-		data = block.Bytes
-	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // resolveSigners turns spec.signers into certificate identities, named the way

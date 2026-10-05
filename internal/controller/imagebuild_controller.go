@@ -35,10 +35,18 @@ import (
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	supplychain "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/supplychain"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/evidence"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 	pipeline "github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pruner"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
+)
+
+const (
+	// evidenceRetry is how often a finished build is revisited while Tekton
+	// Chains has not signed its run yet; evidenceWait is for how long.
+	evidenceRetry = 20 * time.Second
+	evidenceWait  = 10 * time.Minute
 )
 
 type ImageBuildReconciler struct {
@@ -81,8 +89,12 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Terminal state guard.
-	if ib.Status.Phase == "Succeeded" || ib.Status.Phase == "Failed" {
+	// Terminal state guard. A build that succeeded is only revisited for the
+	// evidence Tekton Chains adds after the run has finished.
+	if ib.Status.Phase == "Succeeded" {
+		return r.completeEvidence(ctx, &ib)
+	}
+	if ib.Status.Phase == "Failed" {
 		logger.Info("ImageBuild terminal, skipping", "phase", ib.Status.Phase)
 		return ctrl.Result{}, nil
 	}
@@ -165,6 +177,18 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			logger.Error(err, "failed to prune PipelineRuns")
 		}
 
+		// Tekton Chains signs the run after it has finished, and adds that
+		// provenance to the image. Come back for it, so the recorded
+		// evidence is whole; give up on a run Chains never signs.
+		if ib.Status.Phase == "Succeeded" && !evidence.ChainsDone(pr) && pr.Status.CompletionTime != nil &&
+			time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
+			return ctrl.Result{RequeueAfter: evidenceRetry}, nil
+		}
+
+		// 4d. The record is final: publish it to Tekton.
+		if err := r.publishResult(ctx, &ib, pr.Name); err != nil {
+			logger.Error(err, "Failed to publish ImageBuildResult to Tekton")
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -398,6 +422,52 @@ func (r *ImageBuildReconciler) setFailed(
 	ib.Status.Phase = "Failed"
 	_ = r.Status().Update(ctx, ib)
 	return ctrl.Result{}, err
+}
+
+// completeEvidence records the evidence of a finished build again until
+// Tekton Chains is done with the run. Chains signs a run after it completes
+// and stores that provenance with the image, so the first record, taken the
+// moment the run finished, cannot have it.
+func (r *ImageBuildReconciler) completeEvidence(
+	ctx context.Context,
+	ib *supplychainv1alpha1.ImageBuild,
+) (ctrl.Result, error) {
+	var result supplychainv1alpha1.ImageBuildResult
+	if err := r.Get(ctx, client.ObjectKeyFromObject(ib), &result); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if result.Status.Evidence != nil && result.Status.Evidence.Complete {
+		return ctrl.Result{}, r.publishResult(ctx, ib, ib.Status.PipelineRunRef)
+	}
+
+	var pr tektonv1.PipelineRun
+	key := types.NamespacedName{Namespace: ib.Namespace, Name: ib.Status.PipelineRunRef}
+	if err := r.Get(ctx, key, &pr); err != nil {
+		// Pruned: there is nothing left to learn about it.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if err := r.Recorder.Record(ctx, ib, &pr); err != nil {
+		return ctrl.Result{}, err
+	}
+	if !evidence.ChainsDone(&pr) && pr.Status.CompletionTime != nil &&
+		time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
+		return ctrl.Result{RequeueAfter: evidenceRetry}, nil
+	}
+	return ctrl.Result{}, r.publishResult(ctx, ib, pr.Name)
+}
+
+// publishResult creates the CustomRun that shows the ImageBuildResult in
+// Tekton. It is created once, when nothing more will be added to the record.
+func (r *ImageBuildReconciler) publishResult(
+	ctx context.Context,
+	ib *supplychainv1alpha1.ImageBuild,
+	pipelineRun string,
+) error {
+	if pipelineRun == "" {
+		return nil
+	}
+	err := r.Create(ctx, results.NewRun(ib, pipelineRun))
+	return client.IgnoreAlreadyExists(err)
 }
 
 func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {

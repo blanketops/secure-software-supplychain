@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/evidence"
 )
 
 // Recorder extracts PipelineRun results and writes them to an ImageBuildResult CR.
@@ -67,6 +68,25 @@ func (r *Recorder) Record(
 		FillFromTaskRuns(buildResults, taskRuns.Items)
 	}
 
+	_, err := r.write(ctx, ib, run, phase, reason, run.Status.CompletionTime, buildResults)
+	return err
+}
+
+// write creates or updates the ImageBuildResult of ib.
+func (r *Recorder) write(
+	ctx context.Context,
+	ib *supplyv1alpha1.ImageBuild,
+	run *tektonv1.PipelineRun,
+	phase, reason string,
+	completedAt *metav1.Time,
+	buildResults *supplyv1alpha1.PipelineStepResults,
+) (*supplyv1alpha1.ImageBuildResult, error) {
+	log := r.Log.WithValues(
+		"imageBuild", ib.Name,
+		"pipelineRun", run.Name,
+		"namespace", ib.Namespace,
+	)
+
 	log.Info("recording build result",
 		"phase", phase,
 		"imageURL", buildResults.ImageURL,
@@ -74,6 +94,15 @@ func (r *Recorder) Record(
 		"trivySummary", buildResults.TrivyScanSummary,
 		"sonarGate", buildResults.SonarGateStatus,
 	)
+
+	var existing supplyv1alpha1.ImageBuildResult
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: ib.Namespace, Name: ib.Name}, &existing)
+	if client.IgnoreNotFound(err) != nil {
+		return nil, fmt.Errorf("reading ImageBuildResult: %w", err)
+	}
+	found := err == nil
+
+	collected := r.collectEvidence(ctx, ib, run, phase, buildResults, existing.Status.Evidence)
 
 	desired := &supplyv1alpha1.ImageBuildResult{
 		ObjectMeta: metav1.ObjectMeta{
@@ -101,28 +130,59 @@ func (r *Recorder) Record(
 		},
 	}
 
-	var existing supplyv1alpha1.ImageBuildResult
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-	if err == nil {
-		applyStatus(&existing.Status, phase, reason, run.Name, run.Status.CompletionTime, buildResults)
+	if found {
+		applyStatus(&existing.Status, phase, reason, run.Name, completedAt, buildResults)
+		existing.Status.Evidence = collected
 		if updateErr := r.Client.Status().Update(ctx, &existing); updateErr != nil {
-			return fmt.Errorf("updating ImageBuildResult status: %w", updateErr)
+			return nil, fmt.Errorf("updating ImageBuildResult status: %w", updateErr)
 		}
 		log.Info("ImageBuildResult updated", "phase", phase)
-		return nil
+		return &existing, nil
 	}
 
 	if createErr := r.Client.Create(ctx, desired); createErr != nil {
-		return fmt.Errorf("creating ImageBuildResult: %w", createErr)
+		return nil, fmt.Errorf("creating ImageBuildResult: %w", createErr)
 	}
 
-	applyStatus(&desired.Status, phase, reason, run.Name, run.Status.CompletionTime, buildResults)
+	applyStatus(&desired.Status, phase, reason, run.Name, completedAt, buildResults)
+	desired.Status.Evidence = collected
 	if updateErr := r.Client.Status().Update(ctx, desired); updateErr != nil {
-		return fmt.Errorf("setting ImageBuildResult status: %w", updateErr)
+		return nil, fmt.Errorf("setting ImageBuildResult status: %w", updateErr)
 	}
 
 	log.Info("ImageBuildResult created", "phase", phase)
-	return nil
+	return desired, nil
+}
+
+// collectEvidence reads the signatures and attestations of the pushed image
+// and their transparency log entries. Evidence that is already complete is
+// kept as it is: nothing more will be added to the image, and the registry
+// need not be asked again on every reconcile.
+func (r *Recorder) collectEvidence(
+	ctx context.Context,
+	ib *supplyv1alpha1.ImageBuild,
+	run *tektonv1.PipelineRun,
+	phase string,
+	buildResults *supplyv1alpha1.PipelineStepResults,
+	have *supplyv1alpha1.BuildEvidence,
+) *supplyv1alpha1.BuildEvidence {
+	if have != nil && have.Complete {
+		return have
+	}
+	if phase != "Succeeded" || buildResults.ImageURL == "" || buildResults.ImageDigest == "" {
+		return have
+	}
+	var sc supplyv1alpha1.SupplyChain
+	key := client.ObjectKey{Namespace: ib.Namespace, Name: ib.Spec.SupplyChainRef.Name}
+	if err := r.Client.Get(ctx, key, &sc); err != nil {
+		r.Log.Error(err, "Failed to read SupplyChain; evidence not collected", "supplyChain", key.Name)
+		return have
+	}
+	collected := evidence.ForBuild(ctx, r.Client, &sc, run, buildResults.ImageURL, buildResults.ImageDigest)
+	if collected.Message != "" {
+		r.Log.Info("Collected evidence with gaps", "imageBuild", ib.Name, "message", collected.Message)
+	}
+	return collected
 }
 
 // ExtractAllResults pulls the full set of results from all 9 pipeline steps.

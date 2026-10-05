@@ -299,7 +299,7 @@ func TestTrustRoot(t *testing.T) {
 
 func TestFingerprintIgnoresWhitespace(t *testing.T) {
 	cert := rootCert(t, pkix.Name{CommonName: "fulcio"})
-	if fingerprint(cert) != fingerprint("\n"+cert+"\n\n") {
+	if signing.Fingerprint(cert) != signing.Fingerprint("\n"+cert+"\n\n") {
 		t.Error("fingerprint changed with surrounding whitespace")
 	}
 }

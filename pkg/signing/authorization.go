@@ -16,8 +16,12 @@ limitations under the License.
 package signing
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
 )
@@ -80,4 +84,28 @@ func AuthorizationPolicyCUE(principal string) string {
 		proof("intent", IntentCheck) +
 		proof("output", OutputCheck) +
 		"}\n"
+}
+
+// AuthorizeSigner runs the three checks for a build ServiceAccount. It always
+// runs all three, so the returned proofs show everything that is missing; the
+// error is non-nil if any was denied or could not be evaluated.
+func AuthorizeSigner(
+	ctx context.Context,
+	c client.Client,
+	namespace, serviceAccount string,
+) (*AuthorizationPredicate, error) {
+	var errs []error
+	verify := func(check AuthorizationCheck) *authz.AuthzProof {
+		proof, err := authz.VerifyAuthorization(ctx, c, serviceAccount, namespace, check.Resource, check.Verb)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return proof
+	}
+	proofs := &AuthorizationPredicate{
+		Scope:  verify(ScopeCheck),
+		Intent: verify(IntentCheck),
+		Output: verify(OutputCheck),
+	}
+	return proofs, errors.Join(errs...)
 }

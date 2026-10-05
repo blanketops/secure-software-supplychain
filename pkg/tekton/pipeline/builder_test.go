@@ -360,3 +360,17 @@ func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 		}
 	}
 }
+
+// Tekton Chains only signs a PipelineRun whose children are all TaskRuns: it
+// looks each child up as a TaskRun and gives up on the run when one is not
+// found. A custom task in the pipeline would cost the run its provenance, so
+// the result is published to Tekton by a CustomRun of its own instead.
+func TestPipelineHasOnlyTaskRuns(t *testing.T) {
+	spec := testPipelineRun(t).Spec.PipelineSpec
+	for _, task := range append(append([]tektonv1.PipelineTask{}, spec.Tasks...), spec.Finally...) {
+		if ref := task.TaskRef; ref != nil && ref.APIVersion != "" && !strings.HasPrefix(ref.APIVersion, "tekton.dev/") {
+			t.Errorf("task %s is a custom task (%s %s); Tekton Chains would not sign the run",
+				task.Name, ref.APIVersion, ref.Kind)
+		}
+	}
+}

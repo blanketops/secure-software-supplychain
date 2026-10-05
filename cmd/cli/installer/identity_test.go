@@ -212,12 +212,21 @@ func TestSpireManifests(t *testing.T) {
 	for _, dir := range []string{"crds/crds.yaml", "release/release.yaml", "identities/identities.yaml"} {
 		for _, obj := range decodeAll(t, "dependencies/spire/"+dir) {
 			kinds[obj.GetKind()]++
+			if obj.GetKind() == "ClusterSPIFFEID" && obj.GetName() == defaultClusterSPIFFEID {
+				t.Errorf("%s gives every pod an identity; identities are granted, not default", obj.GetName())
+			}
 			if obj.GetKind() == "ClusterSPIFFEID" && !strings.HasSuffix(dir, "identities.yaml") {
 				t.Errorf("ClusterSPIFFEID %s is in %s; it must be applied after the server is up", obj.GetName(), dir)
 			}
 		}
 	}
-	for kind, want := range map[string]int{"CustomResourceDefinition": 3, "StatefulSet": 1, "CSIDriver": 1, "ClusterSPIFFEID": 3} {
+	// Two ClusterSPIFFEIDs, not the chart's three: the default one, which gives
+	// every pod an identity, is left out. Chains and the node alias are
+	// registered as static entries instead.
+	for kind, want := range map[string]int{
+		"CustomResourceDefinition": 3, "StatefulSet": 1, "CSIDriver": 1,
+		"ClusterSPIFFEID": 2, "ClusterStaticEntry": 2,
+	} {
 		if kinds[kind] != want {
 			t.Errorf("%d %s objects in the SPIRE manifests, want %d", kinds[kind], kind, want)
 		}

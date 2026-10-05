@@ -24,9 +24,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
 // forKanikoAppSupplyChain returns a SupplyChain that exactly mirrors
@@ -197,6 +199,48 @@ var _ = Describe("SupplyChain Controller", func() {
 		Expect(r.ensureServiceAccount(ctx, &sc, name)).To(Succeed())
 		Expect(k8sClient.Get(ctx, key, &sa)).To(Succeed())
 		Expect(sa.ResourceVersion).To(Equal(version))
+	})
+
+	// Under SPIFFE the identity is what Fulcio certifies, so it is only given
+	// to a ServiceAccount that passes the three authorization checks. The
+	// test ServiceAccount has no RBAC at all.
+	It("should withhold the signing identity from a ServiceAccount that is not authorized", func() {
+		By("configuring the cluster to sign with SPIFFE identities")
+		for _, cm := range []*corev1.ConfigMap{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: signing.ChainsConfigNamespace, Name: signing.ChainsConfigName},
+				Data: map[string]string{
+					signing.ChainsFulcioProvider: signing.ProviderSPIFFE,
+					signing.ChainsFulcioIssuer:   "http://oidc.spire.svc",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: signing.SpireConfigNamespace, Name: signing.SpireConfigName},
+				Data:       map[string]string{signing.SpireConfigTrustDomain: "blanketops.dev"},
+			},
+		} {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cm.Namespace}}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, cm)).To(Succeed()) })
+		}
+
+		var sc supplychainv1alpha1.SupplyChain
+		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
+		r := &SupplyChainReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+		authorized, err := r.ensureSigningIdentity(ctx, &sc, "supply-chain-runner")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(authorized).To(BeFalse())
+		Expect(sc.Status.SigningIdentity).To(BeEmpty())
+		Expect(sc.Status.Authorization).NotTo(BeNil())
+		for _, proof := range []*supplychainv1alpha1.AuthorizationProof{
+			sc.Status.Authorization.Scope, sc.Status.Authorization.Intent, sc.Status.Authorization.Output,
+		} {
+			Expect(proof).NotTo(BeNil())
+			Expect(proof.Allowed).To(BeFalse())
+			Expect(proof.Principal).To(Equal("system:serviceaccount:default:supply-chain-runner"))
+		}
 	})
 
 	// ── 1:1 repo uniqueness ───────────────────────────────────────────────

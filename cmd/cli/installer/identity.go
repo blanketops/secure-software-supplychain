@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -260,4 +261,23 @@ func (i *Installer) waitForStatefulSet(ctx context.Context, namespace, name stri
 		time.Sleep(5 * time.Second)
 	}
 	return fmt.Errorf("statefulset %s/%s not ready after %s", namespace, name, timeout)
+}
+
+// defaultClusterSPIFFEID is the SPIRE chart's rule that gives every pod in
+// the cluster a SPIFFE ID.
+const defaultClusterSPIFFEID = "spire-server-spire-default"
+
+// removeDefaultSPIFFEID deletes that rule from clusters installed before it
+// was dropped from the manifests. With it in place any pod could obtain a
+// Fulcio certificate, whether or not its ServiceAccount was authorized to
+// build.
+func (i *Installer) removeDefaultSPIFFEID(ctx context.Context) error {
+	ids := i.dynamic.Resource(schema.GroupVersionResource{
+		Group: "spire.spiffe.io", Version: "v1alpha1", Resource: "clusterspiffeids",
+	})
+	err := ids.Delete(ctx, defaultClusterSPIFFEID, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("removing ClusterSPIFFEID %s: %w", defaultClusterSPIFFEID, err)
+	}
+	return nil
 }

@@ -168,7 +168,7 @@ var installOrder = []step{
 				return err
 			}
 			waitSp.succeed("SPIRE OIDC discovery ready")
-			return nil
+			return i.removeDefaultSPIFFEID(ctx)
 		},
 	},
 	{

@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
@@ -39,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
 	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/events"
@@ -47,6 +49,14 @@ import (
 
 const (
 	supplyChainFinalizer = "supplychain.blanketops.dev/finalizer"
+
+	phaseUnauthorized = "Unauthorized"
+
+	// unauthorizedRetry is how soon a denied ServiceAccount is reviewed again.
+	unauthorizedRetry = 30 * time.Second
+	// authorizationRecheck is how often a registered identity is reviewed,
+	// and so how long it can outlive the permissions it was granted on.
+	authorizationRecheck = 5 * time.Minute
 )
 
 // SupplyChainReconciler reconciles a SupplyChain object
@@ -124,9 +134,20 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// ── Signing identity ──────────────────────────────────────────────────
 	// Under SPIFFE the runner's identity is registered here, by the authority,
 	// so it exists before any build pod asks for it.
-	if err := r.ensureSigningIdentity(ctx, &sc, saName); err != nil {
+	authorized, err := r.ensureSigningIdentity(ctx, &sc, saName)
+	if err != nil {
 		logger.Error(err, "Failed to register signing identity", "serviceAccount", saName)
 		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+	if !authorized {
+		// Nothing below is of use to a ServiceAccount that may not build, and
+		// it has no identity to sign with. RBAC is not watched; look again.
+		logger.Info("Build ServiceAccount is not authorized; signing identity withheld", "serviceAccount", saName)
+		sc.Status.Phase = phaseUnauthorized
+		if err := r.Status().Update(ctx, &sc); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: unauthorizedRetry}, nil
 	}
 
 	// ── Trigger layer ─────────────────────────────────────────────────────
@@ -157,6 +178,10 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	logger.Info("SupplyChain ready", "repository", sc.Spec.Repository)
+	if sc.Status.SigningIdentity != "" {
+		// The identity stays registered only while the proofs hold.
+		return ctrl.Result{RequeueAfter: authorizationRecheck}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -232,28 +257,76 @@ func runnerServiceAccount(sc *supplyv1alpha1.SupplyChain) string {
 	return "supply-chain-runner"
 }
 
-// ensureSigningIdentity registers the runner ServiceAccount with SPIRE when
-// the cluster signs with SPIFFE identities. Under the Kubernetes identity the
-// ServiceAccount token is the identity and there is nothing to register.
+// ensureSigningIdentity reviews the build ServiceAccount and, when the cluster
+// signs with SPIFFE identities, registers its identity with SPIRE only while
+// all three authorization checks pass. It reports whether the ServiceAccount
+// may sign.
+//
+// SPIRE hands a registered identity to any pod that runs as the
+// ServiceAccount, and Fulcio turns it into a signing certificate. Registering
+// it is therefore the point at which the authorization has to hold: without
+// the proofs there is no identity, and without an identity Fulcio issues
+// nothing.
+//
+// Under the Kubernetes identity the ServiceAccount token is the identity and
+// there is nothing to register or withhold; the proofs are recorded and every
+// build is still reviewed before it starts.
 func (r *SupplyChainReconciler) ensureSigningIdentity(
 	ctx context.Context,
 	sc *supplyv1alpha1.SupplyChain,
 	saName string,
-) error {
+) (bool, error) {
 	identity, err := signing.LoadIdentity(ctx, r.Client)
 	if err != nil {
-		return err
+		return false, err
+	}
+
+	proofs, denied := signing.AuthorizeSigner(ctx, r.Client, sc.Namespace, saName)
+	sc.Status.Authorization = &supplyv1alpha1.SignerAuthorization{
+		Scope:  authorizationProof(proofs.Scope),
+		Intent: authorizationProof(proofs.Intent),
+		Output: authorizationProof(proofs.Output),
+	}
+	sc.Status.SigningIdentity = ""
+	if proofs.Scope == nil || proofs.Intent == nil || proofs.Output == nil {
+		// The API server did not answer. That is not a denial: leave the
+		// registration as it is and try again.
+		return false, fmt.Errorf("reviewing ServiceAccount %s: %w", saName, denied)
 	}
 	if !identity.IsSPIFFE() {
-		return nil
+		return true, nil
 	}
+
+	if denied != nil {
+		if err := r.deleteSigningIdentity(ctx, sc.Namespace, saName); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	entry := signing.WorkloadEntry(identity, sc.Namespace, saName)
 	err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(entry),
 		client.ForceOwnership, client.FieldOwner("supplychain-controller"))
 	if err != nil {
-		return fmt.Errorf("registering SPIFFE identity %s: %w", identity.Subject(sc.Namespace, saName), err)
+		return false, fmt.Errorf("registering SPIFFE identity %s: %w", identity.Subject(sc.Namespace, saName), err)
 	}
-	return nil
+	sc.Status.SigningIdentity = identity.Subject(sc.Namespace, saName)
+	return true, nil
+}
+
+func authorizationProof(proof *authz.AuthzProof) *supplyv1alpha1.AuthorizationProof {
+	if proof == nil {
+		return nil
+	}
+	return &supplyv1alpha1.AuthorizationProof{
+		Principal:   proof.Principal,
+		Group:       proof.Group,
+		Resource:    proof.Resource,
+		Verb:        proof.Verb,
+		Allowed:     proof.Allowed,
+		Reason:      proof.Reason,
+		EvaluatedAt: metav1.NewTime(proof.EvaluatedAt),
+	}
 }
 
 // releaseSigningIdentity removes the runner's SPIRE registration unless
@@ -272,9 +345,13 @@ func (r *SupplyChainReconciler) releaseSigningIdentity(ctx context.Context, sc *
 		}
 	}
 
+	return r.deleteSigningIdentity(ctx, sc.Namespace, saName)
+}
+
+func (r *SupplyChainReconciler) deleteSigningIdentity(ctx context.Context, namespace, saName string) error {
 	entry := &unstructured.Unstructured{}
 	entry.SetGroupVersionKind(signing.ClusterStaticEntryGVK)
-	entry.SetName(signing.WorkloadEntryName(sc.Namespace, saName))
+	entry.SetName(signing.WorkloadEntryName(namespace, saName))
 	err := r.Delete(ctx, entry)
 	// No SPIRE in this cluster means there was never anything to remove.
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {

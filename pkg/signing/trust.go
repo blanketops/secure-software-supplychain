@@ -16,7 +16,11 @@ limitations under the License.
 package signing
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"strings"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 )
@@ -69,4 +73,15 @@ func EndpointsFor(sc *supplyv1alpha1.SupplyChain) Endpoints {
 // Kubernetes ServiceAccount token.
 func ServiceAccountIdentity(namespace, serviceAccount string) string {
 	return fmt.Sprintf("https://kubernetes.io/namespaces/%s/serviceaccounts/%s", namespace, serviceAccount)
+}
+
+// Fingerprint is the SHA-256 of a trust anchor: of the DER bytes when it is
+// PEM, so that whitespace and line endings do not change it.
+func Fingerprint(pemData string) string {
+	data := []byte(strings.TrimSpace(pemData))
+	if block, _ := pem.Decode(data); block != nil {
+		data = block.Bytes
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
