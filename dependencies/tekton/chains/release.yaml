@@ -116,7 +116,20 @@ spec:
               mountPath: /etc/signing-secrets
             - name: oidc-info
               mountPath: /var/run/sigstore/cosign
+            # BlanketOps: trust anchors of the in-cluster sigstore.
+            - name: sigstore-roots
+              mountPath: /etc/sigstore
+              readOnly: true
           env:
+            # BlanketOps: without these the controller checks the certificates,
+            # CT log proofs and Rekor entries it gets back against the public
+            # sigstore's keys, and rejects the ones from the in-cluster stack.
+            - name: SIGSTORE_ROOT_FILE
+              value: /etc/sigstore/fulcio-root.pem
+            - name: SIGSTORE_REKOR_PUBLIC_KEY
+              value: /etc/sigstore/rekor.pub
+            - name: SIGSTORE_CT_LOG_PUBLIC_KEY_FILE
+              value: /etc/sigstore/ctfe.pub
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -142,6 +155,13 @@ spec:
         - name: signing-secrets
           secret:
             secretName: signing-secrets
+        # BlanketOps: created by `supplychain install` once Fulcio, Rekor and
+        # the CT log are up, which is after this Deployment is applied. Optional
+        # so the controller can start first; the files appear when it exists.
+        - name: sigstore-roots
+          configMap:
+            name: blanketops-sigstore-roots
+            optional: true
         - name: oidc-info
           projected:
             sources:

@@ -99,9 +99,25 @@ func TestSignsThePushedDigest(t *testing.T) {
 		t.Errorf("pipeline result IMAGE_DIGEST = %q, want %q", reported, pushed)
 	}
 
+	// The push is the only task that reports the IMAGE_URL / IMAGE_DIGEST
+	// pair, which is what Tekton Chains reads to decide what a run produced.
 	push := findTask(t, pr, stepPushImage).TaskSpec.TaskSpec
-	if len(push.Results) != 1 || push.Results[0].Name != "IMAGE_DIGEST" {
-		t.Fatalf("push task results = %v, want IMAGE_DIGEST", push.Results)
+	names := map[string]bool{}
+	for _, result := range push.Results {
+		names[result.Name] = true
+	}
+	if !names["IMAGE_URL"] || !names["IMAGE_DIGEST"] {
+		t.Fatalf("push task results = %v, want IMAGE_URL and IMAGE_DIGEST", push.Results)
+	}
+	if !strings.Contains(push.Steps[0].Script, "$(results.IMAGE_URL.path)") {
+		t.Error("push step does not write the IMAGE_URL result it declares")
+	}
+	for _, result := range pr.Spec.PipelineSpec.Results {
+		if result.Name == "IMAGE_URL" || result.Name == "IMAGE_DIGEST" {
+			if want := "$(tasks." + stepPushImage + ".results." + result.Name + ")"; result.Value.StringVal != want {
+				t.Errorf("pipeline result %s = %q, want %q", result.Name, result.Value.StringVal, want)
+			}
+		}
 	}
 	if script := push.Steps[0].Script; !strings.Contains(script, "--digestfile") ||
 		!strings.Contains(script, "$(results.IMAGE_DIGEST.path)") {

@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -165,6 +166,37 @@ var _ = Describe("SupplyChain Controller", func() {
 		Expect(sc.Spec.Steps.Trivy).To(BeTrue())
 		Expect(sc.Spec.Steps.Sign).To(BeTrue())
 		Expect(sc.Spec.Steps.Attest).To(BeTrue())
+	})
+
+	// ── ServiceAccount ────────────────────────────────────────────────────
+
+	It("should give the runner ServiceAccount the registry credentials Tekton Chains needs", func() {
+		var sc supplychainv1alpha1.SupplyChain
+		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
+		r := &SupplyChainReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		const name = "chains-credentials-runner"
+		key := types.NamespacedName{Namespace: namespace, Name: name}
+		pullSecret := corev1.LocalObjectReference{Name: "registry-credentials-chains"}
+
+		By("creating it with the pull secret")
+		Expect(r.ensureServiceAccount(ctx, &sc, name)).To(Succeed())
+		var sa corev1.ServiceAccount
+		Expect(k8sClient.Get(ctx, key, &sa)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, &sa)).To(Succeed()) })
+		Expect(sa.ImagePullSecrets).To(ConsistOf(pullSecret))
+
+		By("adding it to one that exists without it, keeping what is there")
+		sa.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "someone-elses"}}
+		Expect(k8sClient.Update(ctx, &sa)).To(Succeed())
+		Expect(r.ensureServiceAccount(ctx, &sc, name)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, &sa)).To(Succeed())
+		Expect(sa.ImagePullSecrets).To(ConsistOf(corev1.LocalObjectReference{Name: "someone-elses"}, pullSecret))
+
+		By("changing nothing when it is already there")
+		version := sa.ResourceVersion
+		Expect(r.ensureServiceAccount(ctx, &sc, name)).To(Succeed())
+		Expect(k8sClient.Get(ctx, key, &sa)).To(Succeed())
+		Expect(sa.ResourceVersion).To(Equal(version))
 	})
 
 	// ── 1:1 repo uniqueness ───────────────────────────────────────────────

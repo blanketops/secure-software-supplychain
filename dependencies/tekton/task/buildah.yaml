@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/version: '0.1'
   name: buildah
 spec:
-  description: Builds a container image from a Dockerfile using Buildah and pushes it to a registry. Stores IMAGE_URL and IMAGE_DIGEST results for Tekton Chains attestation.
+  description: Builds a container image from a Dockerfile using Buildah and pushes it to a registry. The image is saved to an archive in the workspace; a later step scans and pushes it.
   params:
   - description: Name (reference) of the image to build and push.
     name: IMAGE
@@ -33,11 +33,11 @@ spec:
     name: BUILDER_IMAGE
     type: string
   results:
-  - description: Digest of the image just built.
-    name: IMAGE_DIGEST
-    type: string
-  - description: URL of the image just built.
-    name: IMAGE_URL
+  # Deliberately not IMAGE_URL / IMAGE_DIGEST: that pair tells Tekton Chains
+  # "this TaskRun produced this image". Nothing is published here, and the
+  # archive's digest is not the digest the registry will serve after the push.
+  - description: Digest of the local image archive. Not a registry digest.
+    name: ARCHIVE_DIGEST
     type: string
   steps:
   - name: build
@@ -61,11 +61,10 @@ spec:
       # Only clean images (passing all chain checks) will be pushed by a later step.
       # --digestfile writes the manifest digest of the tar, not the base image digest.
       buildah --storage-driver=vfs push \
-        --digestfile "$(results.IMAGE_DIGEST.path)" \
+        --digestfile "$(results.ARCHIVE_DIGEST.path)" \
         $(params.IMAGE) \
         docker-archive:$(workspaces.source.path)/image.tar:$(params.IMAGE)
 
-      printf '%s' "$(params.IMAGE)" > "$(results.IMAGE_URL.path)"
     securityContext:
       capabilities:
         add:

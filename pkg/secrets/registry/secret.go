@@ -67,7 +67,7 @@ func (r *RegistrySecretReconciler) Reconcile(
 
 	// 2. Chains secret (dockerconfigjson, .dockerconfigjson key)
 	if err := r.reconcileExternalSecret(ctx, sc, ib, chainsSecretSpec{
-		name:               fmt.Sprintf("%s-chains", secretName),
+		name:               ChainsSecretName(secretName),
 		namespace:          namespace,
 		registryAnnotation: registryAnnotation,
 	}); err != nil {
@@ -75,6 +75,12 @@ func (r *RegistrySecretReconciler) Reconcile(
 	}
 
 	return nil
+}
+
+// ChainsSecretName is the name of the image pull secret synced for Tekton
+// Chains from a SupplyChain's registry secret.
+func ChainsSecretName(registrySecret string) string {
+	return registrySecret + "-chains"
 }
 
 // -------------------------------------------------------------------------

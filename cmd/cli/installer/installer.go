@@ -76,6 +76,13 @@ const (
 	// running services have already loaded.
 	readyTimeout = time.Hour
 
+	// signerOIDCIssuer issues the ServiceAccount tokens exchanged with Fulcio.
+	signerOIDCIssuer = "https://kubernetes.default.svc.cluster.local"
+
+	// chainsIdentityTokenFile is where the Chains Deployment mounts its
+	// projected ServiceAccount token (see dependencies/tekton/chains/release.yaml).
+	chainsIdentityTokenFile = "/var/run/sigstore/cosign/oidc-token"
+
 	// ctlog secret coords.
 	ctfePublicKeySecret = "ctlog-public-key"
 	ctfePublicKeyNS     = "ctlog-system"
@@ -710,6 +717,45 @@ func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 // Chains config
 // ---------------------------------------------------------------------------
 
+// chainsConfig is the Tekton Chains configuration for this stack: keyless
+// signing against the in-cluster Fulcio and Rekor, with SLSA v1.0 provenance
+// stored next to the image it describes.
+func chainsConfig() map[string]interface{} {
+	const (
+		// slsa/v2alpha4 is Chains' name for SLSA v1.0 provenance. "in-toto" and
+		// "slsa/v1" are both the older v0.2 predicate.
+		provenanceFormat = "slsa/v2alpha4"
+		fulcioURL        = "http://fulcio-server.fulcio-system.svc.cluster.local"
+		rekorURL         = "http://rekor-server.rekor-system.svc.cluster.local"
+	)
+	return map[string]interface{}{
+		"artifacts.taskrun.format":                     provenanceFormat,
+		"artifacts.taskrun.storage":                    "oci",
+		"artifacts.taskrun.signer":                     "x509",
+		"artifacts.oci.storage":                        "oci",
+		"artifacts.oci.format":                         "simplesigning",
+		"artifacts.oci.signer":                         "x509",
+		"artifacts.pipelinerun.format":                 provenanceFormat,
+		"artifacts.pipelinerun.storage":                "oci",
+		"artifacts.pipelinerun.signer":                 "x509",
+		"artifacts.pipelinerun.enable-deep-inspection": "true",
+		// storage.oci.repository is left unset on purpose: signatures and
+		// attestations are then stored alongside the image, which is where
+		// cosign and policy-controller look for them.
+		"builder.id":                  "https://tekton.dev/chains/v2",
+		"builddefinition.buildtype":   "https://tekton.dev/chains/v2/slsa",
+		"signers.x509.fulcio.enabled": "true",
+		"signers.x509.fulcio.address": fulcioURL,
+		"signers.x509.fulcio.issuer":  signerOIDCIssuer,
+		// The Chains controller is given a projected ServiceAccount token for
+		// the "sigstore" audience at this path; that token is its identity.
+		"signers.x509.identity.token.file": chainsIdentityTokenFile,
+		"signers.x509.rekor.address":       rekorURL,
+		"transparency.enabled":             "true",
+		"transparency.url":                 rekorURL,
+	}
+}
+
 // applyChainsConfig overwrites the default chains-config ConfigMap with the
 // BlanketOps configuration: in-cluster Fulcio/Rekor, OCI storage, x509/keyless.
 func (i *Installer) applyChainsConfig(ctx context.Context) error {
@@ -726,29 +772,7 @@ func (i *Installer) applyChainsConfig(ctx context.Context) error {
 					"app.kubernetes.io/part-of":  "tekton-chains",
 				},
 			},
-			"data": map[string]interface{}{
-				"artifacts.taskrun.format":                     "in-toto",
-				"artifacts.taskrun.storage":                    "oci",
-				"artifacts.taskrun.signer":                     "x509",
-				"artifacts.oci.storage":                        "oci",
-				"artifacts.oci.format":                         "simplesigning",
-				"artifacts.oci.signer":                         "x509",
-				"artifacts.pipelinerun.format":                 "in-toto",
-				"artifacts.pipelinerun.storage":                "oci",
-				"artifacts.pipelinerun.signer":                 "x509",
-				"artifacts.pipelinerun.enable-deep-inspection": "true",
-				"storage.oci.repository":                       "docker.io/nkanyezisolutions/blanketops-environments-min",
-				"storage.oci.repository.insecure":              "false",
-				"builder.id":                                   "https://tekton.dev/chains/v2",
-				"builddefinition.buildtype":                    "https://tekton.dev/chains/v2/slsa",
-				"signers.x509.fulcio.enabled":                  "true",
-				"signers.x509.fulcio.address":                  "http://fulcio-server.fulcio-system.svc.cluster.local",
-				"signers.x509.fulcio.issuer":                   "https://kubernetes.default.svc.cluster.local",
-				"signers.x509.fulcio.provider":                 "spiffe",
-				"signers.x509.rekor.address":                   "http://rekor-server.rekor-system.svc.cluster.local",
-				"transparency.enabled":                         "true",
-				"transparency.url":                             "http://rekor-server.rekor-system.svc.cluster.local",
-			},
+			"data": chainsConfig(),
 		},
 	}
 	existing, err := i.dynamic.Resource(cmGVR).Namespace("tekton-chains").Get(ctx, "chains-config", metav1.GetOptions{})

@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/events"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/triggers"
 )
@@ -146,30 +147,68 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // ensureServiceAccount ensures the pipeline runner SA exists before the
-// EventListener deployment tries to use it.
+// EventListener deployment tries to use it, and that it carries the registry
+// credentials Tekton Chains needs.
+//
+// Chains signs and attests what a run produced using the registry credentials
+// of the run's ServiceAccount. The "<registrySecret>-chains" pull secret is
+// synced for that purpose; without it on the ServiceAccount Chains cannot
+// store anything next to the image.
 func (r *SupplyChainReconciler) ensureServiceAccount(
 	ctx context.Context,
 	sc *supplyv1alpha1.SupplyChain,
 	name string,
 ) error {
 	logger := log.FromContext(ctx)
-	desired := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: sc.Namespace,
-			Labels: map[string]string{
-				"blanketops.dev/managed":      "true",
-				"blanketops.dev/supply-chain": sc.Name,
-			},
-		},
+
+	var pullSecrets []corev1.LocalObjectReference
+	if sc.Spec.Image.RegistrySecretRef != "" {
+		pullSecrets = append(pullSecrets, corev1.LocalObjectReference{
+			Name: registry.ChainsSecretName(sc.Spec.Image.RegistrySecretRef),
+		})
 	}
+
 	var existing corev1.ServiceAccount
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
+	err := r.Get(ctx, client.ObjectKey{Namespace: sc.Namespace, Name: name}, &existing)
 	if apierrors.IsNotFound(err) {
-		logger.Info("creating ServiceAccount", "name", name)
-		return r.Client.Create(ctx, desired)
+		logger.Info("Creating ServiceAccount", "name", name)
+		return r.Create(ctx, &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: sc.Namespace,
+				Labels: map[string]string{
+					"blanketops.dev/managed":      "true",
+					"blanketops.dev/supply-chain": sc.Name,
+				},
+			},
+			ImagePullSecrets: pullSecrets,
+		})
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	// The ServiceAccount may predate this, or have been created by hand; add
+	// what is missing and leave anything else on it alone.
+	changed := false
+	for _, want := range pullSecrets {
+		found := false
+		for _, have := range existing.ImagePullSecrets {
+			if have.Name == want.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing.ImagePullSecrets = append(existing.ImagePullSecrets, want)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	logger.Info("Adding registry credentials to ServiceAccount", "name", name)
+	return r.Update(ctx, &existing)
 }
 
 func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1alpha1.SupplyChain) error {

@@ -167,7 +167,7 @@ func buildResults(sc *supplyv1alpha1.SupplyChain, verified bool) []tektonv1.Pipe
 		// The digest the registry serves, from the push — not the digest of the
 		// local build archive, which changes when the image is pushed.
 		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)"}},
-		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepBuildImage + ".results.IMAGE_URL)"}},
+		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_URL)"}},
 	}
 
 	if sc.Spec.Steps.Trivy {
@@ -404,6 +404,10 @@ func pushImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 					{Name: "dockerconfig"},
 				},
 				Results: []tektonv1.TaskResult{
+					// IMAGE_URL + IMAGE_DIGEST is the pair Tekton Chains reads to learn
+					// what a run produced. The push is where the image is published,
+					// so it is the task that reports it.
+					{Name: "IMAGE_URL", Description: "Image reference that was pushed"},
 					{Name: "IMAGE_DIGEST", Description: "Digest of the image manifest as pushed to the registry"},
 				},
 				Steps: []tektonv1.Step{
@@ -424,6 +428,7 @@ skopeo copy \
   docker-archive:/workspace/source/image.tar \
   docker://$(params.IMAGE)
 printf '%s' "$(cat /tmp/pushed-digest)" > $(results.IMAGE_DIGEST.path)
+printf '%s' "$(params.IMAGE)" > $(results.IMAGE_URL.path)
 echo "Pushed $(params.IMAGE)@$(cat /tmp/pushed-digest)"
 `,
 					},
