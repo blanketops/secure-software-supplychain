@@ -4,19 +4,19 @@ metadata:
   labels:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
-  name: for-kaniko-app-webhook
+  name: your-app-webhook
   namespace: default
 spec:
   # Repository to register the webhook on — owner/repo format.
-  repository: ntlaletsi70/for-kaniko-app
+  repository: your-org/your-app
   # SupplyChain that owns the EventListener this webhook targets.
   # Controller waits for the SupplyChain to be Ready before registering.
   supplyChainRef:
-    name: for-kaniko-app
+    name: your-app
   # URL where GitHub delivers webhook payloads.
   # Local kind dev: use a smee.io channel URL.
   # Production: use the EventListener ingress URL.
-  hookURL: https://pop-os.tailf8145.ts.net
+  hookURL: https://your-machine.your-tailnet.ts.net
 
   # GitHub event types to subscribe to.
   events:

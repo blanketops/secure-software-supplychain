@@ -4,13 +4,13 @@ metadata:
   labels:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
-  name: for-kaniko-app
+  name: your-app
 spec:
-  repository: ntlaletsi70/for-kaniko-app
-  webhookHost: pop-os.tailf8145.ts.net
+  repository: your-org/your-app
+  webhookHost: your-machine.your-tailnet.ts.net
   image:
     registry: docker.io
-    name: nkanyezisolutions/for-kaniko-app
+    name: your-dockerhub-user/your-app
     tagStrategy: git-sha
     cloneSecret: github-ssh-credentials
     registrySecret: registry-credentials
@@ -23,7 +23,7 @@ spec:
       #serverURL: http://sonarqube-sonarqube.secure-software-supply-chain-supply-chain.svc.cluster.local:9000 #deployed
       serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token
-      projectKey: ntlaletsi70_for-kaniko-app
+      projectKey: your-org_your-app
 
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local

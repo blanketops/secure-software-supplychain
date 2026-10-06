@@ -38,9 +38,9 @@ func newImageBuild(name, supplyChainName, revision, sha string) *supplychainv1al
 				"blanketops.dev/triggered-by": "github-push",
 			},
 			Annotations: map[string]string{
-				"blanketops.dev/repo-full-name": "ntlaletsi70/for-kaniko-app",
+				"blanketops.dev/repo-full-name": "your-org/your-app",
 				"blanketops.dev/git-commit-sha": sha,
-				"blanketops.dev/git-repo-url":   "git@github.com:ntlaletsi70/for-kaniko-app.git",
+				"blanketops.dev/git-repo-url":   "git@github.com:your-org/your-app.git",
 			},
 		},
 		Spec: supplychainv1alpha1.ImageBuildSpec{
@@ -48,7 +48,7 @@ func newImageBuild(name, supplyChainName, revision, sha string) *supplychainv1al
 				Name: supplyChainName,
 			},
 			GitRef: supplychainv1alpha1.GitRef{
-				URL:      "git@github.com:ntlaletsi70/for-kaniko-app.git",
+				URL:      "git@github.com:your-org/your-app.git",
 				Revision: revision,
 			},
 			ImageTag: sha,
@@ -67,7 +67,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 	Context("when ImageBuild is already in a terminal state", func() {
 		It("should skip reconciliation for Succeeded phase", func() {
-			ib := newImageBuild("terminal-succeeded", "for-kaniko-app", "main", "abc1234")
+			ib := newImageBuild("terminal-succeeded", "your-app", "main", "abc1234")
 			Expect(k8sClient.Create(ctx, ib)).To(Succeed())
 
 			ib.Status.Phase = "Succeeded"
@@ -85,7 +85,7 @@ var _ = Describe("ImageBuild Controller", func() {
 		})
 
 		It("should skip reconciliation for Failed phase", func() {
-			ib := newImageBuild("terminal-failed", "for-kaniko-app", "main", "abc1234")
+			ib := newImageBuild("terminal-failed", "your-app", "main", "abc1234")
 			Expect(k8sClient.Create(ctx, ib)).To(Succeed())
 
 			ib.Status.Phase = "Failed"
@@ -124,7 +124,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 	Context("when SupplyChain exists but is not Ready", func() {
 		It("should wait for SupplyChain to become Ready", func() {
-			sc := forKanikoAppSupplyChain("not-ready-chain")
+			sc := yourAppSupplyChain("not-ready-chain")
 			sc.Name = "not-ready-chain"
 			sc.Spec.Repository = "ntlaletsi70/not-ready-repo" // avoid uniqueness conflict
 			Expect(k8sClient.Create(ctx, sc)).To(Succeed())
@@ -149,7 +149,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 	Context("when ImageBuild is created with full spec", func() {
 		It("should persist all spec fields correctly", func() {
-			ib := newImageBuild("full-spec-build", "for-kaniko-app", "master", "def5678")
+			ib := newImageBuild("full-spec-build", "your-app", "master", "def5678")
 			Expect(k8sClient.Create(ctx, ib)).To(Succeed())
 
 			var found supplychainv1alpha1.ImageBuild
@@ -159,8 +159,8 @@ var _ = Describe("ImageBuild Controller", func() {
 				}, &found)
 			}, ibTimeout, ibInterval).Should(Succeed())
 
-			Expect(found.Spec.SupplyChainRef.Name).To(Equal("for-kaniko-app"))
-			Expect(found.Spec.GitRef.URL).To(Equal("git@github.com:ntlaletsi70/for-kaniko-app.git"))
+			Expect(found.Spec.SupplyChainRef.Name).To(Equal("your-app"))
+			Expect(found.Spec.GitRef.URL).To(Equal("git@github.com:your-org/your-app.git"))
 			Expect(found.Spec.GitRef.Revision).To(Equal("master"))
 			Expect(found.Spec.ImageTag).To(Equal("def5678"))
 
@@ -172,7 +172,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 	Context("when ImageBuild is auto-created by EventListener", func() {
 		It("should carry correct trigger labels and annotations", func() {
-			ib := newImageBuild("triggered-build", "for-kaniko-app", "main", "abc1234567890")
+			ib := newImageBuild("triggered-build", "your-app", "main", "abc1234567890")
 			Expect(k8sClient.Create(ctx, ib)).To(Succeed())
 
 			var found supplychainv1alpha1.ImageBuild
@@ -181,10 +181,10 @@ var _ = Describe("ImageBuild Controller", func() {
 			}, &found)).To(Succeed())
 
 			Expect(found.Labels["blanketops.dev/triggered-by"]).To(Equal("github-push"))
-			Expect(found.Labels["blanketops.dev/supply-chain"]).To(Equal("for-kaniko-app"))
-			Expect(found.Annotations["blanketops.dev/repo-full-name"]).To(Equal("ntlaletsi70/for-kaniko-app"))
+			Expect(found.Labels["blanketops.dev/supply-chain"]).To(Equal("your-app"))
+			Expect(found.Annotations["blanketops.dev/repo-full-name"]).To(Equal("your-org/your-app"))
 			Expect(found.Annotations["blanketops.dev/git-commit-sha"]).To(Equal("abc1234567890"))
-			Expect(found.Annotations["blanketops.dev/git-repo-url"]).To(Equal("git@github.com:ntlaletsi70/for-kaniko-app.git"))
+			Expect(found.Annotations["blanketops.dev/git-repo-url"]).To(Equal("git@github.com:your-org/your-app.git"))
 			Expect(found.Spec.ImageTag).To(Equal("abc1234567890"))
 
 			Expect(k8sClient.Delete(ctx, ib)).To(Succeed())
@@ -195,7 +195,7 @@ var _ = Describe("ImageBuild Controller", func() {
 
 	Context("phase validation", func() {
 		It("should accept valid phases", func() {
-			ib := newImageBuild("phase-test-build", "for-kaniko-app", "main", "abc1234")
+			ib := newImageBuild("phase-test-build", "your-app", "main", "abc1234")
 			Expect(k8sClient.Create(ctx, ib)).To(Succeed())
 
 			for _, phase := range []string{"Pending", "Running", "Succeeded", "Failed"} {

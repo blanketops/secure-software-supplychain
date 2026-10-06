@@ -24,7 +24,7 @@ import (
 // Carries the full signing identity and transparency log references.
 type ImageSignatureSpec struct {
 	// Image is the fully qualified image reference that was signed.
-	// e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+	// e.g. docker.io/your-dockerhub-user/your-app:abc123
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`
 

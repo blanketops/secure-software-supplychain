@@ -24,6 +24,7 @@ import (
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,8 +55,9 @@ const (
 
 	// unauthorizedRetry is how soon a denied ServiceAccount is reviewed again.
 	unauthorizedRetry = 30 * time.Second
-	// authorizationRecheck is how often a registered identity is reviewed,
-	// and so how long it can outlive the permissions it was granted on.
+	// authorizationRecheck is how often a registered identity is reviewed
+	// even when no RBAC object changed: a backstop for permissions granted
+	// some other way, such as by a webhook authorizer.
 	authorizationRecheck = 5 * time.Minute
 )
 
@@ -80,6 +82,7 @@ type SupplyChainReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterstaticentries,verbs=get;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch
 
 func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues(
@@ -515,6 +518,14 @@ func (r *SupplyChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.supplyChainsForSigningConfig),
 			builder.WithPredicates(predicate.NewPredicateFuncs(isSigningConfig))).
+		// The signing identity is only registered while the build
+		// ServiceAccount passes its three reviews. When RBAC changes, a
+		// revoked permission takes the identity away now, not at the next
+		// periodic review.
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.allSupplyChains)).
+		Watches(&rbacv1.ClusterRoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.allSupplyChains)).
+		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.allSupplyChains)).
+		Watches(&rbacv1.ClusterRole{}, handler.EnqueueRequestsFromMapFunc(r.allSupplyChains)).
 		Complete(r)
 }
 
@@ -524,7 +535,11 @@ func isSigningConfig(obj client.Object) bool {
 		key == types.NamespacedName{Namespace: signing.SpireConfigNamespace, Name: signing.SpireConfigName}
 }
 
-func (r *SupplyChainReconciler) supplyChainsForSigningConfig(ctx context.Context, _ client.Object) []reconcile.Request {
+func (r *SupplyChainReconciler) supplyChainsForSigningConfig(ctx context.Context, obj client.Object) []reconcile.Request {
+	return r.allSupplyChains(ctx, obj)
+}
+
+func (r *SupplyChainReconciler) allSupplyChains(ctx context.Context, _ client.Object) []reconcile.Request {
 	var list supplyv1alpha1.SupplyChainList
 	if err := r.List(ctx, &list); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to list SupplyChains")

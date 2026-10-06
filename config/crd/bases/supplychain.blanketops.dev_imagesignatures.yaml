@@ -77,7 +77,7 @@ spec:
               image:
                 description: |-
                   Image is the fully qualified image reference that was signed.
-                  e.g. docker.io/nkanyezisolutions/for-kaniko-app:abc123
+                  e.g. docker.io/your-dockerhub-user/your-app:abc123
                 type: string
               imageBuild:
                 description: ImageBuild is the name of the ImageBuild that produced

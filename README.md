@@ -37,7 +37,8 @@ What a successful build guarantees:
 | Guarantee | How |
 |---|---|
 | No critical vulnerabilities | Trivy scans before the push; an image that fails is never published or signed |
-| Signed by a known identity, with no long-lived keys | Cosign keyless: a Fulcio certificate issued to the pipeline's ServiceAccount |
+| Signed by a known identity, with no long-lived keys | Cosign keyless: a Fulcio certificate issued to the build's identity, which exists only while its ServiceAccount is authorized |
+| Signed twice, by two identities | The build signs and attests its authorization; Tekton Chains signs and attests SLSA provenance. Admission requires all four. |
 | The signature is publicly witnessed | CT log proof in the certificate, Rekor entry for the signature |
 | The build was authorized | Three SubjectAccessReviews, attested to the image |
 | The signature is on the image you can pull | The digest signed is the one the registry serves |
@@ -103,8 +104,10 @@ default rule, which gives every pod in the cluster an identity, and registers ex
 
 Fulcio certifies whatever SPIRE vouches for, so this is where the three SubjectAccessReviews gate signing itself:
 a ServiceAccount that may not read the `SupplyChain`, start builds and record signatures has no identity, and
-Fulcio issues it nothing. The checks are repeated every five minutes; when one fails the registration is removed
-and the `SupplyChain` reports `Unauthorized`, with the three answers in `status.authorization`.
+Fulcio issues it nothing. The checks run again whenever a Role, RoleBinding, ClusterRole or ClusterRoleBinding
+changes, so a revoked permission takes the identity away within a second, and every five minutes regardless.
+When one fails the registration is removed and the `SupplyChain` reports `Unauthorized`, with the three answers
+in `status.authorization`. [Demo 2](#demo-2-no-authorization-no-identity-no-certificate) shows it.
 
 ### Two tiers of proof
 
@@ -127,7 +130,7 @@ on its own.
 image, read back from the registry and the transparency log once the build is over:
 
 ```console
-$ kubectl get imagebuildresult for-kaniko-app-1 -o jsonpath='{.status.evidence}' | jq
+$ kubectl get imagebuildresult your-app-1 -o jsonpath='{.status.evidence}' | jq
 ```
 
 | Field | What it says |
@@ -191,10 +194,10 @@ the log accepted it. A build that succeeded but whose signature could not be rea
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChainPolicy
 metadata:
-  name: for-kaniko-app
+  name: your-app
 spec:
   supplyChainRef:
-    name: for-kaniko-app
+    name: your-app
   mode: enforce                                    # or warn
   serviceAccountName: supply-chain-policy-runner   # default
   signers:
@@ -254,7 +257,7 @@ not silently turn enforcement off.
 
 ```bash
 kubectl get supplychainpolicies -n default -o wide
-kubectl get supplychainpolicy for-kaniko-app -n default -o yaml
+kubectl get supplychainpolicy your-app -n default -o yaml
 ```
 
 | Status field | Meaning |
@@ -275,13 +278,33 @@ kubectl label namespace <workload-namespace> policy.sigstore.dev/include=true
 
 ---
 
-## Install
+## Installation
 
-Tested on a [kind](https://kind.sigs.k8s.io/) cluster.
+Installation has seven phases. Phases 1 to 5 set up the platform once per cluster; phase 6 makes builds start on
+a push; phase 7 checks the whole thing with one build.
 
-### Prerequisites
+```
+0  Prerequisites           a cluster, tools, External Secrets Operator
+1  Dependencies            supplychain install       Tekton, Sigstore, SPIRE, ingress, SonarQube   (≈ 20 min to hours)
+2  Operator                make install deploy       the CRDs and the controller
+3  Credentials             ClusterSecretStore        git, registry, GitHub and SonarQube secrets   (yours, kept out of git)
+4  SonarQube               supplychain init-sonarqube
+5  Resources               kubectl apply -k config/samples   roles, SupplyChain, SupplyChainPolicy
+6  Public webhook          Tailscale Funnel           GitHub reaches the cluster
+7  First build             an ImageBuild, then admission
+```
 
-- A cluster, `kubectl`, `docker`, Go.
+Every name in angle brackets is yours to fill in. The examples use `your-org/your-app` for the GitHub repository,
+`your-dockerhub-user/your-app` for the image and `your-machine.your-tailnet.ts.net` for the public hostname.
+
+### 0. Prerequisites
+
+- A Kubernetes cluster. Everything here is tested on a single-node [kind](https://kind.sigs.k8s.io/) cluster.
+  Give it room: as a rough guide, 8 GB of memory and 40 GB of free disk for images and volumes. SonarQube's search index
+  stops working when the node's disk is more than 90% full.
+- `kubectl`, `docker`, Go 1.25, `helm`, and `git`.
+- A container registry you can push to, a GitHub repository with a `Dockerfile` at its root, and a GitHub token
+  that can manage that repository's webhooks.
 - [External Secrets Operator](https://external-secrets.io). The installer does not install it:
 
   ```bash
@@ -294,54 +317,106 @@ Tested on a [kind](https://kind.sigs.k8s.io/) cluster.
 
 ```bash
 go build -o bin/supplychain ./cmd/cli
-./bin/supplychain install --webhook-host <public-hostname> [--ui-host <private-hostname>] \
-  [--signing-identity spiffe --trust-domain <domain>]
+./bin/supplychain install \
+  --webhook-host your-machine.your-tailnet.ts.net \
+  --signing-identity spiffe --trust-domain <your-domain>
 ```
 
-This applies, in order: MetalLB, Tekton Pipelines, Triggers, Interceptors, Fulcio (with its CT log), Rekor,
-Tekton Chains, policy-controller, Tekton Dashboard, the Tekton tasks, Tekton Results, the NGINX ingress
-controller, the ingress routes and SonarQube. It also collects the sigstore trust anchors into the
-`blanketops-sigstore-roots` ConfigMap.
+| Flag | Meaning |
+|---|---|
+| `--webhook-host` | The public hostname GitHub will deliver pushes to (phase 6). Only the webhook is routed on it. |
+| `--ui-host` | The hostname of the Tekton Dashboard and SonarQube. Default `supplychain.localhost`, reachable from your machine only. Never the webhook host: the dashboard has no login. |
+| `--signing-identity` | How builds prove who they are to Fulcio: `spiffe` (recommended) or `kubernetes` (default). See [Signing identity](#signing-identity-kubernetes-or-spiffe). |
+| `--trust-domain` | The SPIFFE trust domain, for example your organisation's domain. Identities look like `spiffe://<your-domain>/ns/<namespace>/sa/<serviceaccount>`. |
+| `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
 
-Each wait allows up to an hour, because on a slow connection the time is almost all image pulls.
-See [Troubleshooting](#troubleshooting) if it stalls.
+The installer applies the steps below in order and waits for each to be ready. Each wait allows up to an hour,
+because on a slow connection almost all of the time is image pulls.
+
+| Step | What it sets up |
+|---|---|
+| MetalLB | A load-balancer address for the ingress controller on a local cluster |
+| Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
+| SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
+| Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
+| Rekor | The transparency log, with its Trillian database and a signing key that survives restarts |
+| Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
+| Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
+| Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
+| NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
+| SonarQube | Static analysis, on a PostgreSQL database and volumes of its own |
+
+It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
+`blanketops-sigstore-roots` ConfigMap, which the pipeline and the policies verify against.
+
+**Re-running it is safe.** What must only be made once is never made again: the keys Fulcio, the CT log and
+Rekor sign with, the Merkle trees behind Rekor and the CT log, and the SonarQube database password. If an
+install stops on a timeout, run it again with `--from-step` set to the step it stopped at.
+
+```bash
+./bin/supplychain status        # every dependency and whether it is ready
+```
 
 ### 2. Deploy the operator
 
 ```bash
-docker build -t blanketops/supply-chain-controller:latest .
-kind load docker-image blanketops/supply-chain-controller:latest --name <cluster>
+docker build -t <registry>/supply-chain-controller:<tag> .
+kind load docker-image <registry>/supply-chain-controller:<tag> --name <cluster>   # or docker push
 
-make install
-make deploy IMG=blanketops/supply-chain-controller:latest
+make install                                              # the CRDs
+make deploy IMG=<registry>/supply-chain-controller:<tag>  # the controller
 ```
 
 ### 3. Create the secret store
 
-The operator reads its credentials from a `ClusterSecretStore` named `secure-software-supply-chain-store`
-(External Secrets, fake provider). It holds real credentials, so **keep it outside the repository**:
+The operator reads every credential from a `ClusterSecretStore` named `secure-software-supply-chain-store`
+(External Secrets, fake provider) and syncs what each build needs into ordinary Secrets. The store holds real
+credentials: **create it from a file outside the repository and never commit it.**
 
-```bash
-kubectl apply -f ~/supplychain_v1alpha1_secretsstore.yaml
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: secure-software-supply-chain-store
+spec:
+  provider:
+    fake:
+      data:
+      - key: /supplychain/git/ssh-privatekey      # an SSH key that can read the repository
+        value: |
+          -----BEGIN OPENSSH PRIVATE KEY-----
+          <your private key>
+          -----END OPENSSH PRIVATE KEY-----
+      - key: /supplychain/git/ssh-publickey
+        value: <your public key>
+      - key: /supplychain/git/known-hosts         # ssh-keyscan github.com
+        value: <github.com host keys>
+      - key: /supplychain/git/ssh-config
+        value: <ssh client config for the git host, if you need one>
+      - key: /supplychain/registry/config         # a Docker config.json with push access
+        value: '{"auths":{"https://index.docker.io/v1/":{"auth":"<base64 of user:token>"}}}'
+      - key: /supplychain/github/pat              # a token that can manage the repository's webhooks
+        value: <github token>
+      - key: /supplychain/github/token
+        value: <github token>
+      - key: /supplychain/sonarqube/token         # written for you in phase 4
+        value: ""
 ```
 
-| Key | Content |
-|---|---|
-| `/supplychain/git/ssh-privatekey`, `/supplychain/git/ssh-publickey` | SSH key that can read the source repository |
-| `/supplychain/git/known-hosts`, `/supplychain/git/ssh-config` | SSH client configuration for the git host |
-| `/supplychain/registry/config` | Docker `config.json` with push access to the registry |
-| `/supplychain/sonarqube/token` | SonarQube user token (written by step 4) |
-| `/supplychain/github/pat`, `/supplychain/github/token` | GitHub token that can manage the repository's webhooks |
+```bash
+kubectl apply -f <path-outside-the-repo>/secretstore.yaml
+```
 
-A GitHub deploy key belongs to exactly one repository. The store has a single SSH key shared by every
-SupplyChain, so for more than one repository use a machine user's key.
+Use a registry access token rather than a password, and a GitHub fine-grained token limited to the repository.
+A GitHub deploy key belongs to exactly one repository; the store has one SSH key for every `SupplyChain`, so
+for more than one repository use a machine user's key.
 
-The synced Kubernetes Secrets do not refresh on their own. After changing a value in the store, delete the
-Secret and External Secrets recreates it.
+Synced Secrets are not refreshed when the store changes, except the SonarQube token. After changing any other
+value, delete the synced Secret and External Secrets recreates it.
 
 ### 4. Bootstrap SonarQube
 
-SonarQube starts with `admin` / `admin`. The bootstrap sets a new admin password, generates a `supply-chain`
+SonarQube starts with `admin` / `admin`. The bootstrap sets your admin password, generates a `supply-chain`
 token and writes it into the store:
 
 ```bash
@@ -355,72 +430,118 @@ works. It is safe to run again: the password is only set while it is still the d
 generated when the one in the store is missing or SonarQube no longer accepts it. When it does replace the token,
 it also refreshes the Secrets the builds read it from.
 
-SonarQube keeps its users, tokens, settings and analysis in a PostgreSQL database
-(`sonarqube-postgresql`), and its search index and plugins on a volume of its own; both survive restarts and
-re-running the installer. The database password is generated by the installer on first install and kept in the
-`sonarqube-postgresql` Secret. It is never replaced, because PostgreSQL only reads it when it initialises an empty
-volume.
+SonarQube keeps its users, tokens, settings and analysis in a PostgreSQL database (`sonarqube-postgresql`), and
+its search index and plugins on a volume of its own; both survive restarts and re-running the installer. The
+database password is generated by the installer on first install and kept in the `sonarqube-postgresql` Secret.
+It is never replaced, because PostgreSQL only reads it when it initialises an empty volume. Delete that Secret
+only together with the two volumes.
 
 ### 5. Apply the roles and the resources
+
+Edit the samples first: `config/samples/supplychain_v1alpha1_supplychain.yaml` names your repository, image and
+public hostname, and `supplychain_v1alpha1_githubwebhook.yaml` names your repository and hostname again.
 
 ```bash
 kubectl apply -k config/samples
 ```
 
-This applies the signing, event-listener and policy-runner roles, the `SupplyChain`, the `GitHubWebhook` and
-the `SupplyChainPolicy`.
-
-Check:
+This applies the signing, event-listener and policy-runner roles, the `SupplyChain`, the `GitHubWebhook` and the
+`SupplyChainPolicy`. The roles grant the build ServiceAccount the three permissions it is reviewed for before it
+is given an identity, and the policy ServiceAccount the three it needs before a policy is rendered.
 
 ```bash
 kubectl get supplychain,supplychainpolicy,githubwebhook -n default
 kubectl get clusterimagepolicies,trustroots
 ```
 
----
+The `SupplyChain` should be `Ready` with `status.signingIdentity` set, and the policy `Ready=True`. A
+`SupplyChain` that reports `Unauthorized` lists in `status.authorization` which of the three checks failed.
 
-## Triggering builds from a push
+### 6. Make the webhook reachable: Tailscale Funnel
 
-GitHub has to reach the EventListener. On a local cluster, [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
-gives it a public hostname without a cloud load balancer.
+GitHub has to reach the cluster's EventListener over HTTPS. A local cluster has no public address, and
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel) gives it one, with a valid certificate, without a cloud
+load balancer or opening a port on your router.
+
+```
+GitHub ──https──► your-machine.your-tailnet.ts.net   (Tailscale Funnel, public, TLS)
+                     └──► localhost:8888              (socat on your machine)
+                            └──► MetalLB IP:80        (ingress-nginx in the cluster)
+                                   └──► EventListener (routed only for --webhook-host)
+```
+
+**Enable Funnel for your tailnet** (once, in the Tailscale admin console): turn on HTTPS certificates under
+*DNS*, and allow Funnel for your machine in the access-control policy:
+
+```json
+"nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]
+```
+
+**Find your machine's public name.** It is the webhook host for phase 1 and the samples:
 
 ```bash
-# Bridge a local port to the ingress address assigned by MetalLB
+sudo tailscale up
+tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//'    # your-machine.your-tailnet.ts.net
+```
+
+**Bridge a local port to the ingress controller.** On kind, the address MetalLB gives ingress-nginx is only
+reachable from the machine itself, so a small forwarder carries traffic from a local port to it:
+
+```bash
+INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
 sudo tee /etc/systemd/system/kind-ingress-bridge.service <<EOF
 [Unit]
-Description=Bridge localhost to kind ingress-nginx
+Description=Bridge localhost:8888 to kind ingress-nginx
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:8888,fork,reuseaddr TCP:<metallb-ingress-ip>:80
+ExecStart=/usr/bin/socat TCP-LISTEN:8888,fork,reuseaddr TCP:${INGRESS_IP}:80
 Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 sudo systemctl enable --now kind-ingress-bridge
+```
 
-# Publish it
-sudo tailscale up
+**Publish the port:**
+
+```bash
 tailscale funnel --bg 8888
+tailscale funnel status          # https://your-machine.your-tailnet.ts.net (Funnel on) -> 127.0.0.1:8888
 ```
 
-Set that hostname as `spec.webhookHost` on the `SupplyChain` and as `spec.hookURL` on the `GitHubWebhook`. The
-`GitHubWebhook` then registers the webhook, and every push creates an `ImageBuild` named
-`<supplychain>-<branch>-<commit-sha>`.
+The `GitHubWebhook` then registers the push webhook on your repository, pointing at that hostname, and keeps it
+registered. Every push creates an `ImageBuild` named `<supplychain>-<branch>-<commit-sha>`.
 
-Funnel publishes everything served on that hostname, so only the webhook is routed there. The Tekton Dashboard
-and SonarQube have ingresses of their own on a separate hostname (`--ui-host`, default `supplychain.localhost`)
-that is only reachable from the machine itself:
+What is public and what is not:
 
-```
-http://supplychain.localhost:8888/dashboard/
-http://supplychain.localhost:8888/sonarqube/
-```
-
-Do not set `--ui-host` to the webhook host: the dashboard has no login.
+- Funnel publishes everything served on that hostname, so ingress routes **only the webhook** there.
+- The Tekton Dashboard and SonarQube are routed on `--ui-host` (`supplychain.localhost` by default), which
+  resolves only on your machine: `http://supplychain.localhost:8888/dashboard/` and
+  `http://supplychain.localhost:8888/sonarqube/`.
+- Set a webhook secret (`spec.webhookSecretRef` on the `GitHubWebhook`) so that only GitHub's deliveries start
+  builds.
+- `tailscale funnel reset` takes the hostname off the internet again.
 
 > **Branch names containing `/`** cannot trigger a build yet: the branch is part of the build's name.
+
+### 7. Check it with one build
+
+Push a commit, or start a build by hand (see [Trigger a build by hand](#trigger-a-build-by-hand)), then:
+
+```bash
+kubectl get imagebuilds -n default -w           # Pending -> Running -> Succeeded
+kubectl get imagesignatures,imagebuildresults -n default
+```
+
+A finished build has an `ImageSignature` that is `Signed`, with the Rekor index of its signature, and an
+`ImageBuildResult` whose evidence lists the build's and Chains' signatures and attestations. Run the image in a
+namespace labelled `policy.sigstore.dev/include=true`: it is admitted, and an image this pipeline did not build
+is refused.
 
 ---
 
@@ -432,15 +553,15 @@ Do not set `--ui-host` to the webhook host: the dashboard has no login.
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChain
 metadata:
-  name: for-kaniko-app
+  name: your-app
   namespace: default
 spec:
-  repository: ntlaletsi70/for-kaniko-app
+  repository: your-org/your-app
   serviceAccountName: supply-chain-runner
-  webhookHost: your-machine.tailf8145.ts.net
+  webhookHost: your-machine.your-tailnet.ts.net
   image:
     registry: docker.io
-    name: nkanyezisolutions/for-kaniko-app
+    name: your-dockerhub-user/your-app
     tagStrategy: git-sha
     cloneSecret: github-ssh-credentials
     registrySecret: registry-credentials
@@ -451,7 +572,7 @@ spec:
     sonarQube:
       serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token
-      projectKey: ntlaletsi70_for-kaniko-app
+      projectKey: your-org_your-app
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: http://rekor-server.rekor-system.svc.cluster.local
@@ -464,13 +585,13 @@ spec:
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: GitHubWebhook
 metadata:
-  name: for-kaniko-app-webhook
+  name: your-app-webhook
   namespace: default
 spec:
-  repository: ntlaletsi70/for-kaniko-app
+  repository: your-org/your-app
   supplyChainRef:
-    name: for-kaniko-app
-  hookURL: https://your-machine.tailf8145.ts.net
+    name: your-app
+  hookURL: https://your-machine.your-tailnet.ts.net
   events: [push]
   secretRef:
     name: github-app-credentials
@@ -482,13 +603,13 @@ spec:
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: ImageBuild
 metadata:
-  name: for-kaniko-app-manual-001
+  name: your-app-manual-001
   namespace: default
 spec:
   supplyChainRef:
-    name: for-kaniko-app
+    name: your-app
   gitRef:
-    url: git@github.com:ntlaletsi70/for-kaniko-app.git
+    url: git@github.com:your-org/your-app.git
     revision: main
   imageTag: manual-001
 ```
@@ -516,11 +637,13 @@ The last step of a successful build prints what it verified:
 
 ```
 Supply chain policy verification
-  Image:          docker.io/nkanyezisolutions/for-kaniko-app:<sha>@sha256:...
-  Signer:         https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner
-  Issuer:         https://kubernetes.default.svc.cluster.local
+  Image:          docker.io/your-dockerhub-user/your-app:<sha>@sha256:...
+  Signer:         spiffe://<your-domain>/ns/default/sa/supply-chain-runner
+  Issuer:         http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
   Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)
   Authorization:  verified (scope, intent, output allowed)
+  Chains signer:  spiffe://<your-domain>/ns/tekton-chains/sa/tekton-chains-controller
+  Chains:         verified (image signature, SLSA provenance)
   Rekor:          http://rekor-server.rekor-system.svc.cluster.local
   Result:         PASS
 ```
@@ -545,7 +668,7 @@ kubectl get imagebuildresult <name> -n default \
 In a namespace labelled `policy.sigstore.dev/include=true`:
 
 ```bash
-kubectl run app --image=docker.io/nkanyezisolutions/for-kaniko-app:<sha>
+kubectl run app --image=docker.io/your-dockerhub-user/your-app:<sha>
 ```
 
 An image the SupplyChain built is admitted. Anything else under that repository is rejected, and the message
@@ -593,10 +716,10 @@ kubectl get supplychainpolicy <name> -o jsonpath='{.status.trustAnchors.fulcioRo
 curl -s http://<fulcio>/api/v1/rootCert | openssl x509 -outform DER | sha256sum
 ```
 
-They differ when Fulcio's CA was regenerated after the trust anchors were collected. That happens if the
-installer is run again after the setup Jobs have been cleaned up: the Jobs are re-created and generate new keys
-while Fulcio and the CT log keep the old ones in memory. Restart `fulcio-server` and `ctlog`, and make sure the
-CT log's trusted root (`ctlog-secret`, key `fulcio-0`) is the current Fulcio root.
+They differ when Fulcio's CA was regenerated after the trust anchors were collected. The installer no longer
+re-runs the Jobs that make the keys, so this only happens if those keys were deleted by hand. Restart
+`fulcio-server` and `ctlog`, and make sure the CT log's trusted root (`ctlog-secret`, key `fulcio-0`) is the
+current Fulcio root.
 
 **Fulcio returns 500 "Error entering certificate in CTL".** Same cause, seen from the other side: the CT log
 does not trust Fulcio's current root.
@@ -638,6 +761,36 @@ build.
 
 ---
 
+## Demos
+
+Terminal recordings in the same style as [knative-ctl](https://github.com/ntlaletsi70/knative-ctl): `k9s`
+watching the demo namespace on top, a scripted run of the real commands below, recorded with
+[asciinema](https://asciinema.org) and rendered with [agg](https://github.com/asciinema/agg) inside a `screen`
+split. Every script is in [`demo/`](demo/), so each recording can be made again on your own cluster.
+
+### Demo 2: no authorization, no identity, no certificate
+
+![no authorization, no identity, no certificate](demo/2-revoke-identity/demo.gif)
+
+The `your-app` SupplyChain's build ServiceAccount passes its three reviews, so SPIRE gives a pod running as it
+an identity and Fulcio issues that identity a signing certificate. Another ServiceAccount in the same namespace
+gets no identity, and Fulcio will not take its Kubernetes token instead. Deleting the RoleBinding that grants
+the three permissions turns the SupplyChain `Unauthorized` at once (top pane), and the same pod is refused an
+identity. Putting the RoleBinding back restores both.
+
+Re-run it on a cluster installed with `--signing-identity spiffe`, with the operator deployed:
+
+```bash
+kubectl apply -f demo/2-revoke-identity/setup.yaml
+asciinema rec demo/2-revoke-identity/demo.cast -c "screen -c demo/2-revoke-identity/screenrc"
+agg demo/2-revoke-identity/demo.cast demo/2-revoke-identity/demo.gif
+```
+
+It needs `k9s`, `screen`, `python3` and `openssl` on your machine. `ask-fulcio.sh` makes the same certificate
+request a signing step does and prints one line per outcome; it never prints a token or a key.
+
+---
+
 ## Part of BlanketOps
 
 - [blanketops-environments-controller](https://github.com/ntlaletsi70) — environment orchestration
@@ -661,4 +814,4 @@ build.
 [External Secrets Operator](https://external-secrets.io) ·
 [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
 
-See [`demo/`](demo/) for a recorded walkthrough.
+

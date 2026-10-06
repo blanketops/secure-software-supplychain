@@ -51,8 +51,8 @@ var _ = Describe("GitHubWebhook Controller", func() {
 						Namespace: "default",
 					},
 					Spec: supplychainv1alpha1.GitHubWebhookSpec{
-						Repository:     "ntlaletsi70/for-kaniko-app",
-						SupplyChainRef: supplychainv1alpha1.LocalObjectRef{Name: "for-kaniko-app"},
+						Repository:     "your-org/your-app",
+						SupplyChainRef: supplychainv1alpha1.LocalObjectRef{Name: "your-app"},
 						HookURL:        "https://smee.io/test-channel",
 					},
 				}

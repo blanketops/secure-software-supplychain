@@ -43,7 +43,7 @@ type SupplyChainSpec struct {
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
 	// WebhookHost is the public hostname for the EventListener ingress.
-	// e.g. pop-os.tailf8145.ts.net
+	// e.g. your-machine.your-tailnet.ts.net
 	// +optional
 	WebhookHost string `json:"webhookHost,omitempty"`
 }

@@ -68,7 +68,7 @@ func EnsureTriggerBinding(
 					Value: "$(extensions.short_sha)",
 				},
 				{
-					// GitHub repo full name e.g. "ntlaletsi70/for-kaniko-app"
+					// GitHub repo full name e.g. "your-org/your-app"
 					Name:  "repo-full-name",
 					Value: "$(body.repository.full_name)",
 				},

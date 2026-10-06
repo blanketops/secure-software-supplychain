@@ -1,0 +1,11 @@
+defscrollback 5000
+screen -t k9s 0 bash -c "while true; do k9s -n demo -c supplychains --headless --logoless --crumbsless; sleep 1; done"
+screen -t demo 1 bash demo/2-revoke-identity/run-demo.sh
+
+split
+focus top
+select 0
+resize 7
+focus bottom
+select 1
+focus top

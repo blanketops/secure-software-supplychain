@@ -28,13 +28,13 @@ func TestImageBuildLabelValue(t *testing.T) {
 		return &ImageBuild{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	}
 
-	short := "for-kaniko-app-main-" + sha
+	short := "your-app-main-" + sha
 	if got := build(short).LabelValue(); got != short {
 		t.Errorf("LabelValue() = %q, want the name unchanged when it fits", got)
 	}
 
 	// The name a push to a longer branch produces; it does not fit in a label.
-	long := "for-kaniko-app-policy-test-" + sha
+	long := "your-app-policy-test-" + sha
 	got := build(long).LabelValue()
 	if errs := validation.IsValidLabelValue(got); len(errs) > 0 {
 		t.Errorf("LabelValue() = %q is not a valid label value: %v", got, errs)

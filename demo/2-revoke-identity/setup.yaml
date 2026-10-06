@@ -1,0 +1,44 @@
+# The objects demo 2 runs against: a SupplyChain in a namespace of its own, and
+# the RoleBinding that gives its build ServiceAccount the three permissions it
+# is reviewed for. The demo deletes that RoleBinding and puts it back.
+#
+# It never builds anything, so the names are placeholders and the Secrets it
+# names need not exist.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChain
+metadata:
+  name: your-app
+  namespace: demo
+spec:
+  repository: your-org/your-app
+  webhookHost: your-app.demo.invalid
+  serviceAccountName: supply-chain-runner
+  image:
+    registry: docker.io
+    name: your-dockerhub-user/your-app
+    cloneSecret: github-ssh-credentials
+    registrySecret: registry-credentials
+  steps:
+    sign: true
+    attest: true
+---
+# scope (get supplychains), intent (create imagebuilds) and output (create
+# imagesignatures), from the signing role in config/samples.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: your-app-signer
+  namespace: demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: secure-software-supply-chain-image-signer
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: demo

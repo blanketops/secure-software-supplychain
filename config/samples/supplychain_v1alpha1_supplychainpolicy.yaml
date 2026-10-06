@@ -4,13 +4,13 @@ metadata:
   labels:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
-  name: for-kaniko-app
+  name: your-app
 spec:
   # The SupplyChain whose image this policy admits. The image repository, the
   # Fulcio and CT log endpoints and the trust anchors come from it and from the
   # blanketops-sigstore-roots ConfigMap.
   supplyChainRef:
-    name: for-kaniko-app
+    name: your-app
 
   # The ServiceAccount the policy is rendered on behalf of. Nothing is rendered
   # until it passes three SubjectAccessReviews: scope (get supplychains),

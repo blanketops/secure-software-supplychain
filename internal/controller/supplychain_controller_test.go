@@ -31,10 +31,10 @@ import (
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
-// forKanikoAppSupplyChain returns a SupplyChain that exactly mirrors
-// config/samples/supplychain_v1alpha1_supplychain.yaml (for-kaniko-app).
+// yourAppSupplyChain returns a SupplyChain that exactly mirrors
+// config/samples/supplychain_v1alpha1_supplychain.yaml (your-app).
 // This is the source of truth for what the controller must handle.
-func forKanikoAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
+func yourAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 	return &supplychainv1alpha1.SupplyChain{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -45,11 +45,11 @@ func forKanikoAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 			},
 		},
 		Spec: supplychainv1alpha1.SupplyChainSpec{
-			Repository:         "ntlaletsi70/for-kaniko-app",
+			Repository:         "your-org/your-app",
 			ServiceAccountName: "supply-chain-runner",
 			Image: supplychainv1alpha1.ImageSpec{
 				Registry:          "docker.io",
-				Name:              "nkanyezisolutions/for-kaniko-app",
+				Name:              "your-dockerhub-user/your-app",
 				TagStrategy:       "git-sha",
 				CloneSecretRef:    "github-ssh-credentials",
 				RegistrySecretRef: "registry-credentials",
@@ -63,7 +63,7 @@ func forKanikoAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 					Enabled:        true,
 					ServerURL:      "http://sonarqube-sonarqube.default.svc.cluster.local:9000",
 					TokenSecretRef: "sonarqube-token",
-					ProjectKey:     "ntlaletsi70_for-kaniko-app",
+					ProjectKey:     "your-org_your-app",
 				},
 			},
 			Signing: &supplychainv1alpha1.SigningSpec{
@@ -77,7 +77,7 @@ func forKanikoAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 var _ = Describe("SupplyChain Controller", func() {
 
 	const (
-		resourceName = "for-kaniko-app"
+		resourceName = "your-app"
 		namespace    = "default"
 	)
 
@@ -95,7 +95,7 @@ var _ = Describe("SupplyChain Controller", func() {
 		var existing supplychainv1alpha1.SupplyChain
 		err := k8sClient.Get(ctx, namespacedName, &existing)
 		if err != nil && apierrors.IsNotFound(err) {
-			Expect(k8sClient.Create(ctx, forKanikoAppSupplyChain(resourceName))).To(Succeed())
+			Expect(k8sClient.Create(ctx, yourAppSupplyChain(resourceName))).To(Succeed())
 		}
 	})
 
@@ -111,7 +111,7 @@ var _ = Describe("SupplyChain Controller", func() {
 	// ── reconciliation ────────────────────────────────────────────────────
 
 	It("should reconcile without error", func() {
-		By("running the reconciler against the for-kaniko-app SupplyChain")
+		By("running the reconciler against the your-app SupplyChain")
 		r := &SupplyChainReconciler{
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
@@ -125,7 +125,7 @@ var _ = Describe("SupplyChain Controller", func() {
 	It("should store the correct repository", func() {
 		var sc supplychainv1alpha1.SupplyChain
 		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
-		Expect(sc.Spec.Repository).To(Equal("ntlaletsi70/for-kaniko-app"))
+		Expect(sc.Spec.Repository).To(Equal("your-org/your-app"))
 	})
 
 	It("should store the correct service account name", func() {
@@ -138,7 +138,7 @@ var _ = Describe("SupplyChain Controller", func() {
 		var sc supplychainv1alpha1.SupplyChain
 		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
 		Expect(sc.Spec.Image.Registry).To(Equal("docker.io"))
-		Expect(sc.Spec.Image.Name).To(Equal("nkanyezisolutions/for-kaniko-app"))
+		Expect(sc.Spec.Image.Name).To(Equal("your-dockerhub-user/your-app"))
 		Expect(sc.Spec.Image.TagStrategy).To(Equal("git-sha"))
 		Expect(sc.Spec.Image.CloneSecretRef).To(Equal("github-ssh-credentials"))
 		Expect(sc.Spec.Image.RegistrySecretRef).To(Equal("registry-credentials"))
@@ -150,7 +150,7 @@ var _ = Describe("SupplyChain Controller", func() {
 		Expect(sc.Spec.Steps.SonarQube.Enabled).To(BeTrue())
 		Expect(sc.Spec.Steps.SonarQube.ServerURL).To(Equal("http://sonarqube-sonarqube.default.svc.cluster.local:9000"))
 		Expect(sc.Spec.Steps.SonarQube.TokenSecretRef).To(Equal("sonarqube-token"))
-		Expect(sc.Spec.Steps.SonarQube.ProjectKey).To(Equal("ntlaletsi70_for-kaniko-app"))
+		Expect(sc.Spec.Steps.SonarQube.ProjectKey).To(Equal("your-org_your-app"))
 	})
 
 	It("should have the correct Fulcio and Rekor URLs", func() {
@@ -247,7 +247,7 @@ var _ = Describe("SupplyChain Controller", func() {
 
 	It("should enforce one SupplyChain per repository", func() {
 		By("attempting to create a second SupplyChain for the same repository")
-		duplicate := forKanikoAppSupplyChain("for-kaniko-app-duplicate")
+		duplicate := yourAppSupplyChain("your-app-duplicate")
 		err := k8sClient.Create(ctx, duplicate)
 		// Creation itself may succeed — the controller enforces uniqueness on reconcile.
 		// If it was created, clean it up.
@@ -258,7 +258,7 @@ var _ = Describe("SupplyChain Controller", func() {
 			}
 			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "for-kaniko-app-duplicate",
+					Name:      "your-app-duplicate",
 					Namespace: namespace,
 				},
 			}

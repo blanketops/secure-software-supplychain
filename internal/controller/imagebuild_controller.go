@@ -207,7 +207,7 @@ func pipelineRunName(ib *supplychainv1alpha1.ImageBuild) string {
 	}
 
 	// pr-<supplychain>-<branch>-<short-sha>
-	// e.g. pr-for-kaniko-app-master-5728a219
+	// e.g. pr-your-app-master-5728a219
 	name := fmt.Sprintf("run-%s-%s-%s", sc, branch, sha)
 	if len(name) > 63 {
 		name = name[:63]

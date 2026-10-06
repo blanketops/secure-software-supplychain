@@ -94,9 +94,9 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		return getNamed(gvk, renderedName)
 	}
 	createSupplyChain := func() {
-		sc := forKanikoAppSupplyChain(supplyChainName)
+		sc := yourAppSupplyChain(supplyChainName)
 		sc.Spec.Repository = "ntlaletsi70/policy-test-app"
-		sc.Spec.Image.Name = "nkanyezisolutions/policy-test-app"
+		sc.Spec.Image.Name = "your-dockerhub-user/policy-test-app"
 		Expect(k8sClient.Create(ctx, sc)).To(Succeed())
 	}
 	createRoots := func() {
@@ -234,7 +234,7 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{
 			renderedName, authorizationName, renderedName + "-chains", renderedName + "-provenance",
 		}))
-		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/nkanyezisolutions/policy-test-app**"))
+		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/your-dockerhub-user/policy-test-app**"))
 		Expect(scp.Status.Signers).To(Equal([]supplychainv1alpha1.SignerIdentity{{
 			Issuer:  signing.KubernetesOIDCIssuer,
 			Subject: "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner",

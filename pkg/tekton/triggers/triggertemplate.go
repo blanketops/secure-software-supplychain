@@ -34,7 +34,7 @@ import (
 // Deterministic — idempotent on replay, one build per commit.
 //
 // Note: Kubernetes label values cannot contain '/' so repo-full-name
-// (e.g. "ntlaletsi70/for-kaniko-app") lives in annotations only.
+// (e.g. "your-org/your-app") lives in annotations only.
 func EnsureTriggerTemplate(
 	ctx context.Context,
 	c client.Client,
