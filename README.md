@@ -768,6 +768,31 @@ watching the demo namespace on top, a scripted run of the real commands below, r
 [asciinema](https://asciinema.org) and rendered with [agg](https://github.com/asciinema/agg) inside a `screen`
 split. Every script is in [`demo/`](demo/), so each recording can be made again on your own cluster.
 
+Demos 1 and 3 use real images and a real build. The scripts display the image repository, the git repository
+and the `SupplyChain`'s name as `your-dockerhub-user/your-app`, `your-org/your-app` and `your-app`; the `mask`
+function in each script is the only thing that changes what is shown.
+
+### Demo 1: only what the supply chain built may run
+
+![only what the supply chain built may run](demo/1-admission/demo.gif)
+
+Three images of one repository are run in a namespace the policy controller guards. The image the pipeline
+built, signed by the build and by Tekton Chains, is admitted and becomes a pod (top pane). An image signed by
+Chains alone is refused by the policy that wants the build's own signature. An image pushed by hand is refused
+by all four policies, each named with its reason.
+
+Re-run it with three such images of your own:
+
+```bash
+kubectl create namespace admission-demo
+kubectl label namespace admission-demo policy.sigstore.dev/include=true
+
+export REPO=docker.io/<user>/<app> APP=<supplychain> \
+       SIGNED_TAG=<tag> CHAINS_ONLY_TAG=<tag> UNSIGNED_TAG=<tag>
+asciinema rec demo/1-admission/demo.cast -c "screen -c demo/1-admission/screenrc"
+agg --idle-time-limit 2 demo/1-admission/demo.cast demo/1-admission/demo.gif
+```
+
 ### Demo 2: no authorization, no identity, no certificate
 
 ![no authorization, no identity, no certificate](demo/2-revoke-identity/demo.gif)
@@ -788,6 +813,28 @@ agg demo/2-revoke-identity/demo.cast demo/2-revoke-identity/demo.gif
 
 It needs `k9s`, `screen`, `python3` and `openssl` on your machine. `ask-fulcio.sh` makes the same certificate
 request a signing step does and prints one line per outcome; it never prints a token or a key.
+
+### Demo 3: what a build leaves behind
+
+![what a build leaves behind](demo/3-evidence/demo.gif)
+
+One real build, start to finish: an `ImageBuild` is applied, the nine steps run as pods (top pane), and the last
+step prints what it verified. Then the evidence, read back from the registry and Rekor rather than assumed:
+
+- the `ImageSignature`, whose Rekor index is the one cosign printed inside the build and the one Rekor holds an
+  entry at;
+- the `ImageBuildResult`, listing all seven signatures and attestations with their signer, key and log index,
+  complete once Tekton Chains has signed the finished run;
+- the same record in Tekton, as a `CustomRun`.
+
+The build takes about four minutes; the recording caps every pause at two seconds and plays in about a minute
+and a half.
+
+```bash
+export APP=<supplychain> REPO=docker.io/<user>/<app> GIT_REPO=<org>/<repo> REVISION=<branch>
+asciinema rec demo/3-evidence/demo.cast -c "screen -c demo/3-evidence/screenrc"
+agg --idle-time-limit 2 demo/3-evidence/demo.cast demo/3-evidence/demo.gif
+```
 
 ---
 

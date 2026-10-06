@@ -206,13 +206,23 @@ func pipelineRunName(ib *supplychainv1alpha1.ImageBuild) string {
 		}
 	}
 
-	// pr-<supplychain>-<branch>-<short-sha>
-	// e.g. pr-your-app-master-5728a219
-	name := fmt.Sprintf("run-%s-%s-%s", sc, branch, sha)
+	// run-<supplychain>-<branch>-<short-sha>
+	// e.g. run-your-app-master-5728a219
+	//
+	// A build made by hand need not be named that way: "your-app-demo" has no
+	// sha, and one not named after its SupplyChain has neither part in the
+	// expected place. Empty parts are left out, and nothing is left dangling
+	// by the cut to 63 characters, so the name is always a valid one.
+	name := "run-" + sc
+	for _, part := range []string{branch, sha} {
+		if part != "" {
+			name += "-" + part
+		}
+	}
 	if len(name) > 63 {
 		name = name[:63]
 	}
-	return name
+	return strings.TrimRight(name, "-.")
 }
 func (r *ImageBuildReconciler) reconcilePipelineRun(
 	ctx context.Context,
