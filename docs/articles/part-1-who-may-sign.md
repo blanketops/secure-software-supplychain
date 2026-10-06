@@ -1,6 +1,7 @@
 <!--
 Draft for Medium, part 1 of 2. Medium has no tables, so this uses lists and code blocks only.
-Images: upload the GIFs named in the [image: ...] lines from demo/.
+Images: Medium takes no SVG. Upload the PNGs from docs/articles/diagrams/ and the GIFs from demo/;
+the caption for each is the italic line under it.
 -->
 
 # Keyless signing answers "which key?". It does not answer "who gets to sign?"
@@ -78,6 +79,10 @@ status:
 
 The chain is now: RBAC says the ServiceAccount may build, so SPIRE will name it, so Fulcio will certify it. Break the first link and the others go with it.
 
+![The chain from RBAC to a signed image, intact and with the first link cut](diagrams/1-trust-chain.png)
+
+*A signing identity exists only while RBAC allows the build ServiceAccount. Remove the permission and nothing downstream can happen.*
+
 The same three answers are also attached to every image as a signed attestation, so admission can require proof that the build was authorized and not only that it was signed. That is part 2.
 
 ## Revocation has to be immediate
@@ -86,7 +91,9 @@ The first version re-ran the three checks every five minutes. That means a revok
 
 The operator now watches Roles, RoleBindings, ClusterRoles and ClusterRoleBindings, and re-runs the checks whenever any of them changes. Measured on the test cluster, deleting the RoleBinding turned the `SupplyChain` `Unauthorized` in about a tenth of a second. The five-minute check stays as a backstop for permissions granted some other way.
 
-[image: demo/2-revoke-identity/demo.gif — "A permission revoked and restored. Top: the SupplyChain. Bottom: what SPIRE and Fulcio answer each time."]
+![A permission revoked and restored](../../demo/2-revoke-identity/demo.gif)
+
+*A permission revoked and restored. Top: the SupplyChain. Bottom: what SPIRE and Fulcio answer each time.*
 
 In the recording, a pod running as the build ServiceAccount gets an identity and a certificate. Another ServiceAccount in the same namespace gets neither. Then the RoleBinding is deleted, and the same pod, running as the same ServiceAccount, is refused.
 
@@ -109,6 +116,10 @@ Tekton Chains signs too. When a pipeline finishes a task that produced an image,
 Getting both signatures onto the image took longer than expected. The first builds verified against Chains' signature only; the build's own had vanished.
 
 Signatures made with cosign are stored in the registry under a tag derived from the image digest. Adding one means reading the list that is there, appending, and writing it back. Chains signs the instant the push task completes, which is the same moment the pipeline's signing step starts. Two writers read the same empty list, and the second write replaces the first.
+
+![Two timelines: both signers writing at once, and the build waiting for Chains](diagrams/2-signature-race.png)
+
+*Both signers read an empty list, so the second write replaces the first. Making the build wait keeps both signatures.*
 
 The fix is ordering. The signing step now waits until Chains' signature is in the registry before it adds its own. It is one small step in the pipeline, and it would be easy never to notice it was needed: the build reported success either way.
 

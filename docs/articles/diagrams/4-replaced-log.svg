@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-label="Re-running the installer erased the Rekor tree ID and created a new empty tree, so signatures that were still valid could no longer be found and their images were refused.">
+<title>Re-running the installer erased the Rekor tree ID and created a new empty tree, so signatures that were still valid could no longer be found and their images were refused.</title>
+<defs><marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1f2933"/></marker><marker id="a-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1a7f5a"/></marker><marker id="a-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#c0362c"/></marker><marker id="a-line" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa5b1"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5f6c7b"/></marker></defs>
+<rect width="1200" height="600" fill="#ffffff"/>
+<text x="22" y="36" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#1a7f5a" text-anchor="start" font-weight="600">Before the re-run</text>
+<rect x="22" y="60" width="250" height="128" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="147" y="86" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Registry</text>
+<rect x="42" y="100" width="210" height="30" rx="5" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="147" y="120" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">image</text>
+<rect x="42" y="140" width="210" height="30" rx="5" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="147" y="160" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">signature</text>
+<rect x="322" y="60" width="250" height="300" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="447" y="86" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Rekor</text>
+<rect x="342" y="100" width="210" height="34" rx="5" fill="#ffffff" stroke="#1a7f5a" stroke-width="1.5"/>
+<text x="447" y="122" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">serves tree: A</text>
+<rect x="342" y="152" width="210" height="92" rx="5" fill="#ffffff" stroke="#1a7f5a" stroke-width="1.5"/>
+<text x="447" y="174" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">tree A</text>
+<text x="447" y="196" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12" fill="#1f2933" text-anchor="middle" font-weight="400">entry 106: this signature</text>
+<text x="447" y="218" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12" fill="#5f6c7b" text-anchor="middle" font-weight="400">… 112 more entries</text>
+<rect x="22" y="250" width="250" height="110" rx="8" fill="#e6f4ed" stroke="#1a7f5a" stroke-width="1.5"/>
+<text x="147" y="278" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Admission</text>
+<text x="147" y="302" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#5f6c7b" text-anchor="middle" font-weight="400">looks the signature up</text>
+<text x="147" y="320" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#5f6c7b" text-anchor="middle" font-weight="400">in the log</text>
+<text x="147" y="346" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">found: admitted</text>
+<line x1="147" y1="190" x2="147" y2="246" stroke="#1f2933" stroke-width="1.6" marker-end="url(#a-ink)"/>
+<text x="157" y="224" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12" fill="#5f6c7b" text-anchor="start" font-weight="400">reads</text>
+<path d="M274 305 L298 305 L298 198 L336 198" fill="none" stroke="#1a7f5a" stroke-width="1.6" marker-end="url(#a-good)"/>
+<text x="628" y="36" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#c0362c" text-anchor="start" font-weight="600">After the re-run</text>
+<rect x="628" y="60" width="250" height="128" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="753" y="86" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Registry</text>
+<rect x="648" y="100" width="210" height="30" rx="5" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="753" y="120" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">image</text>
+<rect x="648" y="140" width="210" height="30" rx="5" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="753" y="160" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">signature (unchanged)</text>
+<rect x="928" y="60" width="250" height="300" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="1053" y="86" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Rekor</text>
+<rect x="948" y="100" width="210" height="34" rx="5" fill="#ffffff" stroke="#c0362c" stroke-width="1.5"/>
+<text x="1053" y="122" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">serves tree: B</text>
+<rect x="948" y="152" width="210" height="92" rx="5" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1053" y="174" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#5f6c7b" text-anchor="middle" font-weight="600">tree A</text>
+<text x="1053" y="196" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12" fill="#5f6c7b" text-anchor="middle" font-weight="400">entry 106: this signature</text>
+<text x="1053" y="218" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12" fill="#5f6c7b" text-anchor="middle" font-weight="400">… 112 more entries</text>
+<text x="1053" y="236" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="11.5" fill="#5f6c7b" text-anchor="middle" font-weight="400" font-style="italic">still stored, no longer served</text>
+<rect x="948" y="258" width="210" height="84" rx="5" fill="#fdecea" stroke="#c0362c" stroke-width="1.5"/>
+<text x="1053" y="282" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">tree B</text>
+<text x="1053" y="306" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12" fill="#c0362c" text-anchor="middle" font-weight="400">new, empty</text>
+<text x="1053" y="326" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="11.5" fill="#c0362c" text-anchor="middle" font-weight="400" font-style="italic">made by the re-run</text>
+<rect x="628" y="250" width="250" height="110" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5"/>
+<text x="753" y="278" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="middle" font-weight="600">Admission</text>
+<text x="753" y="302" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#5f6c7b" text-anchor="middle" font-weight="400">looks the signature up</text>
+<text x="753" y="320" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#5f6c7b" text-anchor="middle" font-weight="400">in the log</text>
+<text x="753" y="346" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#c0362c" text-anchor="middle" font-weight="600">not found: refused</text>
+<line x1="753" y1="190" x2="753" y2="246" stroke="#1f2933" stroke-width="1.6" marker-end="url(#a-ink)"/>
+<text x="763" y="224" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12" fill="#5f6c7b" text-anchor="start" font-weight="400">reads</text>
+<line x1="880" y1="305" x2="944" y2="305" stroke="#c0362c" stroke-width="1.6" marker-end="url(#a-bad)"/>
+<line x1="600" y1="50" x2="600" y2="372" stroke="#9aa5b1" stroke-width="1" stroke-dasharray="2 5"/>
+<rect x="22" y="400" width="1156" height="118" rx="8" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="44" y="428" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="14.5" fill="#1f2933" text-anchor="start" font-weight="600">What the installer did</text>
+<text x="44" y="456" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="start" font-weight="400">re-applied the ConfigMap that holds the tree ID,</text>
+<text x="44" y="478" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="start" font-weight="400">replacing it with the placeholder from the manifest</text>
+<text x="620" y="456" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="start" font-weight="400">the setup Job, already cleaned up, ran again</text>
+<text x="620" y="478" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="start" font-weight="400">and created tree B; Rekor started serving it</text>
+<circle cx="34" cy="452" r="0" fill="#1f2933"/>
+<line x1="520" y1="466" x2="604" y2="466" stroke="#5f6c7b" stroke-width="1.6" marker-end="url(#a-muted)"/>
+<text x="44" y="504" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#1f2933" text-anchor="start" font-weight="600">Nothing in the registry changed. Every signature was still valid, and every image carrying one was refused.</text>
+<text x="22" y="552" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#5f6c7b" text-anchor="start" font-weight="400">The fix: signing keys and log trees are made exactly once. The installer checks for the result before running the step</text>
+<text x="22" y="576" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#5f6c7b" text-anchor="start" font-weight="400">that makes them, and never overwrites the place the result is kept.</text>
+</svg>

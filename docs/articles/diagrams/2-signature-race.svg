@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-label="Two signers read an empty signature list at the same moment, so the second write replaces the first; making the build wait for Tekton Chains keeps both.">
+<title>Two signers read an empty signature list at the same moment, so the second write replaces the first; making the build wait for Tekton Chains keeps both.</title>
+<defs><marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1f2933"/></marker><marker id="a-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1a7f5a"/></marker><marker id="a-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#c0362c"/></marker><marker id="a-line" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa5b1"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5f6c7b"/></marker></defs>
+<rect width="1200" height="640" fill="#ffffff"/>
+<text x="22" y="40" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#c0362c" text-anchor="start" font-weight="600">Before: both sign as soon as the push finishes</text>
+<text x="22" y="91" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">Tekton Chains</text>
+<line x1="250" y1="86" x2="1170" y2="86" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="22" y="161" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">The build&#x27;s sign step</text>
+<line x1="250" y1="156" x2="1170" y2="156" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="22" y="241" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">Signature tag in the registry</text>
+<line x1="250" y1="236" x2="1170" y2="236" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="1170" y="272" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12" fill="#5f6c7b" text-anchor="end" font-weight="400">time →</text>
+<rect x="295.0" y="221" width="70" height="30" rx="6" fill="#f3f5f7" stroke="#1f2933" stroke-width="1.4"/>
+<text x="330" y="241" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">[ ]</text>
+<circle cx="430" cy="86" r="6" fill="#1f2933"/>
+<text x="430" y="72" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">reads [ ]</text>
+<circle cx="470" cy="156" r="6" fill="#1f2933"/>
+<text x="470" y="180" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">reads [ ]</text>
+<circle cx="640" cy="156" r="6" fill="#1f2933"/>
+<text x="640" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">writes [build]</text>
+<line x1="640" y1="164" x2="640" y2="217" stroke="#1f2933" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a-ink)"/>
+<rect x="665.0" y="221" width="110" height="30" rx="6" fill="#f3f5f7" stroke="#1f2933" stroke-width="1.4"/>
+<text x="720" y="241" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">[build]</text>
+<circle cx="860" cy="86" r="6" fill="#1f2933"/>
+<text x="860" y="72" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">writes [chains]</text>
+<line x1="860" y1="94" x2="860" y2="217" stroke="#c0362c" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a-bad)"/>
+<rect x="960.0" y="221" width="120" height="30" rx="6" fill="#fdecea" stroke="#c0362c" stroke-width="1.4"/>
+<text x="1020" y="241" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="400">[chains]</text>
+<text x="1020" y="276" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">the build&#x27;s signature is gone</text>
+<line x1="22" y1="316" x2="1178" y2="316" stroke="#9aa5b1" stroke-width="1" stroke-dasharray="2 5"/>
+<text x="22" y="356" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#1a7f5a" text-anchor="start" font-weight="600">After: the build waits until Chains&#x27; signature is there</text>
+<text x="22" y="407" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">Tekton Chains</text>
+<line x1="250" y1="402" x2="1170" y2="402" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="22" y="477" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">The build&#x27;s sign step</text>
+<line x1="250" y1="472" x2="1170" y2="472" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="22" y="557" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#1f2933" text-anchor="start" font-weight="600">Signature tag in the registry</text>
+<line x1="250" y1="552" x2="1170" y2="552" stroke="#9aa5b1" stroke-width="1.2"/>
+<text x="1170" y="588" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12" fill="#5f6c7b" text-anchor="end" font-weight="400">time →</text>
+<rect x="295.0" y="537" width="70" height="30" rx="6" fill="#f3f5f7" stroke="#1f2933" stroke-width="1.4"/>
+<text x="330" y="557" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">[ ]</text>
+<circle cx="430" cy="402" r="6" fill="#1f2933"/>
+<text x="430" y="388" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">reads [ ]</text>
+<circle cx="560" cy="402" r="6" fill="#1f2933"/>
+<text x="560" y="388" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">writes [chains]</text>
+<line x1="560" y1="410" x2="560" y2="533" stroke="#1f2933" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a-ink)"/>
+<rect x="580.0" y="537" width="120" height="30" rx="6" fill="#f3f5f7" stroke="#1f2933" stroke-width="1.4"/>
+<text x="640" y="557" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="400">[chains]</text>
+<line x1="300" y1="472" x2="700" y2="472" stroke="#1a7f5a" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 9"/>
+<text x="420" y="496" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">waits, polling the tag</text>
+<circle cx="760" cy="472" r="6" fill="#1f2933"/>
+<text x="760" y="496" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">reads [chains]</text>
+<circle cx="900" cy="472" r="6" fill="#1f2933"/>
+<text x="900" y="458" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1f2933" text-anchor="middle" font-weight="600">writes [chains, build]</text>
+<line x1="900" y1="480" x2="900" y2="533" stroke="#1a7f5a" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a-good)"/>
+<rect x="945.0" y="537" width="190" height="30" rx="6" fill="#e6f4ed" stroke="#1a7f5a" stroke-width="1.4"/>
+<text x="1040" y="557" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="400">[chains, build]</text>
+<text x="22" y="620" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#5f6c7b" text-anchor="start" font-weight="400">cosign keeps every signature of an image in one registry tag, changed by reading the list, adding to it and writing it back.</text>
+</svg>

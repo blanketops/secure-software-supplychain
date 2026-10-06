@@ -1,6 +1,7 @@
 <!--
 Draft for Medium, part 2 of 2. Medium has no tables, so this uses lists and code blocks only.
-Images: upload the GIFs named in the [image: ...] lines from demo/.
+Images: Medium takes no SVG. Upload the PNGs from docs/articles/diagrams/ and the GIFs from demo/;
+the caption for each is the italic line under it. Demo 4 is not recorded yet.
 -->
 
 # A record that said "Signed" had never looked at the signature
@@ -29,7 +30,13 @@ So "signed by the build **and** by Chains" cannot be one policy. It has to be se
 
 An image must pass every one. Neither identity can vouch for an image alone.
 
-[image: demo/1-admission/demo.gif — "Three images of the same repository. One becomes a pod."]
+![Three images against the four policies: one admitted, two refused](diagrams/3-four-policies.png)
+
+*Four separate requirements, two per identity. An image missing any one is refused.*
+
+![Three images of the same repository; one becomes a pod](../../demo/1-admission/demo.gif)
+
+*Three images of the same repository. One becomes a pod.*
 
 In the recording, three images of the same repository are run in a guarded namespace. The one the pipeline built is admitted. One that only Chains signed is refused, and the message names the policy that wanted the build's own signature. One pushed by hand is refused by all four.
 
@@ -73,7 +80,9 @@ I checked one against two independent sources. The signing step's own log printe
 
 The general point is small and easy to get wrong: **a status field should report an observation, not a hope.** "The pipeline succeeded" and "the image is signed" are different facts, and only one of them was being checked.
 
-[image: demo/3-evidence/demo.gif — "One build, then the evidence for it, read back from the registry and the log."]
+![One build, then the evidence for it](../../demo/3-evidence/demo.gif)
+
+*One build, then the evidence for it, read back from the registry and the log.*
 
 The same reading-back produces the build's full evidence: every signature and attestation on the image, who made it, with which key, and where it is logged. A typical build leaves seven entries.
 
@@ -97,6 +106,10 @@ Rekor stores its log in a Merkle tree. The tree is created once by a setup job, 
 
 Our installer re-applied it by replacing the whole object. The ID was erased, the setup job ran again, and Rekor began serving a new, empty tree.
 
+![Before and after the installer re-run: the same signature, a different tree](diagrams/4-replaced-log.png)
+
+*Nothing in the registry changed. The log it was recorded in was no longer the one being served.*
+
 Every signature made before that was still in the registry, still valid, and now "not found in the transparency log". Every image carrying one was refused at admission. It happened on any re-run of the installer, and the first time I blamed something else.
 
 There were two more of the same family. Rekor was configured with an in-memory signing key, so it made a new one on every restart and stopped matching the trust root. And the jobs that generate Fulcio's keys ran again on a re-run, replacing keys that everything already trusted.
@@ -107,7 +120,7 @@ A transparency log that can be swapped out by re-running an install script is no
 
 ## From a push to a running image
 
-[image: demo/4-push-to-build/demo.gif — "One git push. Nothing after it is started by hand."]
+<!-- demo 4 goes here once recorded: demo/4-push-to-build/demo.gif, "One git push. Nothing after it is started by hand." -->
 
 Put together: a push reaches the cluster through a Tailscale Funnel, a build starts on its own, the image is signed by two identities and logged, and the admission policy accepts it.
 

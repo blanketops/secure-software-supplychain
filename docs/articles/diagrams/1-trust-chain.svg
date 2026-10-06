@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" role="img" aria-label="A signing identity exists only while RBAC allows the build ServiceAccount: cut the first link and no certificate can be issued.">
+<title>A signing identity exists only while RBAC allows the build ServiceAccount: cut the first link and no certificate can be issued.</title>
+<defs><marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1f2933"/></marker><marker id="a-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1a7f5a"/></marker><marker id="a-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#c0362c"/></marker><marker id="a-line" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9aa5b1"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5f6c7b"/></marker></defs>
+<rect width="1200" height="520" fill="#ffffff"/>
+<text x="22" y="48" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#1a7f5a" text-anchor="start" font-weight="600">Authorized</text>
+<rect x="22" y="70" width="170" height="92" rx="8" fill="#e6f4ed" stroke="#1a7f5a" stroke-width="1.5"/>
+<text x="107.0" y="100" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">Kubernetes RBAC</text>
+<text x="107.0" y="124" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">RoleBinding grants</text>
+<text x="107.0" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">the three permissions</text>
+<rect x="268" y="70" width="170" height="92" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="353.0" y="100" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">The operator</text>
+<text x="353.0" y="124" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">3 access reviews:</text>
+<text x="353.0" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">all allowed</text>
+<rect x="514" y="70" width="170" height="92" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="599.0" y="100" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">SPIRE</text>
+<text x="599.0" y="124" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">identity is</text>
+<text x="599.0" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">registered</text>
+<rect x="760" y="70" width="170" height="92" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="845.0" y="100" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">Fulcio</text>
+<text x="845.0" y="124" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">issues a 10-minute</text>
+<text x="845.0" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">certificate</text>
+<rect x="1006" y="70" width="170" height="92" rx="8" fill="#f3f5f7" stroke="#9aa5b1" stroke-width="1.5"/>
+<text x="1091.0" y="100" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">The image</text>
+<text x="1091.0" y="124" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">signed by</text>
+<text x="1091.0" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">the build</text>
+<line x1="198" y1="116.0" x2="262" y2="116.0" stroke="#1a7f5a" stroke-width="1.6" marker-end="url(#a-good)"/>
+<text x="230.0" y="104.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">allowed</text>
+<line x1="444" y1="116.0" x2="508" y2="116.0" stroke="#1a7f5a" stroke-width="1.6" marker-end="url(#a-good)"/>
+<text x="476.0" y="104.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">registers</text>
+<line x1="690" y1="116.0" x2="754" y2="116.0" stroke="#1a7f5a" stroke-width="1.6" marker-end="url(#a-good)"/>
+<text x="722.0" y="104.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">token</text>
+<line x1="936" y1="116.0" x2="1000" y2="116.0" stroke="#1a7f5a" stroke-width="1.6" marker-end="url(#a-good)"/>
+<text x="968.0" y="104.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#1a7f5a" text-anchor="middle" font-weight="600">certificate</text>
+<line x1="22" y1="232" x2="1178" y2="232" stroke="#9aa5b1" stroke-width="1" stroke-dasharray="2 5"/>
+<text x="22" y="278" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="16" fill="#c0362c" text-anchor="start" font-weight="600">One permission revoked</text>
+<rect x="22" y="300" width="170" height="92" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5"/>
+<text x="107.0" y="330" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">Kubernetes RBAC</text>
+<text x="107.0" y="354" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">RoleBinding</text>
+<text x="107.0" y="372" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">deleted</text>
+<rect x="268" y="300" width="170" height="92" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="353.0" y="330" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">The operator</text>
+<text x="353.0" y="354" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">3 access reviews:</text>
+<text x="353.0" y="372" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">denied</text>
+<rect x="514" y="300" width="170" height="92" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="599.0" y="330" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">SPIRE</text>
+<text x="599.0" y="354" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">registration</text>
+<text x="599.0" y="372" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">removed</text>
+<rect x="760" y="300" width="170" height="92" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="845.0" y="330" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">Fulcio</text>
+<text x="845.0" y="354" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">nothing to</text>
+<text x="845.0" y="372" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">certify</text>
+<rect x="1006" y="300" width="170" height="92" rx="8" fill="#fdecea" stroke="#c0362c" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1091.0" y="330" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="15" fill="#1f2933" text-anchor="middle" font-weight="600">The image</text>
+<text x="1091.0" y="354" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">cannot be</text>
+<text x="1091.0" y="372" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13" fill="#5f6c7b" text-anchor="middle" font-weight="400">signed</text>
+<line x1="198" y1="346.0" x2="262" y2="346.0" stroke="#c0362c" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M223.0 339.0 L237.0 353.0 M237.0 339.0 L223.0 353.0" stroke="#c0362c" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+<text x="230.0" y="334.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">denied</text>
+<line x1="444" y1="346.0" x2="508" y2="346.0" stroke="#c0362c" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M469.0 339.0 L483.0 353.0 M483.0 339.0 L469.0 353.0" stroke="#c0362c" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+<text x="476.0" y="334.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">removes</text>
+<line x1="690" y1="346.0" x2="754" y2="346.0" stroke="#c0362c" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M715.0 339.0 L729.0 353.0 M729.0 339.0 L715.0 353.0" stroke="#c0362c" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+<text x="722.0" y="334.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">refused</text>
+<line x1="936" y1="346.0" x2="1000" y2="346.0" stroke="#c0362c" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M961.0 339.0 L975.0 353.0 M975.0 339.0 L961.0 353.0" stroke="#c0362c" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+<text x="968.0" y="334.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="12.5" fill="#c0362c" text-anchor="middle" font-weight="600">none</text>
+<text x="22" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#5f6c7b" text-anchor="start" font-weight="400">The three permissions: read the SupplyChain (scope), create builds (intent), record signatures (output).</text>
+<text x="22" y="476" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" font-size="13.5" fill="#5f6c7b" text-anchor="start" font-weight="400">The operator re-runs the reviews whenever RBAC changes, so the second row follows the first within a second.</text>
+<text x="22" y="500" font-family="'JetBrains Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#5f6c7b" text-anchor="start" font-weight="400">spiffe://&lt;your-domain&gt;/ns/&lt;namespace&gt;/sa/supply-chain-runner</text>
+</svg>
