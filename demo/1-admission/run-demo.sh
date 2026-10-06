@@ -39,7 +39,14 @@ step() {
 run() {
   echo "\$ kubectl run $1 --image=${REPO}:$2" | mask
   local out
-  out=$(kubectl run "$1" -n "$NS" --restart=Never --image="${REPO}:$2" 2>&1)
+  # The webhook fails closed after ten seconds, and reads the image's
+  # signatures from the registry for each policy; on a slow link, ask again.
+  for _ in 1 2 3 4 5; do
+    out=$(kubectl run "$1" -n "$NS" --restart=Never --image="${REPO}:$2" 2>&1)
+    echo "$out" | grep -q 'context deadline exceeded' || break
+    echo "  (the admission webhook ran out of time reading the registry; asking again)"
+    sleep 2
+  done
   if echo "$out" | grep -q created; then
     echo "  ADMITTED  pod/$1 created"
     return

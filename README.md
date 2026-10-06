@@ -156,6 +156,8 @@ relying on it:
 - The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
   half of the proof has not been run.
 - Branch names containing `/` cannot trigger a build yet.
+- Admission reads an image's signatures from the registry for each of the four policies, and the webhook fails
+  closed after ten seconds. On a slow link to the registry it can time out; running the workload again succeeds.
 - The Trivy step uses a pre-built scanner image with the vulnerability database baked in, about 1 GB; its first
   pull on a new node can outlast the step's time limit. See [Troubleshooting](docs/troubleshooting.md).
 

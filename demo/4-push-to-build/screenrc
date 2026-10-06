@@ -1,0 +1,11 @@
+defscrollback 5000
+screen -t pods 0 bash demo/4-push-to-build/watch-pods.sh
+screen -t demo 1 bash demo/4-push-to-build/run-demo.sh
+
+split
+focus top
+select 0
+resize 12
+focus bottom
+select 1
+focus top

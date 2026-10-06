@@ -40,6 +40,15 @@ the gate: update the base image.
 **A build fails at `git-clone` with "Permission denied (publickey)".** The key in the store cannot read the
 repository. Remember the synced Secret has to be deleted after the store changes.
 
+**Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
+controller reads the image's signatures and attestations from the registry, once for each of the four policies,
+and the API server gives it ten seconds. On a slow connection to the registry that is not always enough. The
+webhook fails closed, so nothing unverified is admitted; apply the workload again.
+
+**A build fails at `sign-image-cosign` with a registry error after "tlog entry created".** The signature was
+logged in Rekor but could not be stored next to the image, usually a network failure talking to the registry.
+The image is left without the build's signature and admission will refuse it. Run the build again.
+
 **A policy is `Ready=False`.** The reason says which input is missing: `AuthorizationDenied`,
 `SupplyChainNotFound`, `SigningDisabled`, `TrustAnchorsNotFound`, `TrustAnchorsInvalid`,
 `PolicyControllerNotInstalled` or `ApplyFailed`.
