@@ -178,12 +178,6 @@ build.
 
 ---
 
-## Part of BlanketOps
-
-- [blanketops-environments-controller](https://github.com/ntlaletsi70) — environment orchestration
-- [blanketops-environments-supply-chain](https://github.com/ntlaletsi70/secure-software-supply-chain) — supply chain pipeline (this repo)
-- [blanketops-zenith-runners-pool](https://github.com/ntlaletsi70) — GitHub Actions self-hosted runners
-
 ## Acknowledgements
 
 [Tekton](https://tekton.dev) ·
