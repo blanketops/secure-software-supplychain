@@ -17,15 +17,11 @@ package signing
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,8 +33,9 @@ import (
 // Flow:
 //  1. EnsureSignature — called when PipelineRun is created, creates ImageSignature
 //     with Phase=Pending and the full signing identity from the RunSigningContext.
-//  2. MarkSigned — called when PipelineRun succeeds, transitions to Phase=Signed.
-//     Queries Rekor for the transparency log index using the image digest.
+//  2. Record — called when the build is over, with the build's signature as
+//     read back from the registry and the transparency log. Only then, and
+//     only if it was found, does the phase become Signed.
 //  3. MarkFailed — called when PipelineRun fails, transitions to Phase=Failed.
 type SignatureReconciler struct {
 	Client client.Client
@@ -115,7 +112,7 @@ func (s *SignatureReconciler) EnsureSignature(
 		if createErr := s.Client.Create(ctx, desired); createErr != nil {
 			return fmt.Errorf("creating ImageSignature: %w", createErr)
 		}
-		desired.Status.Phase = "Pending"
+		desired.Status.Phase = PhasePending
 		_ = s.Client.Status().Update(ctx, desired)
 		log.Info("ImageSignature created", "phase", "Pending")
 		return nil
@@ -128,64 +125,89 @@ func (s *SignatureReconciler) EnsureSignature(
 	return nil
 }
 
-// MarkSigned transitions the ImageSignature to Phase=Signed.
-// Called when the PipelineRun succeeds.
-// Queries Rekor for the transparency log index using the image digest.
-func (s *SignatureReconciler) MarkSigned(
+// ConditionSigned is the condition that says whether the build's signature
+// was found on the image and in the transparency log.
+const ConditionSigned = "Signed"
+
+// Phases of an ImageSignature.
+const (
+	PhasePending = "Pending"
+	PhaseSigned  = "Signed"
+	PhaseFailed  = "Failed"
+)
+
+// Record completes the ImageSignature from the build's signature as it was
+// read back from the registry and the transparency log.
+//
+// signature is nil when no such signature was found. The record then stays
+// Pending and says why: that a pipeline succeeded is not evidence that the
+// image carries a signature, and nothing here is filled in from what the
+// controller expects to be true.
+func (s *SignatureReconciler) Record(
 	ctx context.Context,
 	ib *supplyv1alpha1.ImageBuild,
 	imageDigest string,
-	certPEM []byte,
-	rekorURL string,
+	signature *supplyv1alpha1.SignatureRecord,
+	missing string,
 ) error {
 	log := s.Log.WithValues("imageBuild", ib.Name)
 
 	var sig supplyv1alpha1.ImageSignature
-	if err := s.Client.Get(ctx, client.ObjectKey{
-		Name:      ib.Name,
-		Namespace: ib.Namespace,
-	}, &sig); err != nil {
-		return fmt.Errorf("fetching ImageSignature for MarkSigned: %w", err)
+	if err := s.Client.Get(ctx, client.ObjectKey{Name: ib.Name, Namespace: ib.Namespace}, &sig); err != nil {
+		return fmt.Errorf("fetching ImageSignature: %w", err)
 	}
 
-	// Update spec digest.
-	sig.Spec.Digest = imageDigest
-	if updateErr := s.Client.Update(ctx, &sig); updateErr != nil {
-		return fmt.Errorf("updating ImageSignature spec: %w", updateErr)
-	}
-
-	// ── Query Rekor for log index ──────────────────────────────────────
-	// Best-effort — does not block the Signed transition on failure.
-	rekorLogIndex := int64(-1)
-	if rekorURL != "" && imageDigest != "" {
-		idx, err := queryRekorLogIndex(ctx, rekorURL, imageDigest, log)
-		if err != nil {
-			log.Info("could not query Rekor log index (best-effort)", "error", err.Error())
-		} else {
-			rekorLogIndex = idx
-			log.Info("Rekor log index resolved", "logIndex", rekorLogIndex)
+	if sig.Spec.Digest != imageDigest {
+		sig.Spec.Digest = imageDigest
+		if err := s.Client.Update(ctx, &sig); err != nil {
+			return fmt.Errorf("updating ImageSignature spec: %w", err)
 		}
 	}
 
-	// ── Update status ──────────────────────────────────────────────────
-	now := metav1.Now()
-	sig.Status.Phase = "Signed"
-	sig.Status.SignedAt = &now
-	if len(certPEM) > 0 {
-		sig.Status.Certificate = string(certPEM)
-	}
-	if rekorLogIndex >= 0 {
-		sig.Status.RekorLogIndex = rekorLogIndex
+	if signature == nil {
+		if sig.Status.Phase == PhaseSigned {
+			// Found before; a registry that cannot be read now takes nothing back.
+			return nil
+		}
+		if missing == "" {
+			missing = "the build's signature was not found on the image"
+		}
+		sig.Status.Phase = PhasePending
+		meta.SetStatusCondition(&sig.Status.Conditions, metav1.Condition{
+			Type:               ConditionSigned,
+			Status:             metav1.ConditionFalse,
+			Reason:             "SignatureNotFound",
+			Message:            missing,
+			ObservedGeneration: sig.Generation,
+		})
+		if err := s.Client.Status().Update(ctx, &sig); err != nil {
+			return fmt.Errorf("updating ImageSignature status: %w", err)
+		}
+		log.Info("Build signature not found; ImageSignature left Pending", "reason", missing)
+		return nil
 	}
 
-	if updateErr := s.Client.Status().Update(ctx, &sig); updateErr != nil {
-		return fmt.Errorf("updating ImageSignature status: %w", updateErr)
+	sig.Status.Phase = PhaseSigned
+	sig.Status.Subject = signature.Subject
+	sig.Status.Issuer = signature.Issuer
+	sig.Status.RekorLogIndex = signature.RekorLogIndex
+	sig.Status.RekorLogID = signature.RekorLogID
+	sig.Status.Certificate = signature.Certificate
+	sig.Status.CertificateFingerprint = signature.CertificateFingerprint
+	sig.Status.KeyFingerprint = signature.KeyFingerprint
+	sig.Status.SignedAt = signature.IntegratedAt
+	meta.SetStatusCondition(&sig.Status.Conditions, metav1.Condition{
+		Type:               ConditionSigned,
+		Status:             metav1.ConditionTrue,
+		Reason:             "SignatureLogged",
+		Message:            fmt.Sprintf("Signed by %s; transparency log entry %d", signature.Subject, *signature.RekorLogIndex),
+		ObservedGeneration: sig.Generation,
+	})
+	if err := s.Client.Status().Update(ctx, &sig); err != nil {
+		return fmt.Errorf("updating ImageSignature status: %w", err)
 	}
-
-	log.Info("ImageSignature marked Signed",
-		"digest", imageDigest,
-		"rekorLogIndex", rekorLogIndex,
-	)
+	log.Info("ImageSignature recorded",
+		"digest", imageDigest, "subject", signature.Subject, "rekorLogIndex", *signature.RekorLogIndex)
 	return nil
 }
 
@@ -207,64 +229,13 @@ func (s *SignatureReconciler) MarkFailed(
 		return fmt.Errorf("fetching ImageSignature for MarkFailed: %w", err)
 	}
 
-	sig.Status.Phase = "Failed"
+	sig.Status.Phase = PhaseFailed
 	if updateErr := s.Client.Status().Update(ctx, &sig); updateErr != nil {
 		return fmt.Errorf("updating ImageSignature status to Failed: %w", updateErr)
 	}
 
 	log.Info("ImageSignature marked Failed")
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Rekor transparency log query
-// ---------------------------------------------------------------------------
-
-// queryRekorLogIndex searches the Rekor transparency log for the entry
-// corresponding to the given image digest and returns the log index.
-//
-// Uses the Rekor search API:
-//
-//	POST /api/v1/index/retrieve {"hash":"sha256:<digest>"}
-//	→ ["<uuid>", ...]
-//	GET  /api/v1/log/entries/<uuid>
-//	→ {"<uuid>": {"logIndex": N, ...}}
-func queryRekorLogIndex(ctx context.Context, rekorURL, imageDigest string, log logr.Logger) (int64, error) {
-	hc := &http.Client{Timeout: 10 * time.Second}
-	base := strings.TrimRight(rekorURL, "/")
-
-	// Get current tree size — our entry is the latest one (treeSize - 1)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/log", nil)
-	if err != nil {
-		return -1, fmt.Errorf("building Rekor log request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := hc.Do(req)
-	if err != nil {
-		return -1, fmt.Errorf("querying Rekor log: %w", err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return -1, fmt.Errorf("reading Rekor log response: %w", err)
-	}
-
-	var logInfo struct {
-		TreeSize int64 `json:"treeSize"`
-	}
-	if err := json.Unmarshal(data, &logInfo); err != nil {
-		return -1, fmt.Errorf("parsing Rekor log info: %w", err)
-	}
-
-	if logInfo.TreeSize == 0 {
-		return -1, fmt.Errorf("Rekor tree is empty")
-	}
-
-	logIndex := logInfo.TreeSize - 1
-	log.V(1).Info("Rekor tree size", "treeSize", logInfo.TreeSize, "logIndex", logIndex)
-	return logIndex, nil
 }
 
 func boolPtr(b bool) *bool {

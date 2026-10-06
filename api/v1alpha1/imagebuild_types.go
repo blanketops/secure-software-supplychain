@@ -122,13 +122,11 @@ type ImageBuildStatus struct {
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
-	// SignedBy is the principal identity from the Fulcio cert.
+	// SignedBy is the ServiceAccount the build runs as, the principal its
+	// three authorization checks were made for. The certificate that signed
+	// the image is on the build's ImageSignature.
 	// +optional
 	SignedBy string `json:"signedBy,omitempty"`
-
-	// SigningCertPEM is the Fulcio ephemeral cert used for signing.
-	// +optional
-	SigningCertPEM string `json:"signingCertPEM,omitempty"`
 }
 
 // StepStatus tracks an individual pipeline step.

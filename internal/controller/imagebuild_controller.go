@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -52,7 +51,6 @@ const (
 type ImageBuildReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
-	Clientset kubernetes.Interface
 	Mediator  *supplychain.Mediator
 	Recorder  *results.Recorder
 	Pruner    *pruner.Pruner
@@ -71,7 +69,6 @@ type ImageBuildReconciler struct {
 // +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns;pipelines;taskruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=external-secrets.io,resources=externalsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;secrets;events;configmaps,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -148,24 +145,10 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			logger.Error(err, "failed to record ImageBuildResult")
 		}
 
-		// 4b. Reconcile ImageSignature
-		// sigCtx fields are stored on Status before the PipelineRun is created.
-		// Read them back here — the cert and principal survive in Status.
+		// 4b. Reconcile ImageSignature from what was just recorded.
 		if ib.Status.Phase == "Succeeded" {
-			_, imageDigest := results.ExtractImageResults(pr)
-
-			// Get rekorURL from SupplyChain spec
-			rekorURL := ""
-			if sc.Spec.Signing != nil {
-				rekorURL = sc.Spec.Signing.RekorURL
-			}
-
-			if err := r.Signature.MarkSigned(
-				ctx, &ib, imageDigest,
-				[]byte(ib.Status.SigningCertPEM),
-				rekorURL,
-			); err != nil {
-				logger.Error(err, "failed to mark ImageSignature signed")
+			if err := r.recordSignature(ctx, &ib); err != nil {
+				logger.Error(err, "Failed to record ImageSignature")
 			}
 		} else {
 			if err := r.Signature.MarkFailed(ctx, &ib); err != nil {
@@ -277,7 +260,6 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	logger.Info("signing context ready",
 		"identityProvider", identity.Provider,
 		"principal", sigCtx.ScopeProof.Principal,
-		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
 
 	// ── Build image reference ─────────────────────────────────────────────
@@ -292,9 +274,9 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	)
 
 	// ── Ensure ImageSignature (Pending) before PipelineRun ───────────────
-	// Created early so the signing identity is recorded before execution.
-	// The cert and principal are stored on Status so the terminal block
-	// can read them back without needing the sigCtx in scope.
+	// Created early so who the build runs as is on record before execution.
+	// The signature itself is recorded when the build is over, from the
+	// registry and the transparency log.
 	if err := r.Signature.EnsureSignature(ctx, ib, sc, sigCtx, imageRef); err != nil {
 		logger.Error(err, "failed to ensure ImageSignature")
 		// non-fatal — continue
@@ -329,7 +311,6 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	ib.Status.ImageRef = imageRef
 	ib.Status.StartTime = &now
 	ib.Status.SignedBy = sigCtx.ScopeProof.Principal
-	ib.Status.SigningCertPEM = string(sigCtx.Cert.CertPEM)
 	_ = r.Status().Update(ctx, ib)
 
 	return pr, nil, nil
@@ -449,11 +430,32 @@ func (r *ImageBuildReconciler) completeEvidence(
 	if err := r.Recorder.Record(ctx, ib, &pr); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.recordSignature(ctx, ib); err != nil {
+		return ctrl.Result{}, err
+	}
 	if !evidence.ChainsDone(&pr) && pr.Status.CompletionTime != nil &&
 		time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
 		return ctrl.Result{RequeueAfter: evidenceRetry}, nil
 	}
 	return ctrl.Result{}, r.publishResult(ctx, ib, pr.Name)
+}
+
+// recordSignature completes the ImageSignature of a build from the evidence
+// in its ImageBuildResult: the signature as it is stored with the image and
+// logged in Rekor, not as the controller assumes it to be.
+func (r *ImageBuildReconciler) recordSignature(ctx context.Context, ib *supplychainv1alpha1.ImageBuild) error {
+	var result supplychainv1alpha1.ImageBuildResult
+	if err := r.Get(ctx, client.ObjectKeyFromObject(ib), &result); err != nil {
+		return fmt.Errorf("reading ImageBuildResult: %w", err)
+	}
+	var missing string
+	if result.Status.Evidence == nil {
+		missing = "no evidence has been collected for the image yet"
+	} else {
+		missing = result.Status.Evidence.Message
+	}
+	return r.Signature.Record(ctx, ib, result.Status.ImageDigest,
+		evidence.BuildSignature(result.Status.Evidence), missing)
 }
 
 // publishResult creates the CustomRun that shows the ImageBuildResult in
@@ -474,17 +476,8 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := ctrl.Log.WithName("controllers").WithName("ImageBuild")
 	recorder := mgr.GetEventRecorderFor("imagebuild-controller")
 
-	config := mgr.GetConfig()
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
-	}
-
-	r.Clientset = clientset
-
 	r.Mediator = supplychain.New(
 		mgr.GetClient(),
-		clientset,
 		mgr.GetScheme(),
 		log.WithName("mediator"),
 		recorder,

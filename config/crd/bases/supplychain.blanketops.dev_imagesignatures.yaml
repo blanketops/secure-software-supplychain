@@ -20,8 +20,8 @@ spec:
     - jsonPath: .spec.image
       name: Image
       type: string
-    - jsonPath: .spec.signedBy
-      name: SignedBy
+    - jsonPath: .status.subject
+      name: Signer
       type: string
     - jsonPath: .status.phase
       name: Phase
@@ -36,9 +36,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          ImageSignature is the cryptographic audit record of a signed image.
-          Created by the controller after a successful PipelineRun. Carries the
-          full signing identity, Fulcio certificate reference, and Rekor log index.
+          ImageSignature is the audit record of the build's own signature on an
+          image: who signed, with which certificate, and where the transparency log
+          recorded it. Created Pending when a build starts and completed from the
+          registry and the log once the build has signed.
           Owned by the ImageBuild — deleted when the ImageBuild is deleted.
         properties:
           apiVersion:
@@ -88,8 +89,9 @@ spec:
                 type: string
               signedBy:
                 description: |-
-                  SignedBy is the SPIFFE/SPIRE identity of the ServiceAccount that signed.
-                  Sourced from the Fulcio certificate subject.
+                  SignedBy is the ServiceAccount the build runs and signs as, the
+                  principal the three authorization checks were made for. The identity
+                  in the signing certificate is in status.subject.
                   e.g. system:serviceaccount:default:supply-chain-runner
                 type: string
               supplyChain:
@@ -106,12 +108,21 @@ spec:
             - supplyChain
             type: object
           status:
-            description: ImageSignatureStatus defines the observed state of ImageSignature.
+            description: |-
+              ImageSignatureStatus defines the observed state of ImageSignature.
+
+              Everything about the signature here is read back from where it is kept:
+              the signature stored next to the image in the registry, and its entry in
+              the transparency log. None of it is what the controller expects to be true.
             properties:
               certificate:
                 description: |-
-                  Certificate is the PEM-encoded Fulcio ephemeral certificate used to sign.
-                  Stored for audit — the private key is discarded after signing.
+                  Certificate is the PEM-encoded Fulcio certificate that signed the
+                  image, as stored with the signature. Its private key was made for
+                  that one signature and discarded.
+                type: string
+              certificateFingerprint:
+                description: CertificateFingerprint is the SHA-256 of that certificate.
                 type: string
               conditions:
                 description: Conditions represent the current state of the ImageSignature
@@ -174,22 +185,40 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              issuer:
+                description: Issuer is the OIDC issuer Fulcio verified that identity
+                  against.
+                type: string
+              keyFingerprint:
+                description: KeyFingerprint is the SHA-256 of the public key in it.
+                type: string
               phase:
-                description: Phase is the current signing phase.
+                description: |-
+                  Phase is Signed only once the build's signature has been found on the
+                  image together with its transparency log entry. A build that succeeded
+                  but whose signature could not be read stays Pending.
                 enum:
                 - Pending
                 - Signed
                 - Failed
                 type: string
+              rekorLogID:
+                description: RekorLogID identifies the log, by the SHA-256 of its
+                  public key.
+                type: string
               rekorLogIndex:
                 description: |-
-                  RekorLogIndex is the Rekor transparency log entry index.
-                  Populated after successful attestation.
+                  RekorLogIndex is the index of the signature's entry in the transparency
+                  log. Unset until the entry has been found.
                 format: int64
                 type: integer
               signedAt:
-                description: SignedAt is the timestamp when the image was signed.
+                description: SignedAt is when the transparency log accepted the signature.
                 format: date-time
+                type: string
+              subject:
+                description: Subject is the identity in the certificate that signed
+                  the image.
                 type: string
             type: object
         required:

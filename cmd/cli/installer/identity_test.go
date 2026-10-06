@@ -111,9 +111,14 @@ func TestFulcioConfig(t *testing.T) {
 	}
 
 	spiffe := parse(spiffeOptions())
-	// The operator still gets its pre-build certificate with a ServiceAccount token.
-	if spiffe.OIDCIssuers[signerOIDCIssuer].Type != "kubernetes" {
-		t.Error("the SPIFFE config dropped the Kubernetes issuer")
+	// Under SPIFFE an identity is only registered for an authorized
+	// ServiceAccount. A Kubernetes issuer beside it would let any pod get a
+	// certificate with its own ServiceAccount token.
+	if len(spiffe.OIDCIssuers) != 1 {
+		t.Errorf("the SPIFFE config trusts %d issuers, want only SPIRE: %+v", len(spiffe.OIDCIssuers), spiffe.OIDCIssuers)
+	}
+	if _, trusted := spiffe.OIDCIssuers[signerOIDCIssuer]; trusted {
+		t.Error("the SPIFFE config still accepts Kubernetes ServiceAccount tokens")
 	}
 	got := spiffe.OIDCIssuers[spireOIDCIssuer]
 	if got.Type != "spiffe" || got.SPIFFETrustDomain != "blanketops.dev" || got.IssuerURL != spireOIDCIssuer || got.ClientID != "sigstore" {
@@ -313,13 +318,57 @@ func TestStepsToRunFromStep(t *testing.T) {
 	}
 }
 
-// Every key-generating Job named in keyJobs must exist in the manifests, or
-// the guard protects nothing.
-func TestKeyJobsExistInManifests(t *testing.T) {
-	for key := range keyJobs {
+// Every one-time setup Job must exist in the manifests, and every ConfigMap
+// such a Job writes into must be shipped without the value it writes; if a
+// name here drifts from the manifests, the guard protects nothing.
+func TestSetupJobsExistInManifests(t *testing.T) {
+	dirs := map[string]string{
+		"fulcio-system": "dependencies/sigstore/fulcio",
+		"ctlog-system":  "dependencies/sigstore/fulcio",
+		"rekor-system":  "dependencies/sigstore/rekor",
+	}
+	for key, result := range setupJobs {
 		namespace, name, _ := strings.Cut(key, "/")
-		if _, err := findEmbeddedJob("dependencies/sigstore/fulcio", namespace, name); err != nil {
-			t.Errorf("keyJobs names %s, which is not in the Fulcio manifests: %v", key, err)
+		if _, err := findEmbeddedJob(dirs[namespace], namespace, name); err != nil {
+			t.Errorf("setupJobs names %s, which is not in the manifests: %v", key, err)
 		}
+		if result.ConfigMap != "" && setupResults[namespace+"/"+result.ConfigMap] != result.Key {
+			t.Errorf("%s writes %s of ConfigMap %s, which is not protected from being re-applied",
+				key, result.Key, result.ConfigMap)
+		}
+	}
+	for key, resultKey := range setupResults {
+		namespace, name, _ := strings.Cut(key, "/")
+		var shipped *unstructured.Unstructured
+		for _, obj := range decodeAll(t, dirs[namespace]+"/release.yaml") {
+			if obj.GetKind() == "ConfigMap" && obj.GetNamespace() == namespace && obj.GetName() == name {
+				shipped = obj
+			}
+		}
+		if shipped == nil {
+			t.Errorf("setupResults names ConfigMap %s, which is not in the manifests", key)
+			continue
+		}
+		if holdsSetupResult(shipped, resultKey) {
+			t.Errorf("the manifest for %s sets %s itself", key, resultKey)
+		}
+	}
+}
+
+// Re-applying the manifests must not start a new transparency log. A setup
+// Job is skipped once its result exists, and a ConfigMap holding a result is
+// not replaced by the placeholder the manifests ship.
+func TestSetupResultsAreRecognised(t *testing.T) {
+	configMap := func(data map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"kind": "ConfigMap", "data": data}}
+	}
+	if holdsSetupResult(configMap(map[string]any{"__placeholder": "#"}), "treeID") {
+		t.Error("a ConfigMap with only the placeholder is taken to hold a tree")
+	}
+	if holdsSetupResult(configMap(nil), "treeID") {
+		t.Error("an empty ConfigMap is taken to hold a tree")
+	}
+	if !holdsSetupResult(configMap(map[string]any{"__placeholder": "#", "treeID": "6084574800880051828"}), "treeID") {
+		t.Error("a ConfigMap with a tree ID is not recognised")
 	}
 }

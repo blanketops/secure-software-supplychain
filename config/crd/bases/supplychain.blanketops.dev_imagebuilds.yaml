@@ -194,11 +194,10 @@ spec:
                   driving this build.
                 type: string
               signedBy:
-                description: SignedBy is the principal identity from the Fulcio cert.
-                type: string
-              signingCertPEM:
-                description: SigningCertPEM is the Fulcio ephemeral cert used for
-                  signing.
+                description: |-
+                  SignedBy is the ServiceAccount the build runs as, the principal its
+                  three authorization checks were made for. The certificate that signed
+                  the image is on the build's ImageSignature.
                 type: string
               startTime:
                 description: StartTime is when the build began.

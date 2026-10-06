@@ -22,7 +22,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -34,11 +33,10 @@ import (
 )
 
 type Mediator struct {
-	Client    client.Client
-	Clientset kubernetes.Interface
-	Scheme    *runtime.Scheme
-	Log       logr.Logger
-	Recorder  record.EventRecorder
+	Client   client.Client
+	Scheme   *runtime.Scheme
+	Log      logr.Logger
+	Recorder record.EventRecorder
 
 	GitSSHExternalSecretReconciler    *git.GitSSHSecretReconciler
 	RegistryExternalSecretReconciler  *registry.RegistrySecretReconciler
@@ -47,17 +45,15 @@ type Mediator struct {
 
 func New(
 	c client.Client,
-	clientset kubernetes.Interface,
 	scheme *runtime.Scheme,
 	log logr.Logger,
 	recorder record.EventRecorder,
 ) *Mediator {
 	return &Mediator{
-		Client:    c,
-		Clientset: clientset,
-		Scheme:    scheme,
-		Log:       log,
-		Recorder:  recorder,
+		Client:   c,
+		Scheme:   scheme,
+		Log:      log,
+		Recorder: recorder,
 
 		GitSSHExternalSecretReconciler:    git.NewGitSSHSecretReconciler(c, log),
 		RegistryExternalSecretReconciler:  registry.NewRegistrySecretReconciler(c, log),
@@ -129,7 +125,7 @@ func (m *Mediator) EnsurePrerequisites(
 	return true, nil
 }
 
-// EstablishSigningContext drives the authorization + signing flow.
+// EstablishSigningContext reviews the build ServiceAccount for this run.
 // Called by the controller AFTER EnsurePrerequisites returns true.
 //
 // Same pattern as the secret reconcilers — a separate block that the
@@ -151,17 +147,9 @@ func (m *Mediator) EstablishSigningContext(
 		saName = "default"
 	}
 
-	fulcioURL := signing.EndpointsFor(sc).FulcioURL
+	log.Info("establishing signing context", "serviceAccount", saName)
 
-	log.Info("establishing signing context",
-		"serviceAccount", saName,
-		"fulcioURL", fulcioURL,
-	)
-
-	sigCtx, err := signing.EstablishSigningContext(
-		ctx, m.Client, m.Clientset,
-		fulcioURL, saName, ib.Namespace,
-	)
+	sigCtx, err := signing.EstablishSigningContext(ctx, m.Client, saName, ib.Namespace)
 	if err != nil {
 		log.Error(err, "signing context failed")
 		m.recordWarning(ib, "SigningContextFailed", err)
@@ -173,7 +161,6 @@ func (m *Mediator) EstablishSigningContext(
 		"scopeAllowed", sigCtx.ScopeProof.Allowed,
 		"intentAllowed", sigCtx.IntentProof.Allowed,
 		"outputAllowed", sigCtx.OutputProof.Allowed,
-		"certExpiry", sigCtx.Cert.ExpiresAt,
 	)
 	return sigCtx, nil
 }

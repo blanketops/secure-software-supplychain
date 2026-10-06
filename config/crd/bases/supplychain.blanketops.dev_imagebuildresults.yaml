@@ -253,6 +253,11 @@ spec:
                         it is stored in the registry next to it, together with where it was
                         recorded in the transparency log.
                       properties:
+                        certificate:
+                          description: |-
+                            certificate is that certificate, PEM-encoded. With it and the log
+                            entry, the signature can be verified again by anyone, at any time.
+                          type: string
                         certificateFingerprint:
                           description: |-
                             certificateFingerprint is the SHA-256 of the Fulcio certificate that

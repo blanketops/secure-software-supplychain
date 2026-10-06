@@ -55,7 +55,7 @@ API group: `supplychain.blanketops.dev/v1alpha1`
 | `SupplyChainPolicy` | The admission side of a SupplyChain. Renders the policy-controller `TrustRoot` and `ClusterImagePolicies` that decide which of its images may run. |
 | `GitHubWebhook` | Registers the push webhook on the GitHub repository and keeps it registered. |
 | `ImageBuild` | One execution of the pipeline. Created by a push, or by hand. Owns the `PipelineRun` and tracks each step. |
-| `ImageSignature` | The signing record of a build: who signed, with which certificate, and the Rekor index. |
+| `ImageSignature` | The record of the build's own signature, read back from the registry and Rekor: the signer, the certificate, the log index and when it was logged. |
 | `ImageBuildResult` | The durable record of a build. Survives PipelineRun pruning. Git provenance, digest, scan counts, policy verification. |
 
 ![Supply Chain Architecture](docs/architecture.png)
@@ -82,7 +82,9 @@ How a workload proves who it is to Fulcio is a cluster-wide choice, made at inst
 | `spiffe` | A JWT-SVID from [SPIRE](https://spiffe.io), fetched over the SPIFFE Workload API | `spiffe://<trust-domain>/ns/<ns>/sa/<sa>` |
 
 With `spiffe`, the installer also installs SPIRE (server, agent, CSI driver, OIDC discovery), tells Fulcio to accept
-identities from the trust domain, and gives Tekton Chains the Workload API socket. The pipeline's sign, attest and
+identities from the trust domain and nothing else, and gives Tekton Chains the Workload API socket. Fulcio then
+refuses Kubernetes ServiceAccount tokens: a pod cannot get a certificate with the token it already has, only
+with an identity that was registered for it. The pipeline's sign, attest and
 verify steps and the default signers of every `SupplyChainPolicy` follow, because they all read the identity from
 the Chains config (`signers.x509.fulcio.provider` and `.issuer`) and the trust domain from Tekton's `config-spire`.
 
@@ -162,7 +164,8 @@ All three must be allowed:
 | Intent | `imagebuilds` | `create` | It may start a build |
 | Output | `imagesignatures` | `create` | It may produce signing records |
 
-Then a short-lived token is minted for the ServiceAccount and exchanged with Fulcio for a signing certificate.
+The controller holds no signing material. The steps that sign obtain their own certificate from Fulcio inside the
+build, with the build's identity; the operator has no permission to mint ServiceAccount tokens.
 
 **Gate 3: the PipelineRun.** Created with the proofs injected. An `ImageSignature` is created as `Pending` first,
 so the signing identity is on record before anything runs.
@@ -171,8 +174,14 @@ After signing, the three proofs are attached to the image with `cosign attest` (
 `https://blanketops.dev/attestations/authorization/v1`), signed by the same keyless identity. The signature says
 who built the image. The attestation says that identity was authorized, according to the API server, when it did.
 
-When the PipelineRun finishes, the controller records an `ImageBuildResult`, marks the `ImageSignature` `Signed`
-or `Failed`, and prunes old PipelineRuns (the last 3 succeeded and 1 failed are kept).
+When the PipelineRun finishes, the controller records an `ImageBuildResult` and prunes old PipelineRuns (the
+last 3 succeeded and 1 failed are kept).
+
+The `ImageSignature` is then completed from the evidence, not from the outcome of the run. It becomes `Signed`
+only when the build's signature is found on the image together with its Rekor entry, and its fields are that
+signature's own: the certificate subject and issuer, the certificate itself, the log index and ID, and the time
+the log accepted it. A build that succeeded but whose signature could not be read stays `Pending`, and the
+`Signed` condition says why. A failed build is marked `Failed`.
 
 ---
 
@@ -591,6 +600,12 @@ CT log's trusted root (`ctlog-secret`, key `fulcio-0`) is the current Fulcio roo
 
 **Fulcio returns 500 "Error entering certificate in CTL".** Same cause, seen from the other side: the CT log
 does not trust Fulcio's current root.
+
+**Re-running the installer.** It is safe: steps that already ran are applied again without replacing what must
+only be made once. The keys Fulcio, the CT log and Rekor sign with, and the Merkle trees behind Rekor and the CT
+log, are created on first install and never again. (A new tree would be a new, empty log: every earlier signature
+would be "not found in the transparency log" and its image refused.) Use `--from-step "<name>"` to resume at a
+step.
 
 **SonarQube restarts with "No shard available".** Its Elasticsearch refuses to allocate indexes when the disk
 is more than 90% full. Free space on the node's disk.

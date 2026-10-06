@@ -226,6 +226,24 @@ func TestSignsWithSPIFFEIdentity(t *testing.T) {
 		}
 	}
 
+	// No task of a SPIFFE build carries a ServiceAccount token for Fulcio:
+	// it would be a second credential beside the one that was authorized.
+	for _, task := range pr.Spec.PipelineSpec.Tasks {
+		if task.TaskSpec == nil {
+			continue
+		}
+		for _, volume := range task.TaskSpec.TaskSpec.Volumes {
+			if volume.Projected != nil {
+				t.Errorf("task %s mounts projected token volume %q under SPIFFE", task.Name, volume.Name)
+			}
+		}
+	}
+	auth := findTask(t, pr, stepAuthFulcio).TaskSpec.TaskSpec
+	if script := auth.Steps[0].Script; !strings.Contains(script, signing.SPIFFESocketPath) ||
+		strings.Contains(script, "oidc-token") {
+		t.Errorf("the Fulcio check does not look for the Workload API socket:\n%s", script)
+	}
+
 	verify := findTask(t, pr, stepVerify)
 	if got, want := param(t, verify.Params, "IDENTITY"), "spiffe://blanketops.dev/ns/default/sa/supply-chain-runner"; got != want {
 		t.Errorf("verify IDENTITY = %q, want %q", got, want)

@@ -105,12 +105,19 @@ func fulcioConfig(opts Options) (string, error) {
 		Type              string `json:"Type"`
 		SPIFFETrustDomain string `json:"SPIFFETrustDomain,omitempty"`
 	}
+	// One issuer, the one the cluster signs with. Fulcio certifies whatever
+	// an issuer it trusts vouches for. Under SPIFFE an identity exists only
+	// for a ServiceAccount that passed its authorization checks; if Fulcio
+	// accepted Kubernetes tokens as well, any pod could present its own
+	// ServiceAccount token and be issued a certificate without them.
 	issuers := map[string]issuer{
 		signerOIDCIssuer: {IssuerURL: signerOIDCIssuer, ClientID: "sigstore", Type: "kubernetes"},
 	}
 	if opts.SigningIdentity == IdentitySPIFFE {
-		issuers[spireOIDCIssuer] = issuer{
-			IssuerURL: spireOIDCIssuer, ClientID: "sigstore", Type: "spiffe", SPIFFETrustDomain: opts.TrustDomain,
+		issuers = map[string]issuer{
+			spireOIDCIssuer: {
+				IssuerURL: spireOIDCIssuer, ClientID: "sigstore", Type: "spiffe", SPIFFETrustDomain: opts.TrustDomain,
+			},
 		}
 	}
 	data, err := json.MarshalIndent(map[string]any{"OIDCIssuers": issuers, "MetaIssuers": map[string]any{}}, "", "  ")

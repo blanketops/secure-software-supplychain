@@ -281,6 +281,7 @@ func describeSigner(record *supplyv1alpha1.SignatureRecord, certPEM string, opts
 		record.SignedBy = SignedByChains
 	}
 
+	record.Certificate = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	record.CertificateFingerprint = fingerprint(cert.Raw)
 	record.KeyFingerprint = fingerprint(cert.RawSubjectPublicKeyInfo)
 	notBefore, notAfter := metav1.NewTime(cert.NotBefore.UTC()), metav1.NewTime(cert.NotAfter.UTC())
@@ -332,4 +333,21 @@ func fingerprint(der []byte) string {
 func isNotFound(err error) bool {
 	var terr *transport.Error
 	return errors.As(err, &terr) && terr.StatusCode == http.StatusNotFound
+}
+
+// BuildSignature returns the build's own signature of the image, with its
+// transparency log entry, or nil when the evidence does not hold one. A
+// signature whose log entry was not found does not count: without the entry
+// nothing shows it was made while its certificate was valid.
+func BuildSignature(evidence *supplyv1alpha1.BuildEvidence) *supplyv1alpha1.SignatureRecord {
+	if evidence == nil {
+		return nil
+	}
+	for i := range evidence.Signatures {
+		record := &evidence.Signatures[i]
+		if record.Kind == KindSignature && record.SignedBy == SignedByBuild && record.RekorLogIndex != nil {
+			return record
+		}
+	}
+	return nil
 }

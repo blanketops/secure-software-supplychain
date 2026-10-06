@@ -124,6 +124,11 @@ type SignatureRecord struct {
 	// +optional
 	CertificateFingerprint string `json:"certificateFingerprint,omitempty"`
 
+	// certificate is that certificate, PEM-encoded. With it and the log
+	// entry, the signature can be verified again by anyone, at any time.
+	// +optional
+	Certificate string `json:"certificate,omitempty"`
+
 	// notBefore and notAfter are the validity of that certificate. The
 	// signature must have been logged inside it.
 	// +optional

@@ -46,6 +46,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/static"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 )
 
 const (
@@ -285,6 +287,20 @@ func TestCollect(t *testing.T) {
 			t.Errorf("record %d: key %q, certificate %q", i, r.KeyFingerprint, r.CertificateFingerprint)
 		}
 	}
+	// The build's signature is the one its ImageSignature is completed from.
+	build := BuildSignature(&supplyv1alpha1.BuildEvidence{Signatures: records})
+	if build == nil || *build.RekorLogIndex != 33 || build.Certificate != buildCert {
+		t.Errorf("BuildSignature = %+v, want the build's signature at 33 with its certificate", build)
+	}
+	// Chains' signatures and the build's attestation are not it.
+	withoutIt := append(append([]supplyv1alpha1.SignatureRecord{}, records[:2]...), records[3])
+	if got := BuildSignature(&supplyv1alpha1.BuildEvidence{Signatures: withoutIt}); got != nil {
+		t.Errorf("BuildSignature = %+v, want none when the build did not sign", got)
+	}
+	if BuildSignature(nil) != nil {
+		t.Error("BuildSignature of no evidence is not nil")
+	}
+
 	// One certificate, and so one key, per signer.
 	if records[1].KeyFingerprint != records[0].KeyFingerprint || records[1].KeyFingerprint == records[2].KeyFingerprint {
 		t.Errorf("key fingerprints do not follow the signers: %q %q %q",

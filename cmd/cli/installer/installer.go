@@ -567,37 +567,71 @@ func (i *Installer) stepsToRun() ([]step, error) {
 	return nil, fmt.Errorf("no step %q; the steps are: %s", i.opts.FromStep, strings.Join(names, ", "))
 }
 
-// keyJobs are the setup Jobs that generate key material, and the Secret each
-// one writes it to.
-var keyJobs = map[string]string{
-	"fulcio-system/fulcio-createcerts":         "fulcio-server-secret",
-	"ctlog-system/fulcio-ctlog-createctconfig": "ctlog-secret",
+// setupResult is where a one-time setup Job leaves what it made: a Secret, or
+// one key of a ConfigMap.
+type setupResult struct {
+	Secret    string
+	ConfigMap string
+	Key       string
 }
 
-// keyJobAlreadyRan reports whether obj is a key-generating Job whose keys
-// already exist.
+// setupJobs are the Jobs that must run exactly once in the life of a cluster,
+// and the result that shows each one has.
 //
-// Finished Jobs are removed by their TTL, so on a later run the Job is simply
-// missing. Creating it again would generate new keys while Fulcio and the CT
-// log keep serving with the ones they loaded at startup, and the trust anchors
-// would then be collected from keys nothing signs with.
-func (i *Installer) keyJobAlreadyRan(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+// They generate what cannot be generated twice: the keys Fulcio and the CT log
+// sign with, and the Merkle trees behind Rekor and the CT log. Finished Jobs
+// are removed by their TTL, so on a later run the Job is simply missing. Run
+// again, the key Jobs replace keys that everything already trusts, and the
+// tree Jobs start a new, empty log: every signature made before then is "not
+// found in the transparency log", and every image carrying one is refused at
+// admission.
+var setupJobs = map[string]setupResult{
+	"fulcio-system/fulcio-createcerts":         {Secret: "fulcio-server-secret"},
+	"ctlog-system/fulcio-ctlog-createctconfig": {Secret: "ctlog-secret"},
+	"ctlog-system/ctlog-createtree":            {ConfigMap: "ctlog-config", Key: "treeID"},
+	"rekor-system/rekor-createtree":            {ConfigMap: "rekor-config", Key: "treeID"},
+}
+
+// setupResults are the ConfigMaps a setup Job writes its result into, and the
+// key it writes. The manifests ship them holding a placeholder only; applying
+// that over one a Job has filled in would erase the tree the log lives in.
+var setupResults = map[string]string{
+	"ctlog-system/ctlog-config": "treeID",
+	"rekor-system/rekor-config": "treeID",
+}
+
+// setupJobAlreadyRan reports whether obj is a one-time setup Job whose result
+// already exists.
+func (i *Installer) setupJobAlreadyRan(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
 	if obj.GetKind() != "Job" {
 		return false, nil
 	}
-	secret, isKeyJob := keyJobs[obj.GetNamespace()+"/"+obj.GetName()]
-	if !isKeyJob {
+	result, isSetupJob := setupJobs[obj.GetNamespace()+"/"+obj.GetName()]
+	if !isSetupJob {
 		return false, nil
 	}
-	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-	_, err := i.dynamic.Resource(secretGVR).Namespace(obj.GetNamespace()).Get(ctx, secret, metav1.GetOptions{})
+	name, gvr := result.Secret, schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	if result.ConfigMap != "" {
+		name, gvr = result.ConfigMap, configMapGVR
+	}
+	found, err := i.dynamic.Resource(gvr).Namespace(obj.GetNamespace()).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("checking for %s/%s: %w", obj.GetNamespace(), secret, err)
+		return false, fmt.Errorf("checking for %s/%s: %w", obj.GetNamespace(), name, err)
 	}
-	return true, nil
+	if result.Key == "" {
+		return true, nil
+	}
+	return holdsSetupResult(found, result.Key), nil
+}
+
+// holdsSetupResult reports whether a ConfigMap already carries the value a
+// setup Job writes under key.
+func holdsSetupResult(cm *unstructured.Unstructured, key string) bool {
+	value, _, _ := unstructured.NestedString(cm.Object, "data", key)
+	return value != ""
 }
 
 // Uninstall removes all supply chain dependencies in reverse order.
@@ -1269,7 +1303,7 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	}
 	existing, err := dr.Get(ctx, obj.GetName(), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		if done, err := i.keyJobAlreadyRan(ctx, obj); err != nil || done {
+		if done, err := i.setupJobAlreadyRan(ctx, obj); err != nil || done {
 			return err
 		}
 		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
@@ -1277,6 +1311,11 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	}
 	if err != nil {
 		return err
+	}
+	// A ConfigMap a setup Job has written its result into is left alone.
+	if key, ok := setupResults[obj.GetNamespace()+"/"+obj.GetName()]; ok && obj.GetKind() == "ConfigMap" &&
+		holdsSetupResult(existing, key) {
+		return nil
 	}
 	obj.SetResourceVersion(existing.GetResourceVersion())
 	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})

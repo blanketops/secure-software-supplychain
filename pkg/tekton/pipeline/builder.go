@@ -215,7 +215,7 @@ func buildTaskList(
 	// Step 2: auth-fulcio — obtain CA cert as init, before anything else
 	// Must be early so signing credentials are warm and ready
 	if sc.Spec.Steps.Sign {
-		tasks = append(tasks, authFulcioTask(sc, last))
+		tasks = append(tasks, authFulcioTask(sc, last, sigCtx.SigningIdentity()))
 		last = stepAuthFulcio
 	}
 
@@ -295,8 +295,30 @@ func gitCloneTask() tektonv1.PipelineTask {
 	}
 }
 
-func authFulcioTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.PipelineTask {
+// authFulcioTask fails the build early, before anything is scanned or built,
+// when it could not sign at the end: it checks that the build has the
+// credential it will present to Fulcio, and that Fulcio is there.
+//
+// The credential is the one the signing steps use and no other. Under SPIFFE
+// that is the Workload API socket; no ServiceAccount token for Fulcio is
+// mounted into a build that does not sign with one.
+func authFulcioTask(sc *supplyv1alpha1.SupplyChain, runAfter string, as signing.Identity) tektonv1.PipelineTask {
 	fulcio := signing.EndpointsFor(sc).FulcioURL
+	source := identitySourceFor(as)
+
+	check := `TOKEN=$(cat /var/run/sigstore/cosign/oidc-token)
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: OIDC token is empty"
+  exit 1
+fi
+echo "OIDC token acquired successfully"`
+	if as.IsSPIFFE() {
+		check = `if [ ! -S "` + signing.SPIFFESocketPath + `" ]; then
+  echo "ERROR: no SPIFFE Workload API socket at ` + signing.SPIFFESocketPath + `"
+  exit 1
+fi
+echo "SPIFFE Workload API socket present"`
+	}
 
 	return tektonv1.PipelineTask{
 		Name:     stepAuthFulcio,
@@ -306,42 +328,15 @@ func authFulcioTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.Pi
 				Params: []tektonv1.ParamSpec{
 					{Name: "FULCIO_URL", Type: tektonv1.ParamTypeString},
 				},
-				Volumes: []corev1.Volume{
-					{
-						Name: "oidc-info",
-						VolumeSource: corev1.VolumeSource{
-							Projected: &corev1.ProjectedVolumeSource{
-								Sources: []corev1.VolumeProjection{
-									{
-										ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
-											Path:              "oidc-token",
-											ExpirationSeconds: int64Ptr(600),
-											Audience:          "sigstore",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
+				Volumes: []corev1.Volume{source.volume},
 				Steps: []tektonv1.Step{
 					{
-						Name:  "verify-fulcio",
-						Image: "curlimages/curl:latest",
-						VolumeMounts: []corev1.VolumeMount{
-							{
-								Name:      "oidc-info",
-								MountPath: "/var/run/sigstore/cosign",
-							},
-						},
+						Name:         "verify-fulcio",
+						Image:        "curlimages/curl:latest",
+						VolumeMounts: []corev1.VolumeMount{source.mount},
 						Script: `#!/bin/sh
 set -e
-TOKEN=$(cat /var/run/sigstore/cosign/oidc-token)
-if [ -z "$TOKEN" ]; then
-  echo "ERROR: OIDC token is empty"
-  exit 1
-fi
-echo "OIDC token acquired successfully"
+` + check + `
 echo "Verifying Fulcio endpoint: $(params.FULCIO_URL)"
 curl -sf $(params.FULCIO_URL)/api/v1/rootCert > /dev/null
 echo "Fulcio reachable and ready"
