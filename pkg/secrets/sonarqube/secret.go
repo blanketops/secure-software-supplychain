@@ -76,7 +76,9 @@ func (r *SonarQubeSecretReconciler) Reconcile(
 				},
 			},
 			"spec": map[string]any{
-				"refreshInterval": "0s",
+				// Kept in step with the store: a token replaced there reaches
+				// the builds without anyone having to recreate this.
+				"refreshInterval": "1m",
 				"secretStoreRef": map[string]any{
 					"name": "secure-software-supply-chain-store",
 					"kind": "ClusterSecretStore",

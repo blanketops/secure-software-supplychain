@@ -1,0 +1,118 @@
+# Not from the SonarQube chart. The database SonarQube keeps its users, tokens,
+# settings and analysis in, and the volume for its own data directory.
+#
+# The image is the one Tekton Results already runs, so nothing more is pulled.
+# The password is not here: the installer generates it once and stores it in
+# the sonarqube-postgresql Secret, before any of this is applied.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-data
+  namespace: default
+  labels:
+    app: sonarqube
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube-postgresql
+  namespace: default
+  labels:
+    app: sonarqube-postgresql
+spec:
+  selector:
+    app: sonarqube-postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sonarqube-postgresql
+  namespace: default
+  labels:
+    app: sonarqube-postgresql
+spec:
+  replicas: 1
+  serviceName: sonarqube-postgresql
+  selector:
+    matchLabels:
+      app: sonarqube-postgresql
+  template:
+    metadata:
+      labels:
+        app: sonarqube-postgresql
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: postgresql
+          image: bitnami/postgresql@sha256:ac8dd0d6512c4c5fb146c16b1c5f05862bd5f600d73348506ab4252587e7fcc6
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          env:
+            - name: POSTGRESQL_DATABASE
+              value: sonarqube
+            - name: POSTGRESQL_USERNAME
+              value: sonarqube
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sonarqube-postgresql
+                  key: password
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "sonarqube", "-d", "sonarqube", "-h", "127.0.0.1"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /bitnami/postgresql
+            - name: tmp
+              mountPath: /tmp
+            - name: postgresql-conf
+              mountPath: /opt/bitnami/postgresql/conf
+            - name: postgresql-tmp
+              mountPath: /opt/bitnami/postgresql/tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: postgresql-conf
+          emptyDir: {}
+        - name: postgresql-tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi

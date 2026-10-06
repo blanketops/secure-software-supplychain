@@ -210,6 +210,20 @@ spec:
                 secretKeyRef:
                   name: sonarqube-sonarqube-monitoring-passcode
                   key: SONAR_WEB_SYSTEMPASSCODE
+            # Not the chart's default. Without a JDBC URL SonarQube runs on its
+            # embedded H2 database, which is for evaluation only and lived in an
+            # emptyDir: every restart lost the admin password, the tokens and
+            # all analysis. The database is in postgresql.yaml; the installer
+            # creates its password once, in the sonarqube-postgresql Secret.
+            - name: SONAR_JDBC_URL
+              value: jdbc:postgresql://sonarqube-postgresql.default.svc.cluster.local:5432/sonarqube
+            - name: SONAR_JDBC_USERNAME
+              value: sonarqube
+            - name: SONAR_JDBC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sonarqube-postgresql
+                  key: password
             - name: SONAR_WEB_CONTEXT
               value: /sonarqube/
             - name: SONAR_WEB_JAVAOPTS
@@ -288,52 +302,12 @@ spec:
             items:
               - key: init_sysctl.sh
                 path: init_sysctl.sh
+        # A claim of its own rather than a volumeClaimTemplate, which cannot be
+        # added to a StatefulSet that already exists. Holds the search index
+        # and installed plugins, so a restart does not rebuild them.
         - name: sonarqube
-          emptyDir:
-            {}
+          persistentVolumeClaim:
+            claimName: sonarqube-data
         - name : tmp-dir
           emptyDir:
             {}
----
-# Source: sonarqube/templates/tests/sonarqube-test.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: "sonarqube-ui-test"
-  annotations:
-    "helm.sh/hook": test-success
-    # Disable Istio sidecar injection for this test pod
-    "sidecar.istio.io/inject": "false"
-  labels:
-    app: sonarqube
-    chart: sonarqube-2026.2.1
-    release: sonarqube
-    heritage: Helm
-spec:
-  automountServiceAccountToken: false
-  containers:
-    - name: sonarqube-ui-test
-      image: "sonarqube:26.3.0.120487-community"
-      imagePullPolicy: IfNotPresent
-      command: ['curl']
-      args: [
-        '--retry-connrefused',
-        '--retry',
-        '12',
-        '--retry-delay',
-        '1',
-        '--max-time',
-        '5',
-        '-s',
-        'sonarqube-sonarqube:9000/api/system/status'
-        ]
-      resources:
-        limits:
-          cpu: 500m
-          ephemeral-storage: 1000M
-          memory: 200M
-        requests:
-          cpu: 500m
-          ephemeral-storage: 100M
-          memory: 200M
-  restartPolicy: Never

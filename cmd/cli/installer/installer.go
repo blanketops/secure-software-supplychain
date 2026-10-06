@@ -329,6 +329,20 @@ var installOrder = []step{
 	{
 		Name:  "SonarQube",
 		Paths: []string{"dependencies/sonarqube"},
+		// Both SonarQube and its database read the password when they start.
+		PreHook: func(ctx context.Context, i *Installer) error {
+			return i.ensureSonarQubeDatabasePassword(ctx)
+		},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for the SonarQube database to be ready...")
+			waitSp.start()
+			if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarDatabaseSTS, readyTimeout); err != nil {
+				waitSp.fail("SonarQube database not ready")
+				return err
+			}
+			waitSp.succeed("SonarQube database ready")
+			return nil
+		},
 	},
 }
 
