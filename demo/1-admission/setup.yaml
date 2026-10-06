@@ -1,0 +1,8 @@
+# The namespace demo 1 runs its three pods in. The label is what puts a
+# namespace under the policy controller's admission webhook.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: admission-demo
+  labels:
+    policy.sigstore.dev/include: "true"

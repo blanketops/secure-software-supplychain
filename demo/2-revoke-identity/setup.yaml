@@ -42,3 +42,34 @@ subjects:
 - kind: ServiceAccount
   name: supply-chain-runner
   namespace: demo
+---
+# Not part of what the demo shows: every SupplyChain runs a Tekton
+# EventListener as its build ServiceAccount, and it needs Tekton's own
+# listener permissions to start. These are not among the three permissions the
+# build is reviewed for, so deleting the RoleBinding above still revokes them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: your-app-eventlistener
+  namespace: demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-roles
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: demo-your-app-eventlistener
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-clusterroles
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-runner
+  namespace: demo
