@@ -5,7 +5,7 @@ verified, and only then allowed to run. Built with Kubebuilder, driven by Tekton
 
 > "Treat your pipeline as infrastructure, not a script."
 
-It is part of the [BlanketOps](https://github.com/ntlaletsi70) platform engineering project.
+It is part of the [BlanketOps](https://github.com/blanketops) platform engineering project.
 
 ---
 
