@@ -1,7 +1,7 @@
 <!--
 Draft for Medium, part 2 of 2. Medium has no tables, so this uses lists and code blocks only.
 Images: Medium takes no SVG. Upload the PNGs from docs/articles/diagrams/ and the GIFs from demo/;
-the caption for each is the italic line under it. Demo 4 is not recorded yet.
+the caption for each is the italic line under it.
 -->
 
 # A record that said "Signed" had never looked at the signature
@@ -120,7 +120,9 @@ A transparency log that can be swapped out by re-running an install script is no
 
 ## From a push to a running image
 
-<!-- demo 4 goes here once recorded: demo/4-push-to-build/demo.gif, "One git push. Nothing after it is started by hand." -->
+![One git push, then a build, a signature and an admitted image](../../demo/4-push-to-build/demo.gif)
+
+*One git push. Nothing after it is started by hand.*
 
 Put together: a push reaches the cluster through a Tailscale Funnel, a build starts on its own, the image is signed by two identities and logged, and the admission policy accepts it.
 

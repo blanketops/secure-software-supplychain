@@ -13,10 +13,8 @@ the Tekton Dashboard, photographed every few seconds while a build runs.
 | [1. Only what the supply chain built may run](#demo-1-only-what-the-supply-chain-built-may-run) | Admission: one image admitted, two refused | about 50 s |
 | [2. No authorization, no identity, no certificate](#demo-2-no-authorization-no-identity-no-certificate) | A permission revoked and restored, and what Fulcio does each time | about 80 s |
 | [3. What a build leaves behind](#demo-3-what-a-build-leaves-behind) | A build from source to signed image, then its evidence | about 90 s |
+| [4. From a push to a running, verified image](#demo-4-from-a-push-to-a-running-verified-image) | One `git push`, a build that starts on its own, and the image admitted | about 75 s |
 | [5. A build, live in the Tekton Dashboard](#demo-5-a-build-live-in-the-tekton-dashboard) | The nine steps of a successful run in Tekton's own UI | about 40 s |
-
-Demo 4, a build started by a `git push`, has its scripts in [`4-push-to-build/`](4-push-to-build/) but no
-recording yet.
 
 ## Recording them yourself
 
@@ -29,7 +27,7 @@ Each demo has a `run-demo.sh` (the bottom pane), a `screenrc` (the layout) and, 
 own, a `setup.yaml`. The commands below are run from the root of the repository. `--idle-time-limit 2` caps
 every pause at two seconds when the GIF is rendered; the `.cast` file keeps the real timing.
 
-Demos 1 and 3 use real images and a real build. Their scripts display the image repository, the git repository
+Demos 1, 3 and 4 use real images and real builds. Their scripts display the image repository, the git repository
 and the `SupplyChain`'s name as `your-dockerhub-user/your-app`, `your-org/your-app` and `your-app`; the `mask`
 function in each script is the only thing that changes what is shown.
 
@@ -101,6 +99,31 @@ export APP=<supplychain> REPO=docker.io/<user>/<app> GIT_REPO=<org>/<repo> REVIS
 asciinema rec demo/3-evidence/demo.cast -c "screen -c demo/3-evidence/screenrc"
 agg --idle-time-limit 2 demo/3-evidence/demo.cast demo/3-evidence/demo.gif
 ```
+
+## Demo 4: from a push to a running, verified image
+
+![from a push to a running, verified image](4-push-to-build/demo.gif)
+
+An empty commit is pushed to a branch the `SupplyChain` builds. GitHub delivers the push to the cluster through
+[Tailscale Funnel](../docs/installation.md#6-make-the-webhook-reachable-tailscale-funnel), an `ImageBuild` named
+after the branch and the commit appears, and its pipeline runs, one pod per step (top pane). The `ImageSignature`
+then shows the build's signature with its Rekor index, and the image is run in a guarded namespace and admitted.
+Nothing after the push is started by hand except that last `kubectl run`.
+
+It needs the webhook reachable, a clone of the repository you can push from, and the `admission-demo` namespace
+from demo 1. Every recording pushes one empty commit to the branch.
+
+```bash
+kubectl apply -f demo/1-admission/setup.yaml
+
+export APP=<supplychain> REPO=docker.io/<user>/<app> GIT_REPO=<org>/<repo> \
+       BRANCH=<branch> CLONE=<path to your clone>
+asciinema rec demo/4-push-to-build/demo.cast -c "screen -c demo/4-push-to-build/screenrc"
+agg --idle-time-limit 2 demo/4-push-to-build/demo.cast demo/4-push-to-build/demo.gif
+```
+
+The build depends on the registry being reachable throughout: a dropped request while cosign stores the
+signature fails the sign step, and the recording with it.
 
 ## Demo 5: a build, live in the Tekton Dashboard
 

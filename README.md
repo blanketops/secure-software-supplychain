@@ -17,6 +17,12 @@ steps from clone to verified image, each turning green as it finishes, ending on
 
 ![a build, live in the Tekton Dashboard](demo/5-tekton-dashboard/demo.gif)
 
+**[From a push to a running, verified image.](demo/README.md#demo-4-from-a-push-to-a-running-verified-image)**
+One `git push`. GitHub delivers it to the cluster, a build starts on its own, and the image it produces is signed,
+logged and admitted.
+
+![from a push to a running, verified image](demo/4-push-to-build/demo.gif)
+
 **[Only what the supply chain built may run.](demo/README.md#demo-1-only-what-the-supply-chain-built-may-run)** The image the pipeline built is admitted; one signed by Tekton
 Chains alone and one signed by nobody are refused, each refusal naming the policy behind it.
 
