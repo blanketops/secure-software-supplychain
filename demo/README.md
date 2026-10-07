@@ -2,16 +2,21 @@
 
 [← Back to the README](../README.md)
 
-Three terminal recordings of the real thing, each a scripted run of ordinary commands against a live cluster:
-a pane on top watching the cluster, the script below it. They are recorded with
+Recordings of the real thing. Demos 1 to 4 are terminal recordings, each a scripted run of ordinary commands
+against a live cluster: a pane on top watching the cluster, the script below it. They are recorded with
 [asciinema](https://asciinema.org) and rendered with [agg](https://github.com/asciinema/agg) inside a `screen`
-split, in the same style as [knative-ctl](https://github.com/ntlaletsi70/knative-ctl).
+split, in the same style as [knative-ctl](https://github.com/ntlaletsi70/knative-ctl). Demo 5 is a browser:
+the Tekton Dashboard, photographed every few seconds while a build runs.
 
 | Demo | Shows | Plays in |
 |---|---|---|
 | [1. Only what the supply chain built may run](#demo-1-only-what-the-supply-chain-built-may-run) | Admission: one image admitted, two refused | about 50 s |
 | [2. No authorization, no identity, no certificate](#demo-2-no-authorization-no-identity-no-certificate) | A permission revoked and restored, and what Fulcio does each time | about 80 s |
 | [3. What a build leaves behind](#demo-3-what-a-build-leaves-behind) | A build from source to signed image, then its evidence | about 90 s |
+| [5. A build, live in the Tekton Dashboard](#demo-5-a-build-live-in-the-tekton-dashboard) | The nine steps of a successful run in Tekton's own UI | about 40 s |
+
+Demo 4, a build started by a `git push`, has its scripts in [`4-push-to-build/`](4-push-to-build/) but no
+recording yet.
 
 ## Recording them yourself
 
@@ -96,3 +101,32 @@ export APP=<supplychain> REPO=docker.io/<user>/<app> GIT_REPO=<org>/<repo> REVIS
 asciinema rec demo/3-evidence/demo.cast -c "screen -c demo/3-evidence/screenrc"
 agg --idle-time-limit 2 demo/3-evidence/demo.cast demo/3-evidence/demo.gif
 ```
+
+## Demo 5: a build, live in the Tekton Dashboard
+
+![a build, live in the Tekton Dashboard](5-tekton-dashboard/demo.gif)
+
+A successful run as Tekton shows it: the nine tasks of the pipeline, each turning green as it finishes, with the
+logs of whichever one is running. It ends on the last step's report: the image, who signed it, and that the
+build's signature and authorization and Tekton Chains' signature and provenance all verified.
+
+It is a time-lapse, not a screen recording. One frame is taken every few seconds over a build of about three
+minutes, and each frame is a fresh load of the page, opened on the task running at that moment.
+
+The dashboard shows the names of real runs, repositories and images, and a web page cannot be passed through
+`sed`. So the browser reaches the dashboard through `mask-proxy.py`, a small reverse proxy that replaces each
+real name with its placeholder in everything the dashboard returns, and back again in what the browser asks
+for. The dashboard itself is untouched.
+
+It needs `firefox`, and `python3` with [Pillow](https://python-pillow.org) for assembling the GIF. Firefox is
+driven over Marionette, its built-in remote-control protocol; `firefox.py` is the few dozen lines of it that are
+needed, so there is no browser driver to install.
+
+```bash
+export APP=<supplychain> GIT_REPO=<org>/<repo> REVISION=<branch>
+export MAPS="--map <registry-user>/<app>=your-dockerhub-user/your-app --map <org>/<repo>=your-org/your-app --map <supplychain>=your-app"
+demo/5-tekton-dashboard/record.sh
+```
+
+`MAPS` lists every real name and what to show instead, longer names first. Leave it empty to record the
+dashboard as it is.

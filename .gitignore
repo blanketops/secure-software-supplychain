@@ -31,3 +31,7 @@ go.work
 
 # Local ClusterSecretStore with real credentials (ESO fake provider) — never commit
 config/samples/supplychain_v1alpha1_secretsstore.yaml
+
+# Frames of a demo 5 recording in progress
+demo/5-tekton-dashboard/frames/
+__pycache__/

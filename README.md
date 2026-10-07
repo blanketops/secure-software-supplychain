@@ -9,8 +9,13 @@ verified, and only then allowed to run. Built with Kubebuilder, driven by Tekton
 
 ## Demos
 
-Three short terminal recordings of the real thing. The scripts that made them, and how to run them on your own
-cluster, are in [`demo/`](demo/README.md).
+Short recordings of the real thing. The scripts that made them, and how to run them on your own cluster, are in
+[`demo/`](demo/README.md).
+
+**[A build, live in the Tekton Dashboard.](demo/README.md#demo-5-a-build-live-in-the-tekton-dashboard)** Nine
+steps from clone to verified image, each turning green as it finishes, ending on what the last step verified.
+
+![a build, live in the Tekton Dashboard](demo/5-tekton-dashboard/demo.gif)
 
 **[Only what the supply chain built may run.](demo/README.md#demo-1-only-what-the-supply-chain-built-may-run)** The image the pipeline built is admitted; one signed by Tekton
 Chains alone and one signed by nobody are refused, each refusal naming the policy behind it.
