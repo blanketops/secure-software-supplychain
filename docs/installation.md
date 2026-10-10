@@ -117,6 +117,8 @@ supplychain secrets set github   token=@<file holding a GitHub token>
 supplychain secrets list         # which fields are set; never prints a value
 ```
 
+These are the store's keys. Every build asks the store for exactly these secrets and fields:
+
 | Secret | Field | What it is |
 |---|---|---|
 | `supplychain/git` | `ssh-privatekey` | An SSH key that can read the repository |
@@ -147,6 +149,40 @@ The installer's `Vault` step does this once, and can be run again safely:
 The operator never talks to Vault and has no Vault credential. It only creates `ExternalSecret` objects that
 point at the store.
 
+The store the installer creates is this one, also in
+[`config/samples/externalsecrets_v1_clustersecretstore_vault.yaml`](../config/samples/externalsecrets_v1_clustersecretstore_vault.yaml):
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: secure-software-supply-chain-store
+spec:
+  provider:
+    vault:
+      server: http://vault.vault.svc.cluster.local:8200
+      path: secret              # the key-value (version 2) engine
+      version: v2
+      auth:
+        kubernetes:             # no token in the store: it logs in as a ServiceAccount
+          mountPath: kubernetes
+          role: supply-chain
+          serviceAccountRef:
+            name: supply-chain-secrets
+            namespace: vault
+```
+
+An `ExternalSecret` the operator creates then asks it for a field of a secret, for example the SSH key:
+
+```yaml
+spec:
+  refreshInterval: 1m
+  secretStoreRef: { name: secure-software-supply-chain-store, kind: ClusterSecretStore }
+  data:
+  - secretKey: id_rsa
+    remoteRef: { key: supplychain/git, property: ssh-privatekey }
+```
+
 > **Vault's own keys are in the cluster.** Vault seals itself whenever its pod restarts, and a sidecar unseals
 > it with a key the installer keeps in the `vault-unseal` Secret, next to Vault's root token. That is what makes
 > the install self-contained, and it means anyone who can read Secrets in the `vault` namespace can open Vault.
@@ -168,6 +204,10 @@ changed, so what they ask for is fixed. Your store has to answer to the same nam
   `supplychain/github`, `supplychain/sonarqube`);
 - each holding the same fields. The operator asks for a field as a `property` of the secret, so in a store that
   keeps one value per secret, the value is a JSON object with those fields.
+
+[`config/samples/externalsecrets_v1_clustersecretstore_aws.yaml`](../config/samples/externalsecrets_v1_clustersecretstore_aws.yaml)
+is an example for AWS Secrets Manager, with the same names. It is a starting point and has not been run as part
+of this project's tests.
 
 Install without Vault, and have the SonarQube bootstrap hand you the token instead of writing it to Vault:
 

@@ -42,9 +42,9 @@ func externalSecret(key string) *unstructured.Unstructured {
 	}}
 }
 
-// The operator owns its ExternalSecrets: one that reads from somewhere else,
-// whether edited by hand or left over from an older layout, is put back. The
-// defaults External Secrets adds to a spec are not a difference.
+// The operator owns its ExternalSecrets: one edited to read from somewhere
+// else is put back. The defaults External Secrets adds to a spec are not a
+// difference.
 func TestApply(t *testing.T) {
 	scheme := runtime.NewScheme()
 	gvk := schema.GroupVersionKind{Group: "external-secrets.io", Version: "v1", Kind: "ExternalSecret"}
@@ -81,10 +81,10 @@ func TestApply(t *testing.T) {
 		t.Errorf("apply over a defaulted object: %s, %v; want unchanged", outcome, err)
 	}
 
-	// The layout from before Vault, or a hand edit.
+	// A hand edit that points it at another secret.
 	live = read()
 	data, _, _ := unstructured.NestedSlice(live.Object, "spec", "data")
-	data[0].(map[string]any)["remoteRef"] = map[string]any{"key": "/supplychain/git/ssh-privatekey"}
+	data[0].(map[string]any)["remoteRef"] = map[string]any{"key": "somewhere/else", "property": "key"}
 	_ = unstructured.SetNestedSlice(live.Object, data, "spec", "data")
 	if err := c.Update(ctx, live); err != nil {
 		t.Fatal(err)

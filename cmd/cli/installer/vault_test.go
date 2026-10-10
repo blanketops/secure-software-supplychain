@@ -29,6 +29,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"sigs.k8s.io/yaml"
+
 	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
@@ -300,5 +302,35 @@ func TestExternalSecretStoreSkipsVault(t *testing.T) {
 	}
 	if !found {
 		t.Error("the Vault step is missing from a default install")
+	}
+}
+
+// The sample in config/samples is the store as documentation; the installer
+// builds the real one. They must describe the same thing.
+func TestSampleStoreMatchesWhatTheInstallerCreates(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "samples",
+		"externalsecrets_v1_clustersecretstore_vault.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal(data, &sample.Object); err != nil {
+		t.Fatal(err)
+	}
+	created := secretStore()
+	if sample.GetName() != created.GetName() || sample.GetKind() != created.GetKind() ||
+		sample.GetAPIVersion() != created.GetAPIVersion() {
+		t.Errorf("sample is %s %s %s", sample.GetAPIVersion(), sample.GetKind(), sample.GetName())
+	}
+	if !reflect.DeepEqual(sample.Object["spec"], created.Object["spec"]) {
+		t.Errorf("sample spec %v differs from the installer's %v", sample.Object["spec"], created.Object["spec"])
+	}
+	// The comment in the sample lists every secret and field the operator asks for.
+	for group, fields := range store.Groups {
+		for _, want := range append([]string{store.Path(group)}, fields...) {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("the sample does not mention %q", want)
+			}
+		}
 	}
 }
