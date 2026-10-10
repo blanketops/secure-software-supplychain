@@ -47,6 +47,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 const (
@@ -327,6 +328,24 @@ var installOrder = []step{
 		Paths: []string{"dependencies/ingress/routes"},
 	},
 	{
+		// Where the credentials live. External Secrets Operator has to be
+		// installed already: the step ends by creating the store it reads
+		// Vault through.
+		Name:  "Vault",
+		Paths: []string{"dependencies/vault"},
+		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			vaultSp := newSpinner("Initialising and configuring Vault...")
+			vaultSp.start()
+			if err := i.ensureVault(ctx); err != nil {
+				vaultSp.fail("Vault not ready")
+				return err
+			}
+			vaultSp.succeed("Vault ready; ClusterSecretStore " + store.Name + " created")
+			return nil
+		},
+	},
+	{
 		Name:  "SonarQube",
 		Paths: []string{"dependencies/sonarqube"},
 		// Both SonarQube and its database read the password when they start.
@@ -554,17 +573,24 @@ func (i *Installer) stepsToRun() ([]step, error) {
 			steps = append(steps, s)
 		}
 	}
-	if i.opts.FromStep == "" {
+	wanted, only := i.opts.FromStep, false
+	if i.opts.OnlyStep != "" {
+		wanted, only = i.opts.OnlyStep, true
+	}
+	if wanted == "" {
 		return steps, nil
 	}
 	names := make([]string, 0, len(steps))
 	for idx, s := range steps {
-		if strings.EqualFold(s.Name, i.opts.FromStep) {
+		if strings.EqualFold(s.Name, wanted) {
+			if only {
+				return steps[idx : idx+1], nil
+			}
 			return steps[idx:], nil
 		}
 		names = append(names, s.Name)
 	}
-	return nil, fmt.Errorf("no step %q; the steps are: %s", i.opts.FromStep, strings.Join(names, ", "))
+	return nil, fmt.Errorf("no step %q; the steps are: %s", wanted, strings.Join(names, ", "))
 }
 
 // setupResult is where a one-time setup Job leaves what it made: a Secret, or

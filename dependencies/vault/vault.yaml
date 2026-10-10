@@ -1,0 +1,203 @@
+# HashiCorp Vault, where the supply chain's credentials are kept.
+#
+# One standalone server with file storage on a volume. The installer
+# initialises it, enables a key-value engine and Kubernetes auth, and creates
+# the ClusterSecretStore that External Secrets reads it through; none of that
+# is in this file, because it can only be done once Vault is running.
+#
+# Vault starts sealed, and seals itself again whenever its pod restarts. The
+# "unseal" sidecar unseals it with the key the installer stores in the
+# vault-unseal Secret. That makes the cluster self-contained, and it means the
+# key that protects Vault's storage is kept in the same cluster: anyone who can
+# read Secrets in the vault namespace can open it. For anything beyond a
+# demonstration, replace this with one of Vault's auto-unseal mechanisms and
+# remove the Secret.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  namespace: vault
+---
+# The identity External Secrets presents to Vault. Vault's Kubernetes auth role
+# is bound to exactly this ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: supply-chain-secrets
+  namespace: vault
+---
+# Vault checks a presented ServiceAccount token by asking the API server who
+# it belongs to.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-token-reviewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: vault
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+data:
+  vault.hcl: |
+    ui            = false
+    disable_mlock = true
+    api_addr      = "http://vault.vault.svc.cluster.local:8200"
+
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = 1
+    }
+
+    storage "file" {
+      path = "/vault/data"
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: vault
+  labels:
+    app: vault
+spec:
+  selector:
+    app: vault
+  # Reachable while sealed too: the installer and the sidecar have to talk to
+  # a sealed Vault in order to open it.
+  publishNotReadyAddresses: true
+  ports:
+    - name: http
+      port: 8200
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: vault
+  labels:
+    app: vault
+spec:
+  replicas: 1
+  serviceName: vault
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      serviceAccountName: vault
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: vault
+          image: hashicorp/vault:2.0.3
+          # The image's entrypoint adds -config=/vault/config itself; naming
+          # the file here as well loads it twice, and the second listener
+          # cannot bind.
+          args: ["server"]
+          env:
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+          ports:
+            - name: http
+              containerPort: 8200
+          # Ready means initialised and unsealed: able to serve secrets.
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /vault/data
+            - name: config
+              mountPath: /vault/config
+        - name: unseal
+          image: hashicorp/vault:2.0.3
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Unseal whenever Vault is found sealed and the key is there.
+              # Before the installer has initialised Vault there is no key,
+              # and this waits.
+              while true; do
+                if [ -s /unseal/unseal-key ] && vault status -format=json 2>/dev/null | grep -q '"sealed": true'; then
+                  vault operator unseal "$(cat /unseal/unseal-key)" > /dev/null && echo "Unsealed Vault"
+                fi
+                sleep 5
+              done
+          env:
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: unseal
+              mountPath: /unseal
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vault-config
+        - name: unseal
+          secret:
+            secretName: vault-unseal
+            optional: true
+            items:
+              - key: unseal-key
+                path: unseal-key
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

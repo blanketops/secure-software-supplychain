@@ -137,6 +137,8 @@ names the policy that refused it.
 
 ```bash
 supplychain install --webhook-host <host>        # install the dependencies (--ui-host for the UIs)
+supplychain secrets set <secret> <field>=<value|@file>   # store or rotate a credential in Vault
+supplychain secrets list                         # which fields are set; never prints a value
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
 supplychain status                               # check the dependencies
 supplychain uninstall                            # remove them
@@ -153,4 +155,4 @@ supplychain uninstall
 ```
 
 `supplychain uninstall` removes the policy-controller CRDs, which deletes every `ClusterImagePolicy` and
-`TrustRoot` with them.
+`TrustRoot` with them. It also removes Vault and its volume, and with them every credential stored there.

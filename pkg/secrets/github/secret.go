@@ -18,22 +18,21 @@ package github
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/go-logr/logr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 // GitHubTokenSecretReconciler ensures a GitHub API token ExternalSecret
 // exists for the GitHubWebhook controller to authenticate with GitHub.
 //
-// The token is sourced from the ClusterSecretStore under the key
-// /supplychain/github/token and materialised as an Opaque Secret with
+// The token is sourced from Vault, through the ClusterSecretStore, at
+// supplychain/github (field "token") and materialised as an Opaque Secret with
 // a single key named "token".
 type GitHubTokenSecretReconciler struct {
 	Client client.Client
@@ -72,49 +71,21 @@ func (r *GitHubTokenSecretReconciler) Reconcile(
 		return err
 	}
 
-	// ── Fetch existing ────────────────────────────────────────────────────
-	var existing unstructured.Unstructured
-	existing.SetGroupVersionKind(desired.GroupVersionKind())
-
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-
-	// ── Create ────────────────────────────────────────────────────────────
-	if apierrors.IsNotFound(err) {
-		r.Log.Info("Creating ExternalSecret for GitHub token",
-			"githubwebhook", ghw.Name,
-			"secret", desired.GetName(),
-		)
-		return r.Client.Create(ctx, desired)
-	}
+	outcome, err := store.Apply(ctx, r.Client, desired)
 	if err != nil {
 		return err
 	}
-
-	// ── Update (spec drift only) ──────────────────────────────────────────
-	if !reflect.DeepEqual(
-		existing.Object["spec"],
-		desired.Object["spec"],
-	) {
-		existing.Object["spec"] = desired.Object["spec"]
-		r.Log.Info("Updating ExternalSecret for GitHub token",
-			"githubwebhook", ghw.Name,
-			"secret", desired.GetName(),
-		)
-		return r.Client.Update(ctx, &existing)
+	if outcome != store.Unchanged {
+		r.Log.Info("Applied ExternalSecret for GitHub token",
+			"outcome", outcome, "githubwebhook", ghw.Name, "secret", desired.GetName())
 	}
-
-	// ── No-op ─────────────────────────────────────────────────────────────
-	r.Log.V(1).Info("ExternalSecret for GitHub token already up-to-date",
-		"githubwebhook", ghw.Name,
-		"secret", desired.GetName(),
-	)
 	return nil
 }
 
 // newGitHubTokenExternalSecret builds the ExternalSecret for the GitHub
-// API token. The token is stored in the ClusterSecretStore at:
+// API token. The token is stored in Vault at:
 //
-//	/supplychain/github/token  →  key: "token"
+//	supplychain/github, field "token"  →  key: "token"
 //
 // Mirrors the pattern used by registry and git SSH secrets.
 func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructured.Unstructured {
@@ -136,11 +107,8 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				},
 			},
 			"spec": map[string]any{
-				"refreshInterval": "0s",
-				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-store",
-					"kind": "ClusterSecretStore",
-				},
+				"refreshInterval": store.RefreshInterval,
+				"secretStoreRef":  store.Ref(),
 				"target": map[string]any{
 					"name": ghw.Spec.SecretRef.Name,
 					"template": map[string]any{
@@ -150,9 +118,7 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				"data": []any{
 					map[string]any{
 						"secretKey": "token",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/github/token",
-						},
+						"remoteRef": store.RemoteRef(store.GitHub, store.GitHubToken),
 					},
 				},
 			},

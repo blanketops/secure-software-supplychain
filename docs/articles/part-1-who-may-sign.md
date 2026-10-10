@@ -127,7 +127,7 @@ The fix is ordering. The signing step now waits until Chains' signature is in th
 
 It would be wrong to oversell this.
 
-- It runs on one kind cluster. Credentials come from External Secrets' fake provider, which is fine for a demonstration and not for production.
+- It runs on one kind cluster. Credentials are kept in a Vault the installer runs, whose unseal key lives in the same cluster so it can restart unattended. That is fine for a demonstration and not for production.
 - Fulcio, Rekor and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
 - Anyone who can create a pod running as the build ServiceAccount gets its identity. The three checks decide whether that ServiceAccount has an identity at all; they do not decide who may run as it. That is ordinary Kubernetes RBAC, and it has to be right.
 - A registered identity can be used for as long as it stays registered, not only during a build.

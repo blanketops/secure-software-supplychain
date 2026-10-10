@@ -128,9 +128,9 @@ Installation takes seven phases, from an empty cluster to a first verified build
 
 ```
 0  Prerequisites      a cluster, tools, External Secrets Operator
-1  Dependencies       supplychain install     Tekton, Sigstore, SPIRE, ingress, SonarQube
+1  Dependencies       supplychain install     Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube
 2  Operator           make install deploy     the CRDs and the controller
-3  Credentials        a ClusterSecretStore    git, registry, GitHub and SonarQube secrets
+3  Credentials        supplychain secrets set   git, registry and GitHub credentials, kept in Vault
 4  SonarQube          supplychain init-sonarqube
 5  Resources          kubectl apply -k config/samples
 6  Public webhook     Tailscale Funnel        so GitHub can reach the cluster
@@ -138,7 +138,7 @@ Installation takes seven phases, from an empty cluster to a first verified build
 ```
 
 [Installation](docs/installation.md) walks through each one. Two that people ask about first:
-[creating the secret store](docs/installation.md#3-create-the-secret-store) and
+[storing the credentials](docs/installation.md#3-store-the-credentials) and
 [making the webhook reachable with Tailscale Funnel](docs/installation.md#6-make-the-webhook-reachable-tailscale-funnel).
 Once it is running, [Usage](docs/usage.md) covers [following a build](docs/usage.md#follow-a-build) and
 [reading its results](docs/usage.md#read-the-results), and [Troubleshooting](docs/troubleshooting.md) covers what
@@ -148,7 +148,7 @@ goes wrong.
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | The seven phases above, including the secret store and Tailscale Funnel |
+| [Installation](docs/installation.md) | The seven phases above, including Vault and the credentials, and Tailscale Funnel |
 | [How it works](docs/concepts.md) | Identity, authorization, the two tiers of proof, admission, and evidence |
 | [Usage](docs/usage.md) | The resources you write, following a build, reading its results, the CLI |
 | [Troubleshooting](docs/troubleshooting.md) | What goes wrong and why |
@@ -159,8 +159,10 @@ goes wrong.
 This is a working proof of concept, exercised end to end on a single-node kind cluster. Things to know before
 relying on it:
 
-- Credentials come from External Secrets' fake provider, which holds them in the cluster in plain form. A real
-  deployment needs a real secret store.
+- Credentials are kept in a Vault the installer runs, and reach builds through External Secrets. Vault's unseal
+  key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
+  demonstration and not for production. Any other External Secrets provider can be
+  [used instead](docs/installation.md#using-a-secret-store-of-your-own).
 - Fulcio, Rekor and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
 - The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
   half of the proof has not been run.

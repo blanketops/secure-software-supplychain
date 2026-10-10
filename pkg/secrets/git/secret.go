@@ -17,15 +17,14 @@ package secrets
 
 import (
 	"context"
-	"reflect"
 
 	"github.com/go-logr/logr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 type GitSSHSecretReconciler struct {
@@ -70,11 +69,8 @@ func (r *GitSSHSecretReconciler) Reconcile(
 				},
 			},
 			"spec": map[string]any{
-				"refreshInterval": "0s",
-				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-store",
-					"kind": "ClusterSecretStore",
-				},
+				"refreshInterval": store.RefreshInterval,
+				"secretStoreRef":  store.Ref(),
 				"target": map[string]any{
 					"name": secretName,
 					"template": map[string]any{
@@ -84,21 +80,15 @@ func (r *GitSSHSecretReconciler) Reconcile(
 				"data": []any{
 					map[string]any{
 						"secretKey": "id_rsa",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/git/ssh-privatekey",
-						},
+						"remoteRef": store.RemoteRef(store.Git, store.GitPrivateKey),
 					},
 					map[string]any{
 						"secretKey": "known_hosts",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/git/known-hosts",
-						},
+						"remoteRef": store.RemoteRef(store.Git, store.GitKnownHosts),
 					},
 					map[string]any{
 						"secretKey": "config",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/git/ssh-config",
-						},
+						"remoteRef": store.RemoteRef(store.Git, store.GitSSHConfig),
 					},
 				},
 			},
@@ -116,66 +106,13 @@ func (r *GitSSHSecretReconciler) Reconcile(
 		return err
 	}
 
-	// -------------------------------------------------------------------------
-	// Fetch existing
-	// -------------------------------------------------------------------------
-	var existing unstructured.Unstructured
-	existing.SetGroupVersionKind(desired.GroupVersionKind())
-
-	err := r.Client.Get(
-		ctx,
-		client.ObjectKey{
-			Name:      secretName,
-			Namespace: namespace,
-		},
-		&existing,
-	)
-
-	// -------------------------------------------------------------------------
-	// Create
-	// -------------------------------------------------------------------------
-	if apierrors.IsNotFound(err) {
-		r.Log.Info(
-			"Creating ExternalSecret for Git SSH",
-			"supply-chain", sc.Name,
-			"image-build", ib.Name,
-			"secret", secretName,
-		)
-		return r.Client.Create(ctx, desired)
-	}
-
+	outcome, err := store.Apply(ctx, r.Client, desired)
 	if err != nil {
 		return err
 	}
-
-	// -------------------------------------------------------------------------
-	// Update (spec drift only)
-	// -------------------------------------------------------------------------
-	if !reflect.DeepEqual(
-		existing.Object["spec"],
-		desired.Object["spec"],
-	) {
-		existing.Object["spec"] = desired.Object["spec"]
-
-		r.Log.Info(
-			"Updating ExternalSecret for Git SSH",
-			"supply-chain", sc.Name,
-			"image-build", ib.Name,
-			"secret", secretName,
-		)
-
-		return r.Client.Update(ctx, &existing)
+	if outcome != store.Unchanged {
+		r.Log.Info("Applied ExternalSecret for Git SSH",
+			"outcome", outcome, "supply-chain", sc.Name, "image-build", ib.Name, "secret", secretName)
 	}
-
-	// -------------------------------------------------------------------------
-	// No-op
-	// -------------------------------------------------------------------------
-	r.Log.V(1).Info(
-		"ExternalSecret for Git SSH already up-to-date",
-		"supply-chain", sc.Name,
-		"image-build", ib.Name,
-		"secret", secretName,
-	)
-
 	return nil
 }

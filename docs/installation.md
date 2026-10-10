@@ -7,9 +7,9 @@ a push; phase 7 checks the whole thing with one build.
 
 ```
 0  Prerequisites           a cluster, tools, External Secrets Operator
-1  Dependencies            supplychain install       Tekton, Sigstore, SPIRE, ingress, SonarQube   (≈ 20 min to hours)
+1  Dependencies            supplychain install       Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube   (≈ 20 min to hours)
 2  Operator                make install deploy       the CRDs and the controller
-3  Credentials             ClusterSecretStore        git, registry, GitHub and SonarQube secrets   (yours, kept out of git)
+3  Credentials             supplychain secrets set   git, registry and GitHub credentials, kept in Vault
 4  SonarQube               supplychain init-sonarqube
 5  Resources               kubectl apply -k config/samples   roles, SupplyChain, SupplyChainPolicy
 6  Public webhook          Tailscale Funnel           GitHub reaches the cluster
@@ -51,6 +51,8 @@ go build -o bin/supplychain ./cmd/cli
 | `--signing-identity` | How builds prove who they are to Fulcio: `spiffe` (recommended) or `kubernetes` (default). See [Signing identity](concepts.md#signing-identity-kubernetes-or-spiffe). |
 | `--trust-domain` | The SPIFFE trust domain, for example your organisation's domain. Identities look like `spiffe://<your-domain>/ns/<namespace>/sa/<serviceaccount>`. |
 | `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
+| `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
+| `--external-secret-store` | Do not install Vault; you provide the secret store. See [Using a secret store of your own](#using-a-secret-store-of-your-own). |
 
 The installer applies the steps below in order and waits for each to be ready. Each wait allows up to an hour,
 because on a slow connection almost all of the time is image pulls.
@@ -66,13 +68,15 @@ because on a slow connection almost all of the time is image pulls.
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
 | Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
 | NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
+| Vault | Where the credentials are kept, and the `ClusterSecretStore` External Secrets reads them through. Skipped with `--external-secret-store`. |
 | SonarQube | Static analysis, on a PostgreSQL database and volumes of its own |
 
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
 `blanketops-sigstore-roots` ConfigMap, which the pipeline and the policies verify against.
 
 **Re-running it is safe.** What must only be made once is never made again: the keys Fulcio, the CT log and
-Rekor sign with, the Merkle trees behind Rekor and the CT log, and the SonarQube database password. If an
+Rekor sign with, the Merkle trees behind Rekor and the CT log, Vault's unseal key and root token, and the
+SonarQube database password. If an
 install stops on a timeout, run it again with `--from-step` set to the step it stopped at.
 
 ```bash
@@ -89,57 +93,94 @@ make install                                              # the CRDs
 make deploy IMG=<registry>/supply-chain-controller:<tag>  # the controller
 ```
 
-## 3. Create the secret store
+## 3. Store the credentials
 
-The operator reads every credential from a `ClusterSecretStore` named `secure-software-supply-chain-store`
-(External Secrets, fake provider) and syncs what each build needs into ordinary Secrets. The store holds real
-credentials: **create it from a file outside the repository and never commit it.**
+Builds need four credentials. They are kept in [HashiCorp Vault](https://www.vaultproject.io), which the
+installer runs, and reach each build as ordinary Kubernetes Secrets through External Secrets Operator.
 
-```yaml
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: secure-software-supply-chain-store
-spec:
-  provider:
-    fake:
-      data:
-      - key: /supplychain/git/ssh-privatekey      # an SSH key that can read the repository
-        value: |
-          -----BEGIN OPENSSH PRIVATE KEY-----
-          <your private key>
-          -----END OPENSSH PRIVATE KEY-----
-      - key: /supplychain/git/ssh-publickey
-        value: <your public key>
-      - key: /supplychain/git/known-hosts         # ssh-keyscan github.com
-        value: <github.com host keys>
-      - key: /supplychain/git/ssh-config
-        value: <ssh client config for the git host, if you need one>
-      - key: /supplychain/registry/config         # a Docker config.json with push access
-        value: '{"auths":{"https://index.docker.io/v1/":{"auth":"<base64 of user:token>"}}}'
-      - key: /supplychain/github/pat              # a token that can manage the repository's webhooks
-        value: <github token>
-      - key: /supplychain/github/token
-        value: <github token>
-      - key: /supplychain/sonarqube/token         # written for you in phase 4
-        value: ""
 ```
+Vault (secret/supplychain/…) ──► ClusterSecretStore ──► ExternalSecret ──► Secret ──► build pod
+       you write here            created by the          created by the operator
+                                 installer               for each build
+```
+
+Put them in with the CLI. A value starting with `@` is read from that file, which is how keys and other
+multi-line values are given, and keeps them out of your shell history:
 
 ```bash
-kubectl apply -f <path-outside-the-repo>/secretstore.yaml
+supplychain secrets set git      ssh-privatekey=@<path-to-private-key> \
+                                 known-hosts=@<file from: ssh-keyscan github.com> \
+                                 ssh-config=@<ssh-client-config>
+supplychain secrets set registry config=@<docker config.json with push access>
+supplychain secrets set github   token=@<file holding a GitHub token>
+
+supplychain secrets list         # which fields are set; never prints a value
 ```
 
-Use a registry access token rather than a password, and a GitHub fine-grained token limited to the repository.
-A GitHub deploy key belongs to exactly one repository; the store has one SSH key for every `SupplyChain`, so
-for more than one repository use a machine user's key.
+| Secret | Field | What it is |
+|---|---|---|
+| `supplychain/git` | `ssh-privatekey` | An SSH key that can read the repository |
+| | `known-hosts` | The git host's keys, for example from `ssh-keyscan github.com` |
+| | `ssh-config` | SSH client configuration for the git host |
+| `supplychain/registry` | `config` | A Docker `config.json` with push access: `{"auths":{"https://index.docker.io/v1/":{"auth":"<base64 of user:token>"}}}` |
+| `supplychain/github` | `token` | A token that can manage the repository's webhooks |
+| `supplychain/sonarqube` | `token` | Written for you in phase 4 |
 
-Synced Secrets are not refreshed when the store changes, except the SonarQube token. After changing any other
-value, delete the synced Secret and External Secrets recreates it.
+Use a registry access token rather than a password, and a GitHub fine-grained token limited to the repository.
+A GitHub deploy key belongs to exactly one repository; there is one SSH key for every `SupplyChain`, so for more
+than one repository use a machine user's key.
+
+**Rotating a credential** is the same command again. `set` changes the fields you name and keeps the rest, and
+External Secrets re-reads every secret each minute, so the new value reaches the builds without anything being
+deleted or restarted.
+
+### How the store is set up
+
+The installer's `Vault` step does this once, and can be run again safely:
+
+- starts one Vault server with its data on a volume, initialises it, and enables a key-value engine at `secret/`;
+- enables Kubernetes auth, with a role bound to a single ServiceAccount (`vault/supply-chain-secrets`) and a
+  policy that can **read** `secret/supplychain/*` and nothing else;
+- creates the `ClusterSecretStore` named `secure-software-supply-chain-store`, which logs in as that
+  ServiceAccount. The store holds no token or password.
+
+The operator never talks to Vault and has no Vault credential. It only creates `ExternalSecret` objects that
+point at the store.
+
+> **Vault's own keys are in the cluster.** Vault seals itself whenever its pod restarts, and a sidecar unseals
+> it with a key the installer keeps in the `vault-unseal` Secret, next to Vault's root token. That is what makes
+> the install self-contained, and it means anyone who can read Secrets in the `vault` namespace can open Vault.
+> It is right for a demonstration and wrong for production: there, use one of Vault's
+> [auto-unseal](https://developer.hashicorp.com/vault/docs/concepts/seal#auto-unseal) mechanisms, remove the
+> Secret, and revoke the root token.
+
+### Using a secret store of your own
+
+Vault is what the installer sets up, not something the operator depends on. The operator reads through
+External Secrets, so any [provider](https://external-secrets.io/latest/introduction/stability-support/) it
+supports will do: AWS Secrets Manager, Google Secret Manager, Azure Key Vault, an existing Vault, and so on.
+
+The operator owns the `ExternalSecret` objects: it creates them for each build and puts them back if they are
+changed, so what they ask for is fixed. Your store has to answer to the same names:
+
+- a `ClusterSecretStore` called **`secure-software-supply-chain-store`**;
+- the four secrets in the table above, under the same keys (`supplychain/git`, `supplychain/registry`,
+  `supplychain/github`, `supplychain/sonarqube`);
+- each holding the same fields. The operator asks for a field as a `property` of the secret, so in a store that
+  keeps one value per secret, the value is a JSON object with those fields.
+
+Install without Vault, and have the SonarQube bootstrap hand you the token instead of writing it to Vault:
+
+```bash
+supplychain install --external-secret-store --webhook-host <host> ...
+supplychain init-sonarqube --new-password '<password>' --token-file <file>
+# then store the contents of <file> as supplychain/sonarqube, field "token"
+```
 
 ## 4. Bootstrap SonarQube
 
 SonarQube starts with `admin` / `admin`. The bootstrap sets your admin password, generates a `supply-chain`
-token and writes it into the store:
+token and writes it to Vault:
 
 ```bash
 ./bin/supplychain init-sonarqube --new-password '<password>'
@@ -149,7 +190,7 @@ SonarQube requires at least 12 characters with upper case, lower case, a digit a
 
 The command reaches SonarQube through a port-forward to its pod, so it runs from wherever your kubeconfig
 works. It is safe to run again: the password is only set while it is still the default, and a new token is only
-generated when the one in the store is missing or SonarQube no longer accepts it. When it does replace the token,
+generated when the one in Vault is missing or SonarQube no longer accepts it. When it does replace the token,
 it also refreshes the Secrets the builds read it from.
 
 SonarQube keeps its users, tokens, settings and analysis in a PostgreSQL database (`sonarqube-postgresql`), and

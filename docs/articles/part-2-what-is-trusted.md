@@ -128,7 +128,7 @@ Put together: a push reaches the cluster through a Tailscale Funnel, a build sta
 
 ## Limits
 
-- This is a proof of concept on one kind cluster, with a demonstration secret store and plain HTTP between the in-cluster services.
+- This is a proof of concept on one kind cluster, with a Vault whose unseal key is kept in the same cluster, and plain HTTP between the in-cluster services.
 - Admission reads the image's signatures from the registry for each of the four policies, and the webhook fails closed after ten seconds. On a slow link to the registry it can time out, and the answer is to ask again. Failing closed is the right default; the latency is a cost of requiring four proofs.
 - The provenance Chains produces is SLSA v1.0, and admission requires it. I am not claiming a SLSA build level: that depends on properties of the build platform this setup does not establish, such as isolation between builds.
 - The evidence is read back from a registry and a log the cluster itself runs. It shows what was signed and logged. It does not make the cluster's own operators untrusted parties.

@@ -20,12 +20,12 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 type RegistrySecretReconciler struct {
@@ -129,7 +129,7 @@ type secretSpec interface {
 }
 
 // -------------------------------------------------------------------------
-// Shared reconcile logic (create-only)
+// Shared reconcile logic
 // -------------------------------------------------------------------------
 
 func (r *RegistrySecretReconciler) reconcileExternalSecret(
@@ -148,24 +148,15 @@ func (r *RegistrySecretReconciler) reconcileExternalSecret(
 		return err
 	}
 
-	var existing unstructured.Unstructured
-	existing.SetGroupVersionKind(desired.GroupVersionKind())
-
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
-	if err == nil {
-		return nil // already exists
-	}
-	if !apierrors.IsNotFound(err) {
+	outcome, err := store.Apply(ctx, r.Client, desired)
+	if err != nil {
 		return err
 	}
-
-	r.Log.Info(
-		"Creating ExternalSecret for registry credentials",
-		"supply-chain", sc.Name,
-		"image-build", ib.Name,
-		"secret", desired.GetName(),
-	)
-	return r.Client.Create(ctx, desired)
+	if outcome != store.Unchanged {
+		r.Log.Info("Applied ExternalSecret for registry credentials",
+			"outcome", outcome, "supply-chain", sc.Name, "image-build", ib.Name, "secret", desired.GetName())
+	}
+	return nil
 }
 
 // -------------------------------------------------------------------------
@@ -198,11 +189,8 @@ func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
 				},
 			},
 			"spec": map[string]any{
-				"refreshInterval": "0s",
-				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-store",
-					"kind": "ClusterSecretStore",
-				},
+				"refreshInterval": store.RefreshInterval,
+				"secretStoreRef":  store.Ref(),
 				"target": map[string]any{
 					"name": p.name,
 					"template": map[string]any{
@@ -217,9 +205,7 @@ func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
 				"data": []any{
 					map[string]any{
 						"secretKey": p.secretKey,
-						"remoteRef": map[string]any{
-							"key": "/supplychain/registry/config",
-						},
+						"remoteRef": store.RemoteRef(store.Registry, store.RegistryConfig),
 					},
 				},
 			},

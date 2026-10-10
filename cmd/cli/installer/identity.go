@@ -71,6 +71,12 @@ type Options struct {
 	// FromStep resumes an interrupted install at the named step instead of
 	// starting again from the first one.
 	FromStep string
+	// OnlyStep runs the named step and nothing else.
+	OnlyStep string
+	// ExternalSecretStore leaves Vault out: the credentials are served by a
+	// ClusterSecretStore the user provides, under the same name and with the
+	// same secrets and fields.
+	ExternalSecretStore bool
 }
 
 func (o *Options) defaultAndValidate() error {

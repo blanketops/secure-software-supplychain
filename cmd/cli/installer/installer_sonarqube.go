@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -33,8 +34,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport/spdy"
+
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 const (
@@ -51,16 +52,10 @@ const (
 	sonarDatabaseSecret = "sonarqube-postgresql"
 	sonarDatabaseSTS    = "sonarqube-postgresql"
 	sonarSTS            = "sonarqube-sonarqube"
-
-	sonarStoreName = "secure-software-supply-chain-store"
-	sonarStoreKey  = "/supplychain/sonarqube/token"
 )
 
 var (
-	secretGVR             = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	clusterSecretStoreGVR = schema.GroupVersionResource{
-		Group: "external-secrets.io", Version: "v1", Resource: "clustersecretstores",
-	}
+	secretGVR         = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
 	externalSecretGVR = schema.GroupVersionResource{
 		Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets",
 	}
@@ -114,14 +109,14 @@ func (i *Installer) ensureSonarQubeDatabasePassword(ctx context.Context) error {
 //
 //  1. Waits for SonarQube to be up.
 //  2. Sets the admin password, if it is still the default.
-//  3. Makes sure the ClusterSecretStore holds a token SonarQube accepts,
+//  3. Makes sure Vault holds a token SonarQube accepts,
 //     generating one only when the stored one is missing or no longer valid.
 //
 // SonarQube is reached through a port-forward to its pod, so this works from
 // wherever the kubeconfig does.
 //
 // Called via: supplychain init-sonarqube --new-password <password>
-func (i *Installer) InitSonarQube(ctx context.Context, newPassword string) error {
+func (i *Installer) InitSonarQube(ctx context.Context, newPassword, tokenFile string) error {
 	fmt.Println("  ⏳ Waiting for SonarQube to be ready...")
 	if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarSTS, readyTimeout); err != nil {
 		return fmt.Errorf("SonarQube is not running: %w", err)
@@ -150,23 +145,28 @@ func (i *Installer) InitSonarQube(ctx context.Context, newPassword string) error
 	}
 
 	// ── Token ─────────────────────────────────────────────────────────────
-	stored, err := i.storedSonarQubeToken(ctx)
+	tokens, closeTokens, err := i.sonarTokenStore(ctx, tokenFile)
+	if err != nil {
+		return err
+	}
+	defer closeTokens()
+	stored, err := tokens.get(ctx)
 	if err != nil {
 		return err
 	}
 	if stored != "" && sonar.valid(ctx, stored, "") {
 		// Generating a new one would revoke this one, and every build that
 		// already synced it would be refused until its Secret caught up.
-		fmt.Println("  ✓ The token in the ClusterSecretStore is valid; left as it is")
+		fmt.Printf("  ✓ The token in %s is valid; left as it is\n", tokens.where)
 	} else {
 		token, err := sonar.newToken(ctx, newPassword)
 		if err != nil {
 			return err
 		}
-		if err := i.patchClusterSecretStoreToken(ctx, sonarStoreName, sonarStoreKey, token); err != nil {
-			return fmt.Errorf("patching ClusterSecretStore: %w", err)
+		if err := tokens.put(ctx, token); err != nil {
+			return fmt.Errorf("storing the SonarQube token in %s: %w", tokens.where, err)
 		}
-		fmt.Printf("  ✓ New token stored at %s\n", sonarStoreKey)
+		fmt.Printf("  ✓ New token stored in %s\n", tokens.where)
 	}
 
 	refreshed, err := i.refreshSonarQubeTokenSecrets(ctx)
@@ -186,58 +186,51 @@ func (i *Installer) InitSonarQube(ctx context.Context, newPassword string) error
 // forwardToSonarQube opens a port-forward to the SonarQube pod and returns
 // the URL it is reachable at, context path included, and a func to close it.
 func (i *Installer) forwardToSonarQube(ctx context.Context) (string, func(), error) {
-	transport, upgrader, err := spdy.RoundTripperFor(i.restConfig)
+	base, stop, err := i.forwardToPod(ctx, sonarNamespace, sonarPod, sonarPort)
 	if err != nil {
 		return "", nil, err
 	}
-	host := strings.TrimRight(i.restConfig.Host, "/")
-	target, err := url.Parse(fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/portforward", host, sonarNamespace, sonarPod))
-	if err != nil {
-		return "", nil, err
-	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, target)
-
-	stop, ready := make(chan struct{}), make(chan struct{})
-	// Local port 0: any free port.
-	ports := []string{fmt.Sprintf("0:%d", sonarPort)}
-	forwarder, err := portforward.New(dialer, ports, stop, ready, io.Discard, io.Discard)
-	if err != nil {
-		return "", nil, err
-	}
-	failed := make(chan error, 1)
-	go func() { failed <- forwarder.ForwardPorts() }()
-
-	select {
-	case <-ready:
-	case err := <-failed:
-		return "", nil, fmt.Errorf("port-forward to pod %s/%s: %w", sonarNamespace, sonarPod, err)
-	case <-ctx.Done():
-		close(stop)
-		return "", nil, ctx.Err()
-	}
-	forwarded, err := forwarder.GetPorts()
-	if err != nil || len(forwarded) == 0 {
-		close(stop)
-		return "", nil, fmt.Errorf("port-forward to pod %s/%s gave no port: %v", sonarNamespace, sonarPod, err)
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d%s", forwarded[0].Local, sonarContext), func() { close(stop) }, nil
+	return base + sonarContext, stop, nil
 }
 
-// storedSonarQubeToken returns the token the ClusterSecretStore holds, or ""
-// when it holds none.
-func (i *Installer) storedSonarQubeToken(ctx context.Context) (string, error) {
-	store, err := i.dynamic.Resource(clusterSecretStoreGVR).Get(ctx, sonarStoreName, metav1.GetOptions{})
+// sonarTokens is where the SonarQube token is kept: Vault, or a file when the
+// credentials are served by a store the installer does not run.
+type sonarTokens struct {
+	where string
+	get   func(context.Context) (string, error)
+	put   func(context.Context, string) error
+}
+
+func (i *Installer) sonarTokenStore(ctx context.Context, tokenFile string) (*sonarTokens, func(), error) {
+	if tokenFile != "" {
+		return &sonarTokens{
+			where: tokenFile,
+			get: func(context.Context) (string, error) {
+				data, err := os.ReadFile(tokenFile)
+				if os.IsNotExist(err) {
+					return "", nil
+				}
+				return strings.TrimSpace(string(data)), err
+			},
+			put: func(_ context.Context, token string) error {
+				return os.WriteFile(tokenFile, []byte(token+"\n"), 0o600)
+			},
+		}, func() {}, nil
+	}
+	vault, closeVault, err := i.openVault(ctx)
 	if err != nil {
-		return "", fmt.Errorf("reading ClusterSecretStore %s (apply it before running this): %w", sonarStoreName, err)
+		return nil, nil, fmt.Errorf("%w; with a secret store of your own, pass --token-file", err)
 	}
-	entries, _, _ := unstructured.NestedSlice(store.Object, "spec", "provider", "fake", "data")
-	for _, entry := range entries {
-		if m, ok := entry.(map[string]any); ok && m["key"] == sonarStoreKey {
-			value, _ := m["value"].(string)
-			return value, nil
-		}
-	}
-	return "", nil
+	return &sonarTokens{
+		where: "Vault at " + store.Mount + "/" + store.SonarQube,
+		get: func(ctx context.Context) (string, error) {
+			fields, err := vault.read(ctx, store.SonarQube)
+			return fields[store.SonarQubeToken], err
+		},
+		put: func(ctx context.Context, token string) error {
+			return vault.write(ctx, store.SonarQube, map[string]string{store.SonarQubeToken: token})
+		},
+	}, closeVault, nil
 }
 
 // refreshSonarQubeTokenSecrets makes External Secrets sync the token again
@@ -377,53 +370,4 @@ func (s *sonarClient) call(
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, string(data), err
-}
-
-// patchClusterSecretStoreToken updates the fake provider entry for the given
-// key in the ClusterSecretStore. Uses a JSON merge patch on the spec.
-func (i *Installer) patchClusterSecretStoreToken(
-	ctx context.Context,
-	storeName, key, token string,
-) error {
-	storeGVR := clusterSecretStoreGVR
-
-	// Fetch current store.
-	existing, err := i.dynamic.Resource(storeGVR).Get(ctx, storeName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("fetching ClusterSecretStore: %w", err)
-	}
-
-	// Get current fake data array.
-	fakeData, _, _ := unstructured.NestedSlice(existing.Object,
-		"spec", "provider", "fake", "data")
-
-	// Update or append the entry.
-	updated := false
-	for idx, entry := range fakeData {
-		m, ok := entry.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if m["key"] == key {
-			m["value"] = token
-			fakeData[idx] = m
-			updated = true
-			break
-		}
-	}
-	if !updated {
-		fakeData = append(fakeData, map[string]interface{}{
-			"key":   key,
-			"value": token,
-		})
-	}
-
-	// Write back.
-	if err := unstructured.SetNestedSlice(existing.Object, fakeData,
-		"spec", "provider", "fake", "data"); err != nil {
-		return fmt.Errorf("setting fake data: %w", err)
-	}
-
-	_, err = i.dynamic.Resource(storeGVR).Update(ctx, existing, metav1.UpdateOptions{})
-	return err
 }

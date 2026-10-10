@@ -79,8 +79,8 @@ on its own.
 
 Before a build starts, the `ImageBuild` controller runs three gates in order.
 
-**Gate 1: prerequisites.** The git SSH key, registry credentials and SonarQube token are synced from the
-`ClusterSecretStore` by External Secrets. The build waits until all of them exist.
+**Gate 1: prerequisites.** The git SSH key, registry credentials and SonarQube token are synced from Vault by
+External Secrets, through a `ClusterSecretStore`. The build waits until all of them exist.
 
 **Gate 2: three proofs.** Three SubjectAccessReviews are performed for the `supply-chain-runner` ServiceAccount.
 All three must be allowed:

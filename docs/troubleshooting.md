@@ -38,7 +38,21 @@ was still downloading; the next build uses the cached image. If it reports criti
 the gate: update the base image.
 
 **A build fails at `git-clone` with "Permission denied (publickey)".** The key in the store cannot read the
-repository. Remember the synced Secret has to be deleted after the store changes.
+repository. Check what is set with `supplychain secrets list`, and replace the key with
+`supplychain secrets set git ssh-privatekey=@<file>`; the build's Secret follows within a minute.
+
+**A build waits for its secrets and never starts.** The `ExternalSecret` objects cannot be synced. Look at the
+store first:
+
+```bash
+kubectl get clustersecretstore secure-software-supply-chain-store
+kubectl get pods -n vault
+```
+
+A store that is not `Valid` usually means Vault is sealed or still starting: `vault-0` shows `1/2` until its
+sidecar has unsealed it, which takes a few seconds after a restart. If it stays sealed, the `vault-unseal` Secret
+is missing. A store that is `Valid` with an `ExternalSecret` in `SecretSyncedError` means a field is missing in
+Vault; `supplychain secrets list` shows which.
 
 **Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
 controller reads the image's signatures and attestations from the registry, once for each of the four policies,

@@ -19,12 +19,12 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 type SonarQubeSecretReconciler struct {
@@ -76,13 +76,8 @@ func (r *SonarQubeSecretReconciler) Reconcile(
 				},
 			},
 			"spec": map[string]any{
-				// Kept in step with the store: a token replaced there reaches
-				// the builds without anyone having to recreate this.
-				"refreshInterval": "1m",
-				"secretStoreRef": map[string]any{
-					"name": "secure-software-supply-chain-store",
-					"kind": "ClusterSecretStore",
-				},
+				"refreshInterval": store.RefreshInterval,
+				"secretStoreRef":  store.Ref(),
 				"target": map[string]any{
 					"name": secretName,
 					"template": map[string]any{
@@ -93,9 +88,7 @@ func (r *SonarQubeSecretReconciler) Reconcile(
 					map[string]any{
 						// Tekton sonarqube task reads env var from secret key "token"
 						"secretKey": "token",
-						"remoteRef": map[string]any{
-							"key": "/supplychain/sonarqube/token",
-						},
+						"remoteRef": store.RemoteRef(store.SonarQube, store.SonarQubeToken),
 					},
 				},
 			},
@@ -113,30 +106,13 @@ func (r *SonarQubeSecretReconciler) Reconcile(
 		return err
 	}
 
-	// -------------------------------------------------------------------------
-	// Fetch existing (CREATE-ONLY semantics — existence is enough)
-	// -------------------------------------------------------------------------
-	var existing unstructured.Unstructured
-	existing.SetGroupVersionKind(desired.GroupVersionKind())
-
-	err := r.Client.Get(
-		ctx,
-		client.ObjectKeyFromObject(desired),
-		&existing,
-	)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
+	outcome, err := store.Apply(ctx, r.Client, desired)
+	if err != nil {
 		return err
 	}
-
-	r.Log.Info(
-		"Creating ExternalSecret for SonarQube token",
-		"supply-chain", sc.Name,
-		"image-build", ib.Name,
-		"secret", secretName,
-	)
-
-	return r.Client.Create(ctx, desired)
+	if outcome != store.Unchanged {
+		r.Log.Info("Applied ExternalSecret for SonarQube token",
+			"outcome", outcome, "supply-chain", sc.Name, "image-build", ib.Name, "secret", secretName)
+	}
+	return nil
 }
