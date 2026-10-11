@@ -115,6 +115,12 @@ func (f *fakeCluster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == rekor+"/api/v1/log":
 		write(map[string]any{"rootHash": "abc123", "treeSize": len(f.entries), "treeID": "7441"})
 	case path == rekor+"/api/v1/log/publicKey":
+		// As Rekor does: the PEM itself, or a JSON string of it when JSON
+		// is what was asked for.
+		if strings.Contains(r.Header.Get("Accept"), "json") {
+			write(f.rekorKey)
+			return
+		}
 		_, _ = w.Write([]byte(f.rekorKey))
 	case path == rekor+"/api/v1/log/entries/retrieve":
 		var in struct {

@@ -330,6 +330,11 @@ func (q *querier) rekorSummary(ctx context.Context, anchor string) LogSummary {
 		out.Error = "public key: " + err.Error()
 		return out
 	}
+	// Asked for JSON, Rekor answers with the PEM as a JSON string.
+	var quoted string
+	if json.Unmarshal(key, &quoted) == nil && quoted != "" {
+		key = []byte(quoted)
+	}
 	out.KeyFingerprint = fingerprint(key)
 	if strings.TrimSpace(anchor) != "" {
 		trusted := out.KeyFingerprint == fingerprint([]byte(anchor))
