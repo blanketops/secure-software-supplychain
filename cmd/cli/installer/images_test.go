@@ -60,6 +60,18 @@ func TestStepImages(t *testing.T) {
 			t.Errorf("%s is not among the %d images pulled ahead", want, len(images))
 		}
 	}
+	// What Tekton adds to every step is named in its controller's arguments,
+	// and what a Task runs by default in its parameters.
+	for _, want := range []string{"/entrypoint-", "cgr.dev/chainguard/busybox", "git-clone:v1.1.0", "buildah/stable", "trivy-db"} {
+		if !hasImage(images, want) {
+			t.Errorf("no image matching %q is pulled ahead", want)
+		}
+	}
+	for _, image := range images {
+		if !looksLikeImage(image) && !strings.Contains(image, ":") {
+			t.Errorf("%q does not look like an image", image)
+		}
+	}
 	if !hasImage(images, "/createctconfig") {
 		t.Error("the images of the setup Jobs are not pulled ahead")
 	}
@@ -140,17 +152,17 @@ func TestPullProgress(t *testing.T) {
 // Resuming an install pulls ahead for the steps that are left, and for no
 // others; running one step pulls only as that step does.
 func TestResumingPullsImagesForWhatIsLeft(t *testing.T) {
-	resumed := &Installer{opts: Options{SigningIdentity: IdentitySPIFFE, FromStep: "vault"}}
+	resumed := &Installer{opts: Options{SigningIdentity: IdentitySPIFFE, FromStep: "sonarqube"}}
 	steps, err := resumed.stepsToRun()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !steps[0].PullsImages || steps[1].Name != "Vault" {
-		t.Fatalf("resuming at Vault runs %q then %q", steps[0].Name, steps[1].Name)
+	if !steps[0].PullsImages || steps[1].Name != "SonarQube" {
+		t.Fatalf("resuming at SonarQube runs %q then %q", steps[0].Name, steps[1].Name)
 	}
 	images, _ := stepImages(steps[1:])
-	if !hasImage(images, "hashicorp/vault") || hasImage(images, "rekor") {
-		t.Errorf("resuming at Vault pulls %v", images)
+	if !hasImage(images, "sonarqube") || hasImage(images, "rekor") {
+		t.Errorf("resuming at SonarQube pulls %v", images)
 	}
 
 	one := &Installer{opts: Options{SigningIdentity: IdentitySPIFFE, OnlyStep: "vault"}}
@@ -160,5 +172,18 @@ func TestResumingPullsImagesForWhatIsLeft(t *testing.T) {
 	first := &Installer{opts: Options{SigningIdentity: IdentitySPIFFE, FromStep: "images"}}
 	if steps, _ = first.stepsToRun(); !steps[0].PullsImages || steps[1].PullsImages {
 		t.Error("resuming at the first step repeats it")
+	}
+}
+
+// The pod that pulls an image is named after it, so that a run that follows
+// an interrupted one asks for the same pods and not for new ones.
+func TestImagePullPodIsNamedAfterItsImage(t *testing.T) {
+	a, again := imagePullPod("hashicorp/vault:2.0.3"), imagePullPod("hashicorp/vault:2.0.3")
+	b := imagePullPod("hashicorp/vault:2.0.4")
+	if a.GetName() != again.GetName() || a.GetName() == b.GetName() || !strings.HasPrefix(a.GetName(), "pull-") {
+		t.Errorf("pod names: %s, %s, %s", a.GetName(), again.GetName(), b.GetName())
+	}
+	if a.GetAnnotations()[imagePullAnnotation] != "hashicorp/vault:2.0.3" || a.GetNamespace() != imagePullNamespace {
+		t.Errorf("pod: %v in %s", a.GetAnnotations(), a.GetNamespace())
 	}
 }

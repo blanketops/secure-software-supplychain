@@ -317,3 +317,47 @@ func TestSPIREDiscoveryIsHTTPS(t *testing.T) {
 		t.Errorf("the certificate is for %v, which does not include the issuer", names)
 	}
 }
+
+// Manifests are applied a file at a time, in the order of their names, a step
+// at a time. Nothing may be put in a namespace before the namespace exists:
+// on a cluster that already has it nobody notices, and a fresh install stops.
+func TestNamespacesExistBeforeTheyAreUsed(t *testing.T) {
+	for _, identity := range []string{IdentitySPIFFE, IdentityKubernetes} {
+		i := &Installer{opts: Options{SigningIdentity: identity, KeyResidency: ResidencyVault}}
+		steps, err := i.stepsToRun()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// There before the installer starts, or made by its own code before
+		// the step that uses it.
+		exists := map[string]bool{
+			"": true, "default": true, "kube-system": true,
+			fulcioNamespace: true, rekorNamespace: true, // made with the signing keys
+		}
+		for _, s := range steps {
+			for _, dir := range s.Paths {
+				entries, err := manifests.Dependencies.ReadDir(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range entries {
+					if entry.IsDir() {
+						continue
+					}
+					file := dir + "/" + entry.Name()
+					for _, obj := range manifestObjects(t, file) {
+						if obj.GetKind() == "Namespace" {
+							exists[obj.GetName()] = true
+							continue
+						}
+						if !exists[obj.GetNamespace()] {
+							t.Errorf("%s install, step %q: %s puts %s %s in namespace %q before anything declares it",
+								identity, s.Name, file, obj.GetKind(), obj.GetName(), obj.GetNamespace())
+							exists[obj.GetNamespace()] = true // once is enough
+						}
+					}
+				}
+			}
+		}
+	}
+}

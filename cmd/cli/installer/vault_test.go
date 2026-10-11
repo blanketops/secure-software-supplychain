@@ -18,6 +18,8 @@ package cli
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -45,25 +47,30 @@ import (
 // fakeVault keeps what the installer configures and what is written to the
 // key-value engine, and counts how often each thing was created.
 type fakeVault struct {
-	token    string
-	mounts   map[string]any
-	auths    map[string]any
-	configs  map[string]map[string]any
-	policies map[string]string
-	roles    map[string]map[string]any
-	secrets  map[string]map[string]string
-	enabled  int
+	token       string
+	mounts      map[string]any
+	auths       map[string]any
+	configs     map[string]map[string]any
+	policies    map[string]string
+	roles       map[string]map[string]any
+	secrets     map[string]map[string]string
+	enabled     int
+	transit     map[string]*ecdsa.PrivateKey
+	created     []string
+	keyRequests map[string]map[string]any
 }
 
 func newFakeVault() *fakeVault {
 	return &fakeVault{
-		token:    "root",
-		mounts:   map[string]any{"sys/": map[string]any{"type": "system"}},
-		auths:    map[string]any{"token/": map[string]any{"type": "token"}},
-		configs:  map[string]map[string]any{},
-		policies: map[string]string{},
-		roles:    map[string]map[string]any{},
-		secrets:  map[string]map[string]string{},
+		transit:     map[string]*ecdsa.PrivateKey{},
+		keyRequests: map[string]map[string]any{},
+		token:       "root",
+		mounts:      map[string]any{"sys/": map[string]any{"type": "system"}},
+		auths:       map[string]any{"token/": map[string]any{"type": "token"}},
+		configs:     map[string]map[string]any{},
+		policies:    map[string]string{},
+		roles:       map[string]map[string]any{},
+		secrets:     map[string]map[string]string{},
 	}
 }
 
@@ -108,6 +115,38 @@ func (f *fakeVault) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.roles[strings.TrimPrefix(path, "auth/")] = body
+	case strings.HasPrefix(path, "transit/keys/"):
+		name := strings.TrimPrefix(path, "transit/keys/")
+		if r.Method == http.MethodGet {
+			key, ok := f.transit[name]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"errors":[]}`))
+				return
+			}
+			der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			public := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+				"latest_version": 1, "keys": map[string]any{"1": map[string]any{"public_key": public}},
+			}})
+			return
+		}
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		f.transit[name] = key
+		f.created = append(f.created, name)
+		f.keyRequests[name] = body
+	case strings.HasPrefix(path, "transit/sign/"):
+		key := f.transit[strings.TrimPrefix(path, "transit/sign/")]
+		digest, _ := base64.StdEncoding.DecodeString(body["input"].(string))
+		if key == nil || body["prehashed"] != true || body["marshaling_algorithm"] != "asn1" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"errors":["bad sign request"]}`))
+			return
+		}
+		signature, _ := ecdsa.SignASN1(rand.Reader, key, digest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"signature": "vault:v1:" + base64.StdEncoding.EncodeToString(signature),
+		}})
 	case strings.HasPrefix(path, "secret/data/"):
 		name := strings.TrimPrefix(path, "secret/data/")
 		if r.Method == http.MethodGet {

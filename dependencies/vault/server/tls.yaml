@@ -6,6 +6,12 @@
 # port 8200. It is set up as the sigstore services are, so that a renewed
 # certificate is picked up without restarting Vault, which would seal it.
 ---
+# This file is applied before vault.yaml, which also declares the namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

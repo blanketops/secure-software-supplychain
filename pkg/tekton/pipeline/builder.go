@@ -39,6 +39,9 @@ const (
 	stepAttest     = "attest-image-rekor-fulcio"
 	stepVerify     = "verify-image-policy"
 	cosignImage    = "gcr.io/projectsigstore/cosign:v2.2.3"
+	curlImage      = "curlimages/curl:latest"
+	skopeoImage    = "quay.io/skopeo/stable:latest"
+	busyboxImage   = "busybox:1.36"
 	// provenancePredicateType is cosign's name for the SLSA v1.0 provenance
 	// Chains writes with the slsa/v2alpha4 format.
 	provenancePredicateType = "slsaprovenance1"
@@ -273,6 +276,13 @@ func buildTaskList(
 	return tasks
 }
 
+// Images lists the images the steps written in this package run, beyond those
+// the Tasks installed with the stack bring. The installer pulls them ahead,
+// so that the first build does not have to.
+func Images() []string {
+	return []string{cosignImage, curlImage, skopeoImage, busyboxImage}
+}
+
 // tlsCAVolumeSource is the CA of the in-cluster services' TLS certificates,
 // taken from the trust anchors ConfigMap. It is optional: against public
 // sigstore services there is no such CA, and the volume is then empty.
@@ -365,7 +375,7 @@ echo "SPIFFE Workload API socket present"`
 				Steps: []tektonv1.Step{
 					{
 						Name:         "verify-fulcio",
-						Image:        "curlimages/curl:latest",
+						Image:        curlImage,
 						VolumeMounts: []corev1.VolumeMount{source.mount, tlsCAMount()},
 						Script: `#!/bin/sh
 set -e
@@ -450,7 +460,7 @@ func pushImageTask(imageRef, runAfter string) tektonv1.PipelineTask {
 				Steps: []tektonv1.Step{
 					{
 						Name:  "push",
-						Image: "quay.io/skopeo/stable:latest",
+						Image: skopeoImage,
 						Env: []corev1.EnvVar{
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
 						},
@@ -550,7 +560,7 @@ func withAuthorizationAttestation(task *tektonv1.PipelineTask, predicate string)
 			// by a step that does. It goes through the environment so the JSON
 			// is never interpreted by the shell.
 			Name:  "write-authorization-predicate",
-			Image: "busybox:1.36",
+			Image: busyboxImage,
 			Env:   []corev1.EnvVar{{Name: "PREDICATE", Value: "$(params.AUTHORIZATION_PREDICATE)"}},
 			Script: `#!/bin/sh
 set -e
@@ -721,7 +731,7 @@ func signImageTask(
 func awaitChainsSignatureStep() tektonv1.Step {
 	return tektonv1.Step{
 		Name:  "await-chains-signature",
-		Image: "quay.io/skopeo/stable:latest",
+		Image: skopeoImage,
 		Env: []corev1.EnvVar{
 			{Name: "IMAGE", Value: "$(params.IMAGE)"},
 			{Name: "DIGEST", Value: "$(params.DIGEST)"},
@@ -765,7 +775,7 @@ func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
 				Steps: []tektonv1.Step{
 					{
 						Name:  "attest",
-						Image: "quay.io/skopeo/stable:latest",
+						Image: skopeoImage,
 						Script: `#!/bin/sh
 set -e
 # --format, not grep: the JSON also lists a digest per layer.
@@ -867,7 +877,7 @@ func verifyTask(
 					{
 						// The cosign image has no shell; see withAuthorizationAttestation.
 						Name:  "write-authorization-policy",
-						Image: "busybox:1.36",
+						Image: busyboxImage,
 						Env:   []corev1.EnvVar{{Name: "POLICY", Value: "$(params.AUTHORIZATION_POLICY)"}},
 						Script: `#!/bin/sh
 set -e
@@ -913,7 +923,7 @@ printf '%s' "${POLICY}" > ` + authorizationPolicyPath + `
 						// Only reached when every verification passed: a failing
 						// step stops the task, so the results stay unset.
 						Name:  "report",
-						Image: "busybox:1.36",
+						Image: busyboxImage,
 						Env: []corev1.EnvVar{
 							{Name: "IMAGE", Value: image},
 							{Name: "IDENTITY", Value: "$(params.IDENTITY)"},

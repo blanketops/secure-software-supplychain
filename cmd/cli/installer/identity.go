@@ -84,6 +84,9 @@ type Options struct {
 	// NoImagePull leaves out the step that pulls every image ahead of the
 	// steps that use them.
 	NoImagePull bool
+	// KeyResidency is where Fulcio's and Rekor's signing keys are kept:
+	// ResidencyCluster or ResidencyVault. See keys.go.
+	KeyResidency string
 }
 
 func (o *Options) defaultAndValidate() error {
@@ -98,6 +101,22 @@ func (o *Options) defaultAndValidate() error {
 	}
 	if o.SigningIdentity != IdentityKubernetes && o.SigningIdentity != IdentitySPIFFE {
 		return fmt.Errorf("signing identity %q: must be %q or %q", o.SigningIdentity, IdentityKubernetes, IdentitySPIFFE)
+	}
+	if o.KeyResidency == "" {
+		o.KeyResidency = ResidencyCluster
+	}
+	switch o.KeyResidency {
+	case ResidencyCluster:
+	case ResidencyVault:
+		// The keys are made in the Vault this installer runs. One elsewhere
+		// cannot ask this cluster whose token it is shown, and a store of
+		// the user's own may not be a Vault at all.
+		if o.ExternalSecretStore || o.VaultAddr != "" {
+			return fmt.Errorf("key residency %q needs the Vault the installer runs; "+
+				"it cannot be combined with --vault-addr or --external-secret-store yet", ResidencyVault)
+		}
+	default:
+		return fmt.Errorf("key residency %q: must be %q or %q", o.KeyResidency, ResidencyCluster, ResidencyVault)
 	}
 	if !trustDomainPattern.MatchString(o.TrustDomain) {
 		return fmt.Errorf("trust domain %q: must be lower-case letters, digits, dots, dashes and underscores", o.TrustDomain)

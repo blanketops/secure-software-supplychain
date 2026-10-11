@@ -56,6 +56,7 @@ func installCmd() *cobra.Command {
 	var onlyStep string
 	var externalSecretStore bool
 	var noImagePull bool
+	var keyResidency string
 	var vaultAddr string
 
 	cmd := &cobra.Command{
@@ -89,6 +90,7 @@ Example:
 
 				ExternalSecretStore: externalSecretStore,
 				NoImagePull:         noImagePull,
+				KeyResidency:        keyResidency,
 				VaultAddr:           vaultAddr,
 			})
 			if err != nil {
@@ -107,6 +109,9 @@ Example:
 		"How workloads identify themselves to Fulcio: \"kubernetes\" (ServiceAccount tokens) or \"spiffe\" (installs SPIRE; signatures carry SPIFFE IDs)")
 	cmd.Flags().StringVar(&trustDomain, "trust-domain", installer.DefaultTrustDomain,
 		"SPIFFE trust domain, used with --signing-identity spiffe")
+	cmd.Flags().StringVar(&keyResidency, "key-residency", installer.ResidencyCluster,
+		"Where Fulcio's and Rekor's signing keys are kept: \"cluster\" (files in Kubernetes Secrets) or "+
+			"\"vault\" (made in Vault's Transit engine and never exported; the services ask Vault to sign)")
 	cmd.Flags().BoolVar(&noImagePull, "no-image-pull", false,
 		"Do not pull every image at the start; each step then pulls its own when it is reached")
 	cmd.Flags().BoolVar(&externalSecretStore, "external-secret-store", false,

@@ -252,8 +252,9 @@ func TestSpireStepsOnlyForSPIFFE(t *testing.T) {
 		t.Errorf("a Kubernetes-identity install includes SPIRE steps: %s", joined)
 	}
 	joined := strings.Join(steps(spiffeOptions()), ",")
-	// SPIRE has to be up before Fulcio is told to trust its issuer.
-	if !strings.Contains(joined, "SPIRE CRDs,SPIRE,SPIRE Identities,Fulcio") {
+	// SPIRE has to be up before Fulcio is told to trust its issuer, and
+	// Vault before Fulcio and Rekor, which may sign with keys it holds.
+	if !strings.Contains(joined, "SPIRE CRDs,SPIRE,SPIRE Identities,Vault,Fulcio,Rekor") {
 		t.Errorf("SPIFFE install order = %s", joined)
 	}
 }

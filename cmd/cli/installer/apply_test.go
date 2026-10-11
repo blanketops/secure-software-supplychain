@@ -68,3 +68,48 @@ func TestApplyObjectRetriesWhenTheObjectChangedUnderIt(t *testing.T) {
 		t.Errorf("after %d conflicts left, the object holds %q, want \"new\"", conflicts, value)
 	}
 }
+
+// A component that generates its own certificate ships an empty Secret for
+// it, and fills it when it starts. A second install must not empty it again:
+// Tekton's interceptors then serve nothing until they are restarted.
+func TestApplyObjectLeavesAFilledPlaceholderSecret(t *testing.T) {
+	gvk := schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	secret := func(data map[string]any) *unstructured.Unstructured {
+		obj := &unstructured.Unstructured{Object: map[string]any{}}
+		if data != nil {
+			obj.Object["data"] = data
+		}
+		obj.SetGroupVersionKind(gvk)
+		obj.SetNamespace("default")
+		obj.SetName("certs")
+		return obj
+	}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(gvk, meta.RESTScopeNamespace)
+	read := func(client *dynamicfake.FakeDynamicClient) map[string]any {
+		got, err := client.Resource(gvr).Namespace("default").Get(context.Background(), "certs", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _, _ := unstructured.NestedMap(got.Object, "data")
+		return data
+	}
+
+	client := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), secret(map[string]any{"server-key.pem": "a2V5"}))
+	i := &Installer{dynamic: client, mapper: mapper}
+	if err := i.applyObject(context.Background(), secret(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if len(read(client)) != 1 {
+		t.Error("the empty placeholder replaced what the component had generated")
+	}
+
+	// A Secret the manifest gives a value for is still set to that value.
+	if err := i.applyObject(context.Background(), secret(map[string]any{"token": "bmV3"})); err != nil {
+		t.Fatal(err)
+	}
+	if data := read(client); data["token"] != "bmV3" || len(data) != 1 {
+		t.Errorf("a Secret with a value in the manifest was not applied: %v", data)
+	}
+}

@@ -113,6 +113,9 @@ type step struct {
 	// PullsImages makes the step pull the images of every step after it,
 	// instead of applying anything of its own.
 	PullsImages bool
+	// Mutate changes an object of the step's manifests before it is applied,
+	// or reports false to leave it out.
+	Mutate func(i *Installer, obj *unstructured.Unstructured) bool
 }
 
 // onlyForSPIFFE skips a step unless the signing identity is SPIFFE.
@@ -222,8 +225,44 @@ var installOrder = []step{
 		},
 	},
 	{
-		Name:  "Fulcio",
-		Paths: []string{"dependencies/sigstore/fulcio"},
+		// Where the credentials live, unless a Vault that already exists is
+		// used (--vault-addr) or the store is the user's own. It comes before
+		// Fulcio and Rekor because, with --key-residency vault, they sign with
+		// keys it holds.
+		Name:  "Vault",
+		Paths: []string{"dependencies/vault/server"},
+		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore || i.opts.VaultAddr != "" },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			vaultSp := newSpinner("Initialising and unsealing Vault...")
+			vaultSp.start()
+			if err := i.startVault(ctx); err != nil {
+				vaultSp.fail("Vault not ready")
+				return err
+			}
+			vaultSp.succeed("Vault ready")
+			return nil
+		},
+	},
+	{
+		// With --key-residency vault: the keys Fulcio and Rekor sign with are
+		// made in Vault, before either of them starts.
+		Name: "Signing Keys",
+		Skip: func(i *Installer) bool { return !i.keysInVault() },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			keysSp := newSpinner("Creating the signing keys in Vault...")
+			keysSp.start()
+			if err := i.ensureSigningKeys(ctx); err != nil {
+				keysSp.fail("No signing keys")
+				return err
+			}
+			keysSp.succeed("Fulcio's and Rekor's keys are in Vault, and cannot be exported")
+			return nil
+		},
+	},
+	{
+		Name:   "Fulcio",
+		Paths:  []string{"dependencies/sigstore/fulcio"},
+		Mutate: mutateForKeyResidency,
 		PostHook: func(ctx context.Context, i *Installer) error {
 			if !i.spiffe() {
 				return nil
@@ -239,10 +278,15 @@ var installOrder = []step{
 		},
 	},
 	{
-		Name:  "Rekor",
-		Paths: []string{"dependencies/sigstore/rekor"},
-		// Rekor's pod mounts its signing key, so the key has to be there first.
+		Name:   "Rekor",
+		Paths:  []string{"dependencies/sigstore/rekor"},
+		Mutate: mutateForKeyResidency,
+		// Rekor's pod mounts its signing key, so the key has to be there
+		// first; unless the key is in Vault, where there is nothing to mount.
 		PreHook: func(ctx context.Context, i *Installer) error {
+			if i.keysInVault() {
+				return nil
+			}
 			return i.ensureRekorSigningKey(ctx)
 		},
 		PostHook: func(ctx context.Context, i *Installer) error {
@@ -387,23 +431,6 @@ var installOrder = []step{
 		Paths: []string{"dependencies/ingress/routes"},
 	},
 	{
-		// Where the credentials live, unless a Vault that already exists is
-		// used (--vault-addr) or the store is the user's own.
-		Name:  "Vault",
-		Paths: []string{"dependencies/vault/server"},
-		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore || i.opts.VaultAddr != "" },
-		PostHook: func(ctx context.Context, i *Installer) error {
-			vaultSp := newSpinner("Initialising and unsealing Vault...")
-			vaultSp.start()
-			if err := i.startVault(ctx); err != nil {
-				vaultSp.fail("Vault not ready")
-				return err
-			}
-			vaultSp.succeed("Vault ready")
-			return nil
-		},
-	},
-	{
 		// The store's own identity, with SPIFFE: SPIRE issues the secrets
 		// ServiceAccount a JWT-SVID, and this keeps it where External Secrets
 		// can present it to Vault.
@@ -474,6 +501,8 @@ type Installer struct {
 	// restConfig is kept for operations that need a raw REST client
 	// (e.g. reading pod logs), where the dynamic client is insufficient.
 	restConfig *rest.Config
+	// mutate is the Mutate of the step being applied.
+	mutate func(i *Installer, obj *unstructured.Unstructured) bool
 }
 
 // New creates an Installer from a kubeconfig path.
@@ -547,14 +576,20 @@ func (i *Installer) Install(ctx context.Context) error {
 		fmt.Printf("   Resuming from: %s\n\n", i.opts.FromStep)
 	}
 
+	pullingImages := false
 	for idx, s := range steps {
 		fmt.Printf("[%d/%d] %s\n", idx+1, len(steps), s.Name)
 
 		if s.PullsImages {
 			if !i.dryRun {
-				i.prePullImages(ctx, steps[idx+1:])
+				pullingImages = i.startImagePulls(ctx, steps[idx+1:])
 			}
 			continue
+		}
+		if pullingImages {
+			if note := i.imagePullNote(ctx); note != "" {
+				fmt.Printf("  ↓ %s\n", note)
+			}
 		}
 
 		if s.PreHook != nil && !i.dryRun {
@@ -569,12 +604,14 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 
 		var applyErr error
+		i.mutate = s.Mutate
 		for _, dir := range s.Paths {
 			if err := i.applyDirectory(ctx, dir); err != nil {
 				applyErr = fmt.Errorf("%s failed: %w", s.Name, err)
 				break
 			}
 		}
+		i.mutate = nil
 		if applyErr != nil {
 			if !i.dryRun {
 				sp.fail(applyErr.Error())
@@ -626,6 +663,10 @@ func (i *Installer) Install(ctx context.Context) error {
 			}
 			waitSp.succeed("Tekton Triggers CRDs registered")
 		}
+	}
+
+	if pullingImages {
+		i.finishImagePulls(ctx)
 	}
 
 	fmt.Println()
@@ -1256,6 +1297,9 @@ func (i *Installer) applyManifest(ctx context.Context, data []byte, source strin
 		if obj.GetKind() == "" {
 			continue
 		}
+		if i.mutate != nil && !i.mutate(i, obj) {
+			continue
+		}
 		if i.dryRun {
 			fmt.Printf("  → [dry-run] %s/%s (%s)\n", obj.GetKind(), obj.GetName(), obj.GetNamespace())
 			docIndex++
@@ -1331,6 +1375,9 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 			holdsSetupResult(existing, key) {
 			return nil
 		}
+		if isFilledPlaceholder(obj, existing) {
+			return nil
+		}
 		obj.SetResourceVersion(existing.GetResourceVersion())
 		_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
 		// Some objects cannot be changed once created: a Job's pod template, a
@@ -1342,6 +1389,24 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 		}
 		return err
 	})
+}
+
+// isFilledPlaceholder reports whether a Secret in a manifest is an empty
+// placeholder that something in the cluster has since filled. Several
+// components ship one for the certificate they generate when they start;
+// Tekton's interceptors do, and do not generate it again while they run.
+// Applying the placeholder a second time would empty it under them.
+func isFilledPlaceholder(desired, existing *unstructured.Unstructured) bool {
+	if desired.GetKind() != "Secret" {
+		return false
+	}
+	for _, field := range []string{"data", "stringData"} {
+		if values, _, _ := unstructured.NestedMap(desired.Object, field); len(values) > 0 {
+			return false
+		}
+	}
+	filled, _, _ := unstructured.NestedMap(existing.Object, "data")
+	return len(filled) > 0
 }
 
 func (i *Installer) deleteObject(ctx context.Context, obj *unstructured.Unstructured) error {

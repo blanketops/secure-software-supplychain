@@ -436,3 +436,31 @@ func TestCosignStepsTrustTheSupplyChainCA(t *testing.T) {
 		t.Errorf("only %d cosign steps were found; sign, attest and the verifications were expected", checked)
 	}
 }
+
+// The installer pulls ahead what Images lists. Every image a step of the
+// pipeline names outright has to be in it, or the first build waits for it.
+func TestImagesListsEveryStepImage(t *testing.T) {
+	listed := map[string]bool{}
+	for _, image := range Images() {
+		listed[image] = true
+	}
+	pr := testPipelineRun(t)
+	steps := 0
+	for _, task := range pr.Spec.PipelineSpec.Tasks {
+		if task.TaskSpec == nil {
+			continue
+		}
+		for _, step := range task.TaskSpec.Steps {
+			if strings.Contains(step.Image, "$(") {
+				continue // given as a parameter, by a Task that has a default
+			}
+			steps++
+			if !listed[step.Image] {
+				t.Errorf("step %s of %s runs %s, which Images does not list", step.Name, task.Name, step.Image)
+			}
+		}
+	}
+	if steps < 5 {
+		t.Errorf("only %d steps were looked at", steps)
+	}
+}

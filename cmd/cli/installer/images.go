@@ -18,10 +18,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +37,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
 )
 
 // Almost all of an install's time is image pulls, and without help they
@@ -40,8 +45,10 @@ import (
 // installer reaches it, and each step waits for its own before the next
 // starts. The "Images" step asks for every image the install will use at the
 // start, all at once, so that the node downloads continuously, and in
-// parallel when its kubelet allows that. Later steps then find their images
-// already there.
+// parallel when its kubelet allows that. It does not wait for them: the steps
+// go ahead, each waiting only for its own images, which by then are there or
+// well on their way. What is still downloading when the last step is done,
+// the images only a build uses, is waited for at the end.
 //
 // It is an optimisation and never fails an install: an image it could not
 // pull is pulled again, with its own errors, by the step that needs it.
@@ -49,7 +56,8 @@ import (
 const (
 	// imagePullNamespace holds the pods that exist only to pull images. It is
 	// removed when the step ends.
-	imagePullNamespace = "supply-chain-image-pull"
+	imagePullNamespace  = "supply-chain-image-pull"
+	imagePullAnnotation = "supply-chain.blanketops.dev/image"
 	// imagePullGiveUp is how long images that fail to pull are retried while
 	// nothing else is still downloading.
 	imagePullGiveUp = 5 * time.Minute
@@ -99,14 +107,51 @@ func stepImages(steps []step) ([]string, error) {
 	return images, nil
 }
 
-// collectImages finds the "image" of every entry of a list of containers,
-// wherever in an object such a list is.
+// imageFlag is an argument that names an image a controller will run later,
+// such as Tekton's -entrypoint-image.
+var imageFlag = regexp.MustCompile(`^--?[a-z-]*image$`)
+
+// looksLikeImage tells an image reference from the other things a parameter
+// called "image" may default to: a path, or nothing.
+func looksLikeImage(value string) bool {
+	return value != "" && strings.Contains(value, "/") && !strings.ContainsAny(value, " $") &&
+		!strings.HasPrefix(value, "/") && !strings.HasPrefix(value, ".")
+}
+
+// collectImages finds the images an object will make the node pull: the
+// "image" of every entry of a list of containers, wherever in the object such
+// a list is; the images a container is told about in its arguments, which is
+// how Tekton names the ones it adds to every step; and the images a Task's
+// parameters default to.
 func collectImages(v any, inContainers bool, found func(string)) {
 	switch value := v.(type) {
 	case map[string]any:
 		if image, ok := value["image"].(string); ok && inContainers {
 			if image = strings.TrimSpace(image); image != "" && !strings.Contains(image, "$(") {
 				found(image)
+			}
+		}
+		if args, ok := value["args"].([]any); ok && inContainers {
+			for n, arg := range args {
+				flag, _ := arg.(string)
+				if name, image, joined := strings.Cut(flag, "="); joined && imageFlag.MatchString(name) && looksLikeImage(image) {
+					found(image)
+				} else if imageFlag.MatchString(flag) && n+1 < len(args) {
+					if image, _ := args[n+1].(string); looksLikeImage(image) {
+						found(image)
+					}
+				}
+			}
+		}
+		if value["kind"] == "Task" {
+			params, _, _ := unstructured.NestedSlice(value, "spec", "params")
+			for _, p := range params {
+				param, _ := p.(map[string]any)
+				name, _ := param["name"].(string)
+				image, _ := param["default"].(string)
+				if strings.Contains(strings.ToLower(name), "image") && looksLikeImage(image) {
+					found(image)
+				}
 			}
 		}
 		for key, child := range value {
@@ -158,14 +203,16 @@ func imagePullState(pod *unstructured.Unstructured) (state, reason string) {
 
 // imagePullPod is a pod whose only purpose is to make the node pull an image.
 // Its command does not exist in any image, so nothing of the image runs.
-func imagePullPod(index int, image string) *unstructured.Unstructured {
+func imagePullPod(image string) *unstructured.Unstructured {
+	// Named after the image, so that a second run asks for the same pod.
+	sum := sha256.Sum256([]byte(image))
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
 		"metadata": map[string]any{
-			"name":        fmt.Sprintf("pull-%03d", index),
+			"name":        "pull-" + hex.EncodeToString(sum[:6]),
 			"namespace":   imagePullNamespace,
-			"annotations": map[string]any{"supply-chain.blanketops.dev/image": image},
+			"annotations": map[string]any{imagePullAnnotation: image},
 		},
 		"spec": map[string]any{
 			"restartPolicy":                 "Never",
@@ -214,91 +261,123 @@ func pullProgress(done, total int, waiting []string) string {
 	return line
 }
 
-// prePullImages makes the node pull every image the steps will use, and
-// waits for them. It reports what could not be pulled and returns no error:
-// see the comment at the top of this file.
-func (i *Installer) prePullImages(ctx context.Context, steps []step) {
+// startImagePulls asks the node for every image the steps will use, and
+// returns at once: the steps go ahead while the images download, and each
+// waits only for its own. It reports whether anything was asked for.
+func (i *Installer) startImagePulls(ctx context.Context, steps []step) bool {
 	images, err := stepImages(steps)
 	if err != nil || len(images) == 0 {
-		return
+		return false
 	}
-	if serial := i.nodesPullingOneAtATime(ctx); len(serial) > 0 {
-		fmt.Printf("  ! %s pulls one image at a time (the kubelet's serializeImagePulls).\n"+
-			"    Images are still pulled from the start, but not in parallel.\n"+
-			"    On kind, hack/kind-parallel-pulls.sh turns parallel pulls on.\n", strings.Join(serial, ", "))
-	}
-
-	namespaces := i.dynamic.Resource(namespaceGVR)
-	pods := i.dynamic.Resource(podGVR).Namespace(imagePullNamespace)
-	cleanup := func() {
-		policy := metav1.DeletePropagationBackground
-		_ = namespaces.Delete(context.WithoutCancel(ctx), imagePullNamespace,
-			metav1.DeleteOptions{PropagationPolicy: &policy})
+	// And what the pipeline's own steps run, which the first build would
+	// otherwise wait for.
+	for _, image := range pipeline.Images() {
+		if !slices.Contains(images, image) {
+			images = append(images, image)
+		}
 	}
 	if err := i.applyObject(ctx, &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": imagePullNamespace},
 	}}); err != nil {
 		fmt.Printf("  ! Images are not pulled ahead: %v\n", err)
-		return
+		return false
 	}
-	defer cleanup()
-	for index, image := range images {
-		if _, err := pods.Create(ctx, imagePullPod(index, image), metav1.CreateOptions{}); err != nil {
-			// Left over from a run that was interrupted, or refused: either
-			// way the step that needs the image will pull it.
-			continue
-		}
+	pods := i.dynamic.Resource(podGVR).Namespace(imagePullNamespace)
+	for _, image := range images {
+		// A pod that is already there, from a run that was interrupted, is
+		// pulling or has pulled the same image: its name is made from it.
+		_, _ = pods.Create(ctx, imagePullPod(image), metav1.CreateOptions{})
 	}
+	fmt.Printf("  ✓ Asked the node for %d images; the steps go ahead while they download\n", len(images))
+	if serial := i.nodesPullingOneAtATime(ctx); len(serial) > 0 {
+		fmt.Printf("  ! %s pulls one image at a time (the kubelet's serializeImagePulls).\n"+
+			"    On kind, hack/kind-parallel-pulls.sh turns parallel pulls on.\n", strings.Join(serial, ", "))
+	}
+	return true
+}
 
-	sp := newSpinner(pullProgress(0, len(images), nil))
-	sp.start()
-	deadline := time.Now().Add(readyTimeout)
-	var onlyFailingSince time.Time
+// imagePullCounts reads how far the pulls are: how many images are on the
+// node, which are still coming, and which are failing and why.
+func (i *Installer) imagePullCounts(ctx context.Context, pulledByEvent map[string]bool) (
+	done, total int, waiting []string, failing map[string]string, err error,
+) {
 	// The kubelet says "Pulled" the moment an image is there. A pod's status
 	// can lag behind that for a long time when its container then fails to
 	// start, which here it always does, so the event is believed as well.
 	events := i.dynamic.Resource(schema.GroupVersionResource{Version: "v1", Resource: "events"}).
 		Namespace(imagePullNamespace)
-	pulledByEvent := map[string]bool{}
-	for {
-		if said, err := events.List(ctx, metav1.ListOptions{FieldSelector: "reason=Pulled"}); err == nil {
-			for _, event := range said.Items {
-				if name, _, _ := unstructured.NestedString(event.Object, "involvedObject", "name"); name != "" {
-					pulledByEvent[name] = true
-				}
+	if said, err := events.List(ctx, metav1.ListOptions{FieldSelector: "reason=Pulled"}); err == nil {
+		for _, event := range said.Items {
+			if name, _, _ := unstructured.NestedString(event.Object, "involvedObject", "name"); name != "" {
+				pulledByEvent[name] = true
 			}
 		}
-		list, err := pods.List(ctx, metav1.ListOptions{})
-		done, waiting, failing := 0, []string{}, map[string]string{}
+	}
+	list, err := i.dynamic.Resource(podGVR).Namespace(imagePullNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	failing = map[string]string{}
+	for idx := range list.Items {
+		pod := &list.Items[idx]
+		image := pod.GetAnnotations()[imagePullAnnotation]
+		state, reason := imagePullState(pod)
+		if pulledByEvent[pod.GetName()] {
+			state = imagePulled
+		}
+		switch state {
+		case imagePulled:
+			done++
+		case imageFailing:
+			failing[image] = reason
+		default:
+			waiting = append(waiting, shortImage(image))
+		}
+	}
+	return done, len(list.Items), waiting, failing, nil
+}
+
+// imagePullNote is a one-line account of the pulls, shown between steps.
+func (i *Installer) imagePullNote(ctx context.Context) string {
+	done, total, _, _, err := i.imagePullCounts(ctx, map[string]bool{})
+	if err != nil || total == 0 || done == total {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d images are on the node", done, total)
+}
+
+// finishImagePulls waits for what is still downloading once every step is
+// done, which is the images only a build uses, and removes the pods. It
+// reports what could not be pulled and returns no error: see the comment at
+// the top of this file.
+func (i *Installer) finishImagePulls(ctx context.Context) {
+	cleanup := func() {
+		policy := metav1.DeletePropagationBackground
+		_ = i.dynamic.Resource(namespaceGVR).Delete(context.WithoutCancel(ctx), imagePullNamespace,
+			metav1.DeleteOptions{PropagationPolicy: &policy})
+	}
+	defer cleanup()
+
+	sp := newSpinner("Waiting for the images builds use...")
+	sp.start()
+	deadline := time.Now().Add(readyTimeout)
+	var onlyFailingSince time.Time
+	pulledByEvent := map[string]bool{}
+	for {
+		done, total, waiting, failing, err := i.imagePullCounts(ctx, pulledByEvent)
 		if err == nil {
-			for idx := range list.Items {
-				pod := &list.Items[idx]
-				image := pod.GetAnnotations()["supply-chain.blanketops.dev/image"]
-				state, reason := imagePullState(pod)
-				if pulledByEvent[pod.GetName()] {
-					state = imagePulled
-				}
-				switch state {
-				case imagePulled:
-					done++
-				case imageFailing:
-					failing[image] = reason
-				default:
-					waiting = append(waiting, shortImage(image))
-				}
-			}
-			if done+len(failing) == len(list.Items) && len(failing) == 0 {
-				sp.succeed(fmt.Sprintf("%d images pulled", done))
+			if done == total {
+				sp.succeed(fmt.Sprintf("All %d images are on the node", done))
 				return
 			}
 			retrying := make([]string, 0, len(failing))
 			for image := range failing {
 				retrying = append(retrying, shortImage(image)+" (retrying)")
 			}
-			sp.updateMessage(pullProgress(done, len(list.Items), append(waiting, retrying...)))
+			sp.updateMessage(pullProgress(done, total, append(waiting, retrying...)))
 
 			// Only failures left: give them a while, then leave them to the
-			// steps that need them.
+			// builds that need them.
 			if len(waiting) == 0 && len(failing) > 0 {
 				if onlyFailingSince.IsZero() {
 					onlyFailingSince = time.Now()
@@ -309,7 +388,7 @@ func (i *Installer) prePullImages(ctx context.Context, steps []step) {
 		}
 		gaveUp := !onlyFailingSince.IsZero() && time.Since(onlyFailingSince) > imagePullGiveUp
 		if gaveUp || time.Now().After(deadline) {
-			sp.succeed(fmt.Sprintf("%d of %d images pulled; the rest are pulled by the steps that use them", done, len(images)))
+			sp.succeed(fmt.Sprintf("%d of %d images are on the node; the rest are pulled when first used", done, total))
 			for image, reason := range failing {
 				fmt.Printf("  ! could not pull %s (%s)\n", image, reason)
 			}
