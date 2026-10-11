@@ -66,8 +66,8 @@ because on a slow connection almost all of the time is image pulls.
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
 | SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
-| Fulcio | The certificate authority, with its CT log, both served over HTTPS, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
-| Rekor | The transparency log, served over HTTPS, with its Trillian database and a signing key that survives restarts |
+| Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
+| Rekor | The transparency log, with its Trillian database and a signing key that survives restarts |
 | Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
 | Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
@@ -82,30 +82,41 @@ It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key)
 
 ### TLS between the services
 
-The services of the supply chain are being moved to HTTPS, each with a certificate from the private CA above.
-The sigstore services are done:
+Every service of the supply chain is reached over HTTPS only, with a certificate from the private CA above:
 
-| Service | Address | |
-|---|---|---|
-| Rekor | `https://rekor-server.rekor-system.svc.cluster.local` | HTTPS only |
-| Fulcio | `https://fulcio-server.fulcio-system.svc.cluster.local` | HTTPS only |
-| CT log | `https://ctlog.ctlog-system.svc/fulcio` | HTTPS only |
-| Vault, SPIRE OIDC discovery | `http://…` | still plain HTTP inside the cluster |
+| Service | Address |
+|---|---|
+| Rekor | `https://rekor-server.rekor-system.svc.cluster.local` |
+| Fulcio | `https://fulcio-server.fulcio-system.svc.cluster.local` |
+| CT log | `https://ctlog.ctlog-system.svc/fulcio` |
+| Vault | `https://vault.vault.svc.cluster.local:8200` |
+| SPIRE OIDC discovery | `https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local` |
 
-None of the three serves its HTTP API over TLS in a way that follows a renewed certificate. Each listens on its
-pod's loopback address, where nothing outside the pod reaches it, and a `tls` container in the same pod serves
-it on the Service's port 443. Fulcio's gRPC port is closed the same way and is no longer exposed. cert-manager
-renews the certificates (90 days, renewed after 60) and the container picks a new one up within the hour.
+Rekor, Fulcio, the CT log and Vault do not serve their HTTP API over TLS in a way that follows a renewed
+certificate. Each listens on its pod's loopback address, where nothing outside the pod reaches it, and a `tls`
+container in the same pod serves it on the Service's port. Fulcio's gRPC port is closed the same way and is no
+longer exposed. SPIRE's discovery provider already sits behind nginx, which serves the certificate. cert-manager
+renews the certificates (90 days, renewed after 60) and each container picks a new one up within the hour, so
+nothing is restarted, which matters for Vault: a restart seals it.
 
-Fulcio submits every certificate it issues to the CT log, and verifies the CT log's certificate against the CA.
+Who verifies whom, always against the CA and in addition to the public CAs an image already trusts:
 
-Everything that talks to these services trusts the CA and nothing else new:
+- the pipeline's cosign steps and the operator, for Fulcio and Rekor, read it from the `ca.crt` key of the
+  `blanketops-sigstore-roots` ConfigMap, next to the sigstore trust anchors;
+- Tekton Chains and the policy controller, for Fulcio and Rekor, get it from a `supply-chain-ca` ConfigMap in
+  their namespace;
+- Fulcio verifies the CT log, which it submits every certificate to, and SPIRE's discovery;
+- External Secrets verifies Vault (`caProvider` on the store), and Vault verifies SPIRE's discovery;
+- the CLI verifies Vault and Rekor when it talks to them.
 
-- the pipeline's cosign steps and the operator read it from the `ca.crt` key of the `blanketops-sigstore-roots`
-  ConfigMap, next to the sigstore trust anchors;
-- Tekton Chains and the policy controller get it from a `supply-chain-ca` ConfigMap in their namespace.
+`kubectl exec -n vault vault-0 -c vault -- vault …` still works as before: it runs inside the pod, on loopback.
 
-In each case it is added to the public CAs the image already trusts, so registries keep verifying.
+> **The discovery address is also an identity.** It is the issuer written into every JWT-SVID, and so into
+> every signing certificate, and Fulcio, Vault and the admission policies match it exactly. Moving it from
+> `http://` to `https://` therefore changes who signed: images signed before the change are no longer admitted
+> and have to be built again. The installer restarts SPIRE's server and agent and the store's identity when the
+> issuer changes, so that none of them keeps handing out tokens with the old one. After upgrading an existing
+> install, run it once end to end.
 
 To use a CA of your own, put its certificate and key in the Secret `cert-manager/supply-chain-ca` (`tls.crt`,
 `tls.key`) before installing. To look at what is issued:
@@ -238,10 +249,12 @@ External Secrets ── presents it ──► Vault auth/jwt
 - **SPIRE** has one entry for the identity, for the ServiceAccount `vault/supply-chain-secrets` on an attested
   node. No other pod can obtain it. The `Secret Store Identity` step creates it with the rest of the SPIRE
   identities.
-- **Vault** has JWT auth at `auth/jwt` pointed at SPIRE's OIDC discovery endpoint, and one role:
+- **Vault** has JWT auth at `auth/jwt` pointed at SPIRE's OIDC discovery endpoint, which it verifies against
+  the supply chain's CA, and one role:
 
   ```bash
-  vault write auth/jwt/config oidc_discovery_url=<SPIRE OIDC discovery> bound_issuer=<the same>
+  vault write auth/jwt/config oidc_discovery_url=<SPIRE OIDC discovery> bound_issuer=<the same> \
+      oidc_discovery_ca_pem=@<the CA>
   vault write auth/jwt/role/supply-chain role_type=jwt user_claim=sub \
       bound_audiences=vault \
       bound_subject=spiffe://<your-domain>/ns/vault/sa/supply-chain-secrets \
@@ -270,9 +283,14 @@ metadata:
 spec:
   provider:
     vault:
-      server: http://vault.vault.svc.cluster.local:8200
+      server: https://vault.vault.svc.cluster.local:8200
       path: secret              # the key-value (version 2) engine
       version: v2
+      caProvider:               # Vault's certificate comes from the supply chain's CA
+        type: ConfigMap
+        name: supply-chain-ca
+        key: ca.crt
+        namespace: vault
       auth:
         jwt:                    # the JWT is a SPIFFE JWT-SVID, valid for minutes
           path: jwt
@@ -312,10 +330,9 @@ spec:
     remoteRef: { key: supplychain/git/ssh-privatekey, property: value }
 ```
 
-> **Before production.** Three things here are set up for a self-contained demonstration, and are yours to
-> change: Vault and SPIRE's OIDC discovery are still reached over plain HTTP inside the cluster (see
-> [TLS between the services](#tls-between-the-services));
-> Vault runs as a single server on a file volume; and its unseal key is kept next to it, as the next note says.
+> **Before production.** Two things here are set up for a self-contained demonstration, and are yours to
+> change: Vault runs as a single server on a file volume, and its unseal key is kept next to it, as the next
+> note says.
 
 > **Vault's own keys are in the cluster.** Vault seals itself whenever its pod restarts, and a sidecar unseals
 > it with a key the installer keeps in the `vault-unseal` Secret, next to Vault's root token. That is what makes

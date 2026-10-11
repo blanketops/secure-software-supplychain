@@ -50,6 +50,10 @@ the CA that Rekor's and Fulcio's certificates come from. It is the `ca.crt` key 
 the build's namespace; if the key is missing, run `supplychain install --only-step "Tekton Chains"`, which
 collects the trust anchors again. If the CA itself was replaced, the same step distributes the new one.
 
+**An image that used to be admitted is refused after an upgrade.** If the upgrade moved SPIRE's discovery
+address to `https://`, the issuer in the image's signing certificate is the old one, and the policies now name
+the new one. Build the image again. See [TLS between the services](installation.md#tls-between-the-services).
+
 **A build waits for its secrets and never starts.** The `ExternalSecret` objects cannot be synced. Look at the
 store first:
 

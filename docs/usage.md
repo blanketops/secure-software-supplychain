@@ -96,7 +96,7 @@ The last step of a successful build prints what it verified:
 Supply chain policy verification
   Image:          docker.io/your-dockerhub-user/your-app:<sha>@sha256:...
   Signer:         spiffe://<your-domain>/ns/default/sa/supply-chain-runner
-  Issuer:         http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
+  Issuer:         https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
   Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)
   Authorization:  verified (scope, intent, output allowed)
   Chains signer:  spiffe://<your-domain>/ns/tekton-chains/sa/tekton-chains-controller
