@@ -254,14 +254,31 @@ func (i *Installer) prePullImages(ctx context.Context, steps []step) {
 	sp.start()
 	deadline := time.Now().Add(readyTimeout)
 	var onlyFailingSince time.Time
+	// The kubelet says "Pulled" the moment an image is there. A pod's status
+	// can lag behind that for a long time when its container then fails to
+	// start, which here it always does, so the event is believed as well.
+	events := i.dynamic.Resource(schema.GroupVersionResource{Version: "v1", Resource: "events"}).
+		Namespace(imagePullNamespace)
+	pulledByEvent := map[string]bool{}
 	for {
+		if said, err := events.List(ctx, metav1.ListOptions{FieldSelector: "reason=Pulled"}); err == nil {
+			for _, event := range said.Items {
+				if name, _, _ := unstructured.NestedString(event.Object, "involvedObject", "name"); name != "" {
+					pulledByEvent[name] = true
+				}
+			}
+		}
 		list, err := pods.List(ctx, metav1.ListOptions{})
 		done, waiting, failing := 0, []string{}, map[string]string{}
 		if err == nil {
 			for idx := range list.Items {
 				pod := &list.Items[idx]
 				image := pod.GetAnnotations()["supply-chain.blanketops.dev/image"]
-				switch state, reason := imagePullState(pod); state {
+				state, reason := imagePullState(pod)
+				if pulledByEvent[pod.GetName()] {
+					state = imagePulled
+				}
+				switch state {
 				case imagePulled:
 					done++
 				case imageFailing:
