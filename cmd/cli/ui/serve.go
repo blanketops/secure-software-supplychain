@@ -31,7 +31,7 @@ import (
 	"time"
 )
 
-//go:embed supply_chain.html rbac.html
+//go:embed supply_chain.html rbac.html observer.css
 var static embed.FS
 
 const (
@@ -67,24 +67,34 @@ func Serve(ctx context.Context, page string) error {
 	// ── 4. routes ───────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 
-	// UI page
+	// The pages. "/" is the one that was asked for; both are always there,
+	// so that each can link to the other.
+	servePage := func(file, contentType string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			data, err := static.ReadFile(file)
+			if err != nil {
+				http.Error(w, "page not found", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", contentType)
+			_, _ = w.Write(data)
+		}
+	}
+	const html = "text/html; charset=utf-8"
+	if page == "" {
+		page = "supply_chain.html"
+	}
+	first := servePage(page, html)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		f := page
-		if f == "" {
-			f = "supply_chain.html"
-		}
-		data, err := static.ReadFile(f)
-		if err != nil {
-			http.Error(w, "page not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
+		first(w, r)
 	})
+	mux.HandleFunc("/overview", servePage("supply_chain.html", html))
+	mux.HandleFunc("/permissions", servePage("rbac.html", html))
+	mux.HandleFunc("/observer.css", servePage("observer.css", "text/css; charset=utf-8"))
 
 	// Kubernetes core API — forwarded to kubectl proxy
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +105,9 @@ func Serve(ctx context.Context, page string) error {
 	mux.HandleFunc("/apis/", func(w http.ResponseWriter, r *http.Request) {
 		rp.ServeHTTP(w, r)
 	})
+
+	// What Rekor, Fulcio and the CT log themselves say, decoded for the page.
+	mux.Handle("/sigstore/", newQuerier("http://"+proxyAddr).handler())
 
 	// ── 5. start server ─────────────────────────────────────────────────
 	srv := &http.Server{
