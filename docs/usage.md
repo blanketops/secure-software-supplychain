@@ -31,9 +31,9 @@ spec:
       tokenSecretRef: sonarqube-token
       projectKey: your-org_your-app
   signing:
-    fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
+    fulcioURL: https://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: https://rekor-server.rekor-system.svc.cluster.local
-    ctLogURL: http://ctlog.ctlog-system.svc/fulcio
+    ctLogURL: https://ctlog.ctlog-system.svc/fulcio
 ```
 
 ## GitHubWebhook

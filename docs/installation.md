@@ -66,7 +66,7 @@ because on a slow connection almost all of the time is image pulls.
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
 | SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
-| Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
+| Fulcio | The certificate authority, with its CT log, both served over HTTPS, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
 | Rekor | The transparency log, served over HTTPS, with its Trillian database and a signing key that survives restarts |
 | Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
@@ -83,18 +83,23 @@ It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key)
 ### TLS between the services
 
 The services of the supply chain are being moved to HTTPS, each with a certificate from the private CA above.
-Rekor is the first:
+The sigstore services are done:
 
 | Service | Address | |
 |---|---|---|
 | Rekor | `https://rekor-server.rekor-system.svc.cluster.local` | HTTPS only |
-| Fulcio, CT log, Vault, SPIRE OIDC discovery | `http://…` | still plain HTTP inside the cluster |
+| Fulcio | `https://fulcio-server.fulcio-system.svc.cluster.local` | HTTPS only |
+| CT log | `https://ctlog.ctlog-system.svc/fulcio` | HTTPS only |
+| Vault, SPIRE OIDC discovery | `http://…` | still plain HTTP inside the cluster |
 
-Rekor itself only speaks plain HTTP. It listens on its pod's loopback address, where nothing outside the pod
-reaches it, and a `tls` container in the same pod serves it on the Service's port 443. cert-manager renews the
-certificate (90 days, renewed after 60) and the container picks the new one up within the hour.
+None of the three serves its HTTP API over TLS in a way that follows a renewed certificate. Each listens on its
+pod's loopback address, where nothing outside the pod reaches it, and a `tls` container in the same pod serves
+it on the Service's port 443. Fulcio's gRPC port is closed the same way and is no longer exposed. cert-manager
+renews the certificates (90 days, renewed after 60) and the container picks a new one up within the hour.
 
-Everything that talks to Rekor trusts the CA and nothing else new:
+Fulcio submits every certificate it issues to the CT log, and verifies the CT log's certificate against the CA.
+
+Everything that talks to these services trusts the CA and nothing else new:
 
 - the pipeline's cosign steps and the operator read it from the `ca.crt` key of the `blanketops-sigstore-roots`
   ConfigMap, next to the sigstore trust anchors;

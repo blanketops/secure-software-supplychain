@@ -164,8 +164,8 @@ relying on it:
   key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
   demonstration and not for production. Any other External Secrets provider can be
   [used instead](docs/installation.md#using-a-secret-store-of-your-own).
-- Rekor is served over HTTPS with a certificate from a private CA. Fulcio, the CT log, Vault and SPIRE's OIDC
-  discovery are still reached over plain HTTP inside the cluster; they are next.
+- Rekor, Fulcio and the CT log are served over HTTPS only, with certificates from a private CA. Vault and
+  SPIRE's OIDC discovery are still reached over plain HTTP inside the cluster; they are next.
 - The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
   half of the proof has not been run.
 - Branch names containing `/` cannot trigger a build yet.

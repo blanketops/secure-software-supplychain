@@ -132,13 +132,13 @@ spec:
   - serviceAccountName: supply-chain-runner
   trustRoot:
     fulcio:
-      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      url: https://fulcio-server.fulcio-system.svc.cluster.local
       pemRef: {name: blanketops-sigstore-roots, key: fulcio-root.pem}
     rekor:
       url: https://rekor-server.rekor-system.svc.cluster.local
       pemRef: {name: blanketops-sigstore-roots, key: rekor.pub}
     ctLog:
-      url: http://ctlog.ctlog-system.svc/fulcio
+      url: https://ctlog.ctlog-system.svc/fulcio
       pemRef: {name: blanketops-sigstore-roots, key: ctfe.pub}
 ```
 

@@ -46,7 +46,7 @@ Replace it with `supplychain secrets set github/token=@<file>`. The operator tri
 the webhook registers by itself once the new token has synced.
 
 **A sign or verify step fails with "x509: certificate signed by unknown authority".** The step does not have
-the CA Rekor's certificate comes from. It is the `ca.crt` key of the `blanketops-sigstore-roots` ConfigMap in
+the CA that Rekor's and Fulcio's certificates come from. It is the `ca.crt` key of the `blanketops-sigstore-roots` ConfigMap in
 the build's namespace; if the key is missing, run `supplychain install --only-step "Tekton Chains"`, which
 collects the trust anchors again. If the CA itself was replaced, the same step distributes the new one.
 
