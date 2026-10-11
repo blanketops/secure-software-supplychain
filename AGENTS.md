@@ -12,7 +12,7 @@ internal/webhook/*             Validation/defaulting (if present)
 config/crd/bases/*             Generated CRDs (DO NOT EDIT)
 config/rbac/role.yaml          Generated RBAC (DO NOT EDIT)
 config/samples/*               Example CRs (edit these)
-magefiles/                     Build/test/deploy targets (mage; `go run mage.go -l` lists them)
+magefiles/                     Build/test/deploy targets (mage; `mage help` lists them)
 .ko.yaml                       How ko builds the controller image (no Dockerfile)
 PROJECT                        Kubebuilder metadata Auto-generated (DO NOT EDIT)
 ```

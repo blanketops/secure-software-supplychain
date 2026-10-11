@@ -16,16 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The project's build, as mage targets. Run "mage -l" for the list, or
-// "go run mage.go -l" without mage installed.
-//
-// Targets are configured from the environment:
-//
-//	IMG               the controller image, for example ghcr.io/your-org/controller:v1 (default controller:latest)
-//	PLATFORMS         what ko:push builds for (default linux/amd64,linux/arm64)
-//	IMAGE_ARCHIVE     where ko:build writes the image (default bin/controller-image.tar)
-//	KIND_CLUSTER      the kind cluster ko:load and the e2e tests use
-//	IGNORE_NOT_FOUND  "true" lets uninstall and undeploy pass when something is already gone
+// The project's build. "mage help" lists the targets and their settings.
 package main
 
 import (
@@ -43,8 +34,33 @@ import (
 	"github.com/magefile/mage/sh"
 )
 
-// Default is what a bare "mage" runs.
-var Default = Build
+// Default is what a bare "mage" runs: the list of targets.
+var Default = Help
+
+// Help lists the targets and the settings they read from the environment.
+func Help() error {
+	// The compiled magefile lists its own targets.
+	if err := sh.RunV(os.Args[0], "-l"); err != nil {
+		return err
+	}
+	fmt.Print(`
+Settings, read from the environment:
+  IMG               the controller image, for example ghcr.io/your-org/controller:v1
+                    (default controller:latest)
+  PLATFORMS         what ko:push builds for (default linux/amd64,linux/arm64)
+  IMAGE_ARCHIVE     where ko:build writes the image (default bin/controller-image.tar)
+  KIND_CLUSTER      the kind cluster ko:load and the e2e tests use
+  IGNORE_NOT_FOUND  "true" lets uninstall and undeploy pass when something is already gone
+
+Examples:
+  mage test
+  IMG=ghcr.io/your-org/controller:v1 mage ko:push deploy
+  IMG=controller:dev KIND_CLUSTER=my-cluster mage ko:build ko:load install deploy
+
+Without mage installed: go run mage.go <target>
+`)
+	return nil
+}
 
 const defaultKindCluster = "secure-software-supply-chain-test-e2e"
 
@@ -249,7 +265,7 @@ func BuildInstaller() error {
 	return os.WriteFile(filepath.Join("dist", "install.yaml"), []byte(manifests), 0o644)
 }
 
-// ── Supply chain CLI ─────────────────────────────────────────────────────────
+// ── Secure software supply chain CLI ─────────────────────────────────────────────────────────
 
 // Cli builds and runs the supplychain CLI, which installs what the operator depends on.
 type Cli mg.Namespace
@@ -260,25 +276,25 @@ func (Cli) Build() error {
 	return sh.RunV("go", "build", "-o", filepath.Join("bin", "supplychain"), "./cmd/cli")
 }
 
-// Install installs the supply chain's dependencies onto the current cluster.
+// Install installs the secure software supply chain's dependencies onto the current cluster.
 func (Cli) Install() error {
 	mg.Deps(Cli.Build)
 	return sh.RunV(binary("supplychain"), "install")
 }
 
-// Uninstall removes the supply chain's dependencies from the current cluster.
+// Uninstall removes the secure software supply chain's dependencies from the current cluster.
 func (Cli) Uninstall() error {
 	mg.Deps(Cli.Build)
 	return sh.RunV(binary("supplychain"), "uninstall")
 }
 
-// Status checks the supply chain's dependencies.
+// Status checks the secure software supply chain's dependencies.
 func (Cli) Status() error {
 	mg.Deps(Cli.Build)
 	return sh.RunV(binary("supplychain"), "status")
 }
 
-// Reinstall uninstalls and then installs the supply chain's dependencies.
+// Reinstall uninstalls and then installs the secure software supply chain's dependencies.
 func (Cli) Reinstall() error {
 	mg.Deps(Cli.Build)
 	_ = sh.RunV(binary("supplychain"), "uninstall")

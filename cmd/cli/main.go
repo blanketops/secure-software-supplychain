@@ -59,8 +59,8 @@ func installCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install supply chain dependencies onto the cluster",
-		Long: `Installs all supply chain platform dependencies in the correct order:
+		Short: "Install secure software supply chain dependencies onto the cluster",
+		Long: `Installs all secure software supply chain platform dependencies in the correct order:
   1. MetalLB
   2. Tekton Pipelines, Triggers, Chains, Dashboard, Tasks, Results
   3. Sigstore (Fulcio, Rekor, Policy Controller)
@@ -122,7 +122,7 @@ func uninstallCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove supply chain dependencies from the cluster",
+		Short: "Remove secure software supply chain dependencies from the cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			i, err := installer.New(kubeconfig, false)
@@ -142,13 +142,16 @@ func statusCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Check the status of supply chain dependencies",
+		Short: "Check the status of secure software supply chain dependencies",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			i, err := installer.New(kubeconfig, false)
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
 			}
+			// A dependency that is not ready is a result, not a misuse of the
+			// command: report it without the usage text.
+			cmd.SilenceUsage = true
 			return i.Status(ctx)
 		},
 	}
@@ -160,10 +163,10 @@ func statusCmd() *cobra.Command {
 func observeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "observe [rbac]",
-		Short: "Open the supply chain observer UI in your browser",
-		Long: `Starts kubectl proxy and opens the embedded supply chain observer UI.
+		Short: "Open the secure software supply chain observer UI in your browser",
+		Long: `Starts kubectl proxy and opens the embedded secure software supply chain observer UI.
 
-  supplychain observe        open the supply chain dashboard
+  supplychain observe        open the secure software supply chain dashboard
   supplychain observe rbac   open the RBAC audit dashboard`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
@@ -226,7 +229,7 @@ Example:
 	return cmd
 }
 
-// secretsCmd manages the supply chain's credentials in Vault.
+// secretsCmd manages the secure software supply chain's credentials in Vault.
 func secretsCmd() *cobra.Command {
 	var kubeconfig string
 

@@ -122,7 +122,7 @@ var installOrder = []step{
 		Paths: []string{"dependencies/metallb/release"},
 	},
 	{
-		// Issues and renews the TLS certificates the supply chain's services
+		// Issues and renews the TLS certificates the secure software supply chain's services
 		// serve. A cert-manager that is already in the cluster is used as it
 		// is.
 		Name:          "cert-manager",
@@ -142,7 +142,7 @@ var installOrder = []step{
 	},
 	{
 		// The private CA those certificates come from. Its certificate is
-		// what every client of the supply chain's services trusts.
+		// what every client of the secure software supply chain's services trusts.
 		Name:  "Certificate Authority",
 		Paths: []string{"dependencies/cert-manager/ca"},
 		PreHook: func(ctx context.Context, i *Installer) error {
@@ -449,34 +449,10 @@ var installOrder = []step{
 }
 
 // ---------------------------------------------------------------------------
-// statusChecks
-// ---------------------------------------------------------------------------
-
-var statusChecks = []struct {
-	Namespace  string
-	Deployment string
-	Label      string
-}{
-	{Namespace: "tekton-pipelines", Deployment: "tekton-pipelines-controller", Label: "Tekton Pipelines"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-pipelines-webhook", Label: "Tekton Webhook"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-triggers-controller", Label: "Tekton Triggers"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-triggers-webhook", Label: "Tekton Triggers Webhook"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-triggers-core-interceptors", Label: "Tekton Interceptors"},
-	{Namespace: "fulcio-system", Deployment: "fulcio-server", Label: "Fulcio"},
-	{Namespace: "rekor-system", Deployment: "rekor-server", Label: "Rekor"},
-	{Namespace: "tekton-chains", Deployment: "tekton-chains-controller", Label: "Tekton Chains"},
-	{Namespace: "cosign-system", Deployment: "policy-controller-webhook", Label: "Policy Controller"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-dashboard", Label: "Tekton Dashboard"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-results-api", Label: "Tekton Results API"},
-	{Namespace: "tekton-pipelines", Deployment: "tekton-results-watcher", Label: "Tekton Results Watcher"},
-	{Namespace: "ingress-nginx", Deployment: "ingress-nginx-controller", Label: "NGINX Ingress"},
-}
-
-// ---------------------------------------------------------------------------
 // Installer
 // ---------------------------------------------------------------------------
 
-// Installer applies embedded supply chain manifests to a Kubernetes cluster.
+// Installer applies embedded secure software supply chain manifests to a Kubernetes cluster.
 type Installer struct {
 	dynamic     dynamic.Interface
 	discovery   discovery.DiscoveryInterface
@@ -535,7 +511,7 @@ func NewWithOptions(kubeconfig string, dryRun bool, opts Options) (*Installer, e
 // Install / Uninstall / Status
 // ---------------------------------------------------------------------------
 
-// Install applies all supply chain dependencies in order.
+// Install applies all secure software supply chain dependencies in order.
 func (i *Installer) Install(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("🔧 Installing Secure Software Supply Chain dependencies...")
@@ -636,12 +612,12 @@ func (i *Installer) Install(ctx context.Context) error {
 	}
 
 	fmt.Println()
-	fmt.Println("✅ All supply chain dependencies installed.")
+	fmt.Println("✅ All secure software supply chain dependencies installed.")
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Wait for pods to be ready:  kubectl get pods -n tekton-pipelines")
 	fmt.Println("  2. Bootstrap SonarQube:        supplychain init-sonarqube --new-password <password>")
-	fmt.Println("  3. Deploy the supply chain operator")
+	fmt.Println("  3. Deploy the secure software supply chain operator")
 	fmt.Println("  4. Apply a SupplyChain CR")
 	fmt.Println()
 	return nil
@@ -743,7 +719,7 @@ func holdsSetupResult(cm *unstructured.Unstructured, key string) bool {
 	return value != ""
 }
 
-// Uninstall removes all supply chain dependencies in reverse order.
+// Uninstall removes all secure software supply chain dependencies in reverse order.
 func (i *Installer) Uninstall(ctx context.Context) error {
 	fmt.Println("🗑  Removing Secure Software Supply Chain dependencies...")
 	fmt.Println()
@@ -762,35 +738,7 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 		fmt.Printf("  ✓ %s removed\n", s.Name)
 	}
 	fmt.Println()
-	fmt.Println("✅ Supply chain dependencies removed.")
-	return nil
-}
-
-// Status checks whether key supply chain components are running.
-func (i *Installer) Status(ctx context.Context) error {
-	fmt.Println("📋 Supply Chain Dependency Status")
-	fmt.Println()
-	for _, check := range statusChecks {
-		deploy, err := i.dynamic.Resource(
-			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-		).Namespace(check.Namespace).Get(ctx, check.Deployment, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				fmt.Printf("  ✗ %-30s  not installed\n", check.Label)
-			} else {
-				fmt.Printf("  ✗ %-30s  error: %v\n", check.Label, err)
-			}
-			continue
-		}
-		replicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
-		desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
-		if replicas >= desired && desired > 0 {
-			fmt.Printf("  ✓ %-30s  running (%d/%d)\n", check.Label, replicas, desired)
-		} else {
-			fmt.Printf("  ⏳ %-30s  starting (%d/%d)\n", check.Label, replicas, desired)
-		}
-	}
-	fmt.Println()
+	fmt.Println("✅ Secure software supply chain dependencies removed.")
 	return nil
 }
 
@@ -963,7 +911,7 @@ func (i *Installer) readSecretKey(ctx context.Context, namespace, secretName, ke
 // fetchRekorPublicKey asks Rekor for the public key it signs the log with.
 // Rekor keeps no copy of it in a Secret, and it is not a secret: what matters
 // is that it comes from Rekor, so the connection is verified against the
-// supply chain's CA.
+// secure software supply chain's CA.
 func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
 	base, client, closeForward, err := i.httpsToPod(ctx, "rekor-system",
 		"app.kubernetes.io/name=rekor,app.kubernetes.io/component=server", 8443, "rekor-server.rekor-system.svc")
