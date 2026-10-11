@@ -75,8 +75,14 @@ type webhookResponse struct {
 	ID int64 `json:"id"`
 }
 
-// CreateWebhook registers a new webhook on a GitHub repository.
-// Returns the GitHub-assigned webhook ID.
+// CreateWebhook registers a webhook on a GitHub repository and returns the
+// GitHub-assigned webhook ID.
+//
+// GitHub refuses a second webhook with the same URL on a repository. That is
+// what a cluster that was rebuilt finds: the webhook its predecessor made is
+// still there. It is taken over instead, given this configuration and secret,
+// and its ID returned, so that deliveries are signed with the secret this
+// cluster verifies them with.
 func (c *Client) CreateWebhook(
 	ctx context.Context,
 	repository string,
@@ -128,6 +134,18 @@ func (c *Client) CreateWebhook(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		existing, found, err := c.FindWebhook(ctx, repository, hookURL)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			if err := c.UpdateWebhook(ctx, repository, existing, hookURL, events, secret, insecureSSL, contentType); err != nil {
+				return 0, err
+			}
+			return existing, nil
+		}
+	}
 	if resp.StatusCode != http.StatusCreated {
 		return 0, fmt.Errorf("GitHub API returned %d for CreateWebhook on %s", resp.StatusCode, repository)
 	}
@@ -227,6 +245,41 @@ func (c *Client) DeleteWebhook(
 	}
 
 	return nil
+}
+
+// FindWebhook looks for a webhook on the repository that delivers to hookURL.
+func (c *Client) FindWebhook(ctx context.Context, repository, hookURL string) (int64, bool, error) {
+	url := fmt.Sprintf("%s/repos/%s/hooks?per_page=100", c.baseURL, repository)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to call GitHub API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("GitHub API returned %d for FindWebhook on %s", resp.StatusCode, repository)
+	}
+	var hooks []struct {
+		ID     int64 `json:"id"`
+		Config struct {
+			URL string `json:"url"`
+		} `json:"config"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&hooks); err != nil {
+		return 0, false, fmt.Errorf("failed to decode webhooks: %w", err)
+	}
+	for _, hook := range hooks {
+		if hook.Config.URL == hookURL {
+			return hook.ID, true, nil
+		}
+	}
+	return 0, false, nil
 }
 
 // WebhookExists checks whether a webhook with the given ID exists on the repository.

@@ -25,9 +25,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 	webhookmediator "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/githubwebhook"
@@ -36,7 +38,19 @@ import (
 
 const (
 	githubWebhookFinalizer = "supplychain.blanketops.dev/githubwebhook-finalizer"
+
+	// githubRetryInterval is how long a GitHubWebhook that failed waits before
+	// it is tried again. A failure is usually a credential GitHub refuses, and
+	// asking again at once only repeats the refusal: the store is re-read once
+	// a minute, so a corrected token is picked up on the next try or the one
+	// after.
+	githubRetryInterval = 2 * time.Minute
 )
+
+// retryGitHub is the result of a reconcile that failed and is tried again later.
+func retryGitHub() *ctrl.Result {
+	return &ctrl.Result{RequeueAfter: githubRetryInterval}
+}
 
 // GitHubWebhookReconciler reconciles a GitHubWebhook object.
 type GitHubWebhookReconciler struct {
@@ -110,7 +124,7 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	ready, err := r.Mediator.EnsurePrerequisites(ctx, &ghw)
 	if err != nil {
 		logger.Error(err, "prerequisites failed")
-		return r.setPhase(ctx, &ghw, "Failed", "PrerequisitesFailed", err.Error(), nil)
+		return r.setPhase(ctx, &ghw, "Failed", "PrerequisitesFailed", err.Error(), retryGitHub())
 	}
 	if !ready {
 		logger.Info("waiting for secrets to be materialised by ESO")
@@ -123,13 +137,13 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	token, err := r.Mediator.ResolveToken(ctx, &ghw)
 	if err != nil {
 		logger.Error(err, "failed to resolve GitHub token")
-		return r.setPhase(ctx, &ghw, "Failed", "TokenResolutionFailed", err.Error(), nil)
+		return r.setPhase(ctx, &ghw, "Failed", "TokenResolutionFailed", err.Error(), retryGitHub())
 	}
 
 	webhookSecret, err := r.Mediator.ResolveWebhookSecret(ctx, &ghw)
 	if err != nil {
 		logger.Error(err, "failed to resolve webhook secret")
-		return r.setPhase(ctx, &ghw, "Failed", "WebhookSecretResolutionFailed", err.Error(), nil)
+		return r.setPhase(ctx, &ghw, "Failed", "WebhookSecretResolutionFailed", err.Error(), retryGitHub())
 	}
 
 	// ── Build GitHub client ───────────────────────────────────────────────
@@ -166,7 +180,7 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				ghw.Spec.ContentType,
 			); err != nil {
 				logger.Error(err, "failed to update webhook")
-				return r.setPhase(ctx, &ghw, "Failed", "WebhookUpdateFailed", err.Error(), nil)
+				return r.setPhase(ctx, &ghw, "Failed", "WebhookUpdateFailed", err.Error(), retryGitHub())
 			}
 
 			logger.Info("webhook updated", "webhookID", ghw.Status.WebhookID)
@@ -198,7 +212,7 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	)
 	if err != nil {
 		logger.Error(err, "failed to register webhook with GitHub")
-		return r.setPhase(ctx, &ghw, "Failed", "WebhookRegistrationFailed", err.Error(), nil)
+		return r.setPhase(ctx, &ghw, "Failed", "WebhookRegistrationFailed", err.Error(), retryGitHub())
 	}
 
 	logger.Info("webhook registered",
@@ -345,7 +359,10 @@ func (r *GitHubWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&supplychainv1alpha1.GitHubWebhook{}).
+		// Only a change to the spec, or a deletion, starts a reconcile. Without
+		// this every status write would start another, and a registration
+		// GitHub refuses would be repeated about once a second.
+		For(&supplychainv1alpha1.GitHubWebhook{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("githubwebhook").
 		Complete(r)
 }
