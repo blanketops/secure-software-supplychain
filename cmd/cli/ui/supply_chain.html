@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlanketOps — Supply Chain Observer</title>
+  <title>BlanketOps — Secure Software Supply Chain Observer</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
 
@@ -326,7 +326,7 @@
       margin-top: 0
     }
 
-    /* ── supply chain cards ── */
+    /* ── secure software supply chain cards ── */
     .sc-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1101,7 +1101,7 @@
       <div class="logo-mark"><span>BO</span></div>
       <div>
         <div class="logo-name">blanketops</div>
-        <div class="logo-sub">supply chain observer</div>
+        <div class="logo-sub">secure software supply chain observer</div>
       </div>
     </div>
     <div class="hdr-right">
@@ -1537,7 +1537,7 @@
         .filter(e => ['SupplyChain', 'ImageBuild', 'ImageSignature', 'ImageBuildResult', 'GitHubWebhook'].includes(e.involvedObject?.kind))
         .sort((a, b) => new Date(b.lastTimestamp || b.eventTime) - new Date(a.lastTimestamp || a.eventTime))
         .slice(0, 15);
-      if (!rel.length) { list.innerHTML = '<div class="empty">no supply chain events</div>'; return; }
+      if (!rel.length) { list.innerHTML = '<div class="empty">no secure software supply chain events</div>'; return; }
       list.innerHTML = rel.map(e => `
     <div class="cev-row ${e.type || 'Normal'}">
       <div class="cev-top">

@@ -6,7 +6,7 @@ the caption for each is the italic line under it.
 
 # Keyless signing answers "which key?". It does not answer "who gets to sign?"
 
-*Part 1 of 2 on building a software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. Part 2 covers admission and evidence.*
+*Part 1 of 2 on building a secure software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. Part 2 covers admission and evidence.*
 
 Keyless signing with Sigstore removes the worst part of signing container images: there is no long-lived private key to store, rotate or leak. A build proves who it is, a certificate authority called Fulcio issues it a certificate that lasts ten minutes, the build signs, and the key is thrown away.
 

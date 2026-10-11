@@ -370,7 +370,7 @@ echo "SPIFFE Workload API socket present"`
 						Script: `#!/bin/sh
 set -e
 ` + check + `
-# An in-cluster Fulcio serves a certificate from the supply chain's own CA.
+# An in-cluster Fulcio serves a certificate from the secure software supply chain's own CA.
 # It is trusted in addition to the public CAs, when there is one.
 cat /etc/ssl/certs/ca-certificates.crt > /tmp/trusted.crt
 if [ -s ` + tlsCAMountPath + "/" + signing.RootsCAKey + ` ]; then
@@ -924,7 +924,7 @@ printf '%s' "${POLICY}" > ` + authorizationPolicyPath + `
 set -e
 printf '%s' "PASS" > $(results.POLICY_VERIFICATION.path)
 printf '%s' "${IDENTITY}" > $(results.VERIFIED_SIGNER.path)
-echo "Supply chain policy verification"
+echo "Secure software supply chain policy verification"
 echo "  Image:          ${IMAGE}"
 echo "  Signer:         ${IDENTITY}"
 echo "  Issuer:         ` + as.Issuer + `"

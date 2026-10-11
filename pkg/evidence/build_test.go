@@ -73,7 +73,7 @@ func TestDockerConfigKeychain(t *testing.T) {
 	}
 }
 
-// An in-cluster log serves a certificate from the supply chain's own CA. The
+// An in-cluster log serves a certificate from the secure software supply chain's own CA. The
 // client trusts it when the trust anchors carry one, and is the plain client
 // otherwise, as for a public log.
 func TestHTTPClientTrustsTheSupplyChainCA(t *testing.T) {
@@ -91,7 +91,7 @@ func TestHTTPClientTrustsTheSupplyChainCA(t *testing.T) {
 	}
 	resp, err := HTTPClient(ca).Get(server.URL)
 	if err != nil {
-		t.Fatalf("the supply chain's CA was not trusted: %v", err)
+		t.Fatalf("the secure software supply chain's CA was not trusted: %v", err)
 	}
 	_ = resp.Body.Close()
 }

@@ -23,10 +23,10 @@ logged and admitted.
 
 ![from a push to a running, verified image](demo/4-push-to-build/demo.gif)
 
-**[Only what the supply chain built may run.](demo/README.md#demo-1-only-what-the-supply-chain-built-may-run)** The image the pipeline built is admitted; one signed by Tekton
+**[Only what the secure software supply chain built may run.](demo/README.md#demo-1-only-what-the-secure-software-supply-chain-built-may-run)** The image the pipeline built is admitted; one signed by Tekton
 Chains alone and one signed by nobody are refused, each refusal naming the policy behind it.
 
-![only what the supply chain built may run](demo/1-admission/demo.gif)
+![only what the secure software supply chain built may run](demo/1-admission/demo.gif)
 
 **[No authorization, no identity, no certificate.](demo/README.md#demo-2-no-authorization-no-identity-no-certificate)** A build's ServiceAccount gets a signing identity only while it
 passes three access reviews. Revoke one permission and the identity, and Fulcio's certificate with it, are gone
@@ -184,7 +184,7 @@ mage manifests generate   # after changing *_types.go or kubebuilder markers
 mage test                 # unit and controller tests (envtest)
 mage lint                 # golangci-lint
 mage testE2E              # creates its own kind cluster; allow 15-30 minutes
-mage -l                   # every target
+mage help                 # every target, and the settings they read (a bare `mage` does the same)
 ```
 
 The build is a [magefile](https://magefile.org) in [`magefiles/`](magefiles/), and the controller's image is built

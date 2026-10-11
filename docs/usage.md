@@ -93,7 +93,7 @@ kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097   # http
 The last step of a successful build prints what it verified:
 
 ```
-Supply chain policy verification
+Secure software supply chain policy verification
   Image:          docker.io/your-dockerhub-user/your-app:<sha>@sha256:...
   Signer:         spiffe://<your-domain>/ns/default/sa/supply-chain-runner
   Issuer:         https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
@@ -142,9 +142,9 @@ supplychain secrets set <key>=<value|@file>      # store or rotate a credential 
 supplychain secrets list                         # which keys are set; never prints a value
 supplychain secrets get <key>                    # the value Vault holds for one key
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
-supplychain status                               # check the dependencies
+supplychain status                               # every dependency, certificate and the store; fails if one is not ready
 supplychain uninstall                            # remove them
-supplychain observe                              # supply chain dashboard
+supplychain observe                              # secure software supply chain dashboard
 supplychain observe rbac                         # RBAC audit dashboard
 ```
 

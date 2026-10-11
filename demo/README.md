@@ -10,7 +10,7 @@ the Tekton Dashboard, photographed every few seconds while a build runs.
 
 | Demo | Shows | Plays in |
 |---|---|---|
-| [1. Only what the supply chain built may run](#demo-1-only-what-the-supply-chain-built-may-run) | Admission: one image admitted, two refused | about 50 s |
+| [1. Only what the secure software supply chain built may run](#demo-1-only-what-the-secure-software-supply-chain-built-may-run) | Admission: one image admitted, two refused | about 50 s |
 | [2. No authorization, no identity, no certificate](#demo-2-no-authorization-no-identity-no-certificate) | A permission revoked and restored, and what Fulcio does each time | about 80 s |
 | [3. What a build leaves behind](#demo-3-what-a-build-leaves-behind) | A build from source to signed image, then its evidence | about 90 s |
 | [4. From a push to a running, verified image](#demo-4-from-a-push-to-a-running-verified-image) | One `git push`, a build that starts on its own, and the image admitted | about 75 s |
@@ -31,9 +31,9 @@ Demos 1, 3 and 4 use real images and real builds. Their scripts display the imag
 and the `SupplyChain`'s name as `your-dockerhub-user/your-app`, `your-org/your-app` and `your-app`; the `mask`
 function in each script is the only thing that changes what is shown.
 
-## Demo 1: only what the supply chain built may run
+## Demo 1: only what the secure software supply chain built may run
 
-![only what the supply chain built may run](1-admission/demo.gif)
+![only what the secure software supply chain built may run](1-admission/demo.gif)
 
 Three images of one repository are run in a namespace the policy controller guards. The image the pipeline
 built, signed by the build and by Tekton Chains, is admitted and becomes a pod (top pane). An image signed by

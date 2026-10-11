@@ -2,7 +2,7 @@
 #
 # Vault listens on its pod's loopback address, where nothing outside the pod
 # can reach it, and the "tls" container in the same pod serves it on 8443 with
-# a certificate from the supply chain's CA. The Service exposes only that, as
+# a certificate from the secure software supply chain's CA. The Service exposes only that, as
 # port 8200. It is set up as the sigstore services are, so that a renewed
 # certificate is picked up without restarting Vault, which would seal it.
 ---

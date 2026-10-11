@@ -22,7 +22,7 @@ import (
 // GitHubWebhookSpec defines the desired state of GitHubWebhook.
 //
 // A GitHubWebhook CR registers a webhook on a GitHub repository that
-// forwards push events to the supply chain EventListener. The controller
+// forwards push events to the secure software supply chain EventListener. The controller
 // waits for the referenced SupplyChain to be Ready before calling the
 // GitHub API — ensuring the EventListener is up before events arrive.
 type GitHubWebhookSpec struct {
@@ -141,7 +141,7 @@ type GitHubWebhookStatus struct {
 
 // GitHubWebhook is the Schema for the githubwebhooks API.
 // It registers a GitHub webhook that forwards push events to the
-// supply chain EventListener, triggering automated ImageBuild executions.
+// secure software supply chain EventListener, triggering automated ImageBuild executions.
 type GitHubWebhook struct {
 	metav1.TypeMeta `json:",inline"`
 

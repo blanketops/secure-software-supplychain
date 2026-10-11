@@ -95,7 +95,7 @@ data:
       server unix:/run/spire/oidc-sockets/spire-oidc-server.sock;
     }
 
-    # HTTPS only, with a certificate from the supply chain's CA: this is the
+    # HTTPS only, with a certificate from the secure software supply chain's CA: this is the
     # address inside every JWT-SVID, and where Fulcio and Vault fetch the keys
     # they verify those against.
     server {

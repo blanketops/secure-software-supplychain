@@ -27,7 +27,7 @@ type SupplyChainSpec struct {
 	// Important: Run "mage manifests generate" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-	// Repository is the GitHub repo this supply chain is bound to (owner/name format).
+	// Repository is the GitHub repo this secure software supply chain is bound to (owner/name format).
 	// One SupplyChain per repository — this is law.
 	Repository string `json:"repository"`
 	// Image defines how the container image is built and where it's pushed

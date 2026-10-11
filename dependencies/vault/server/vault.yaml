@@ -1,4 +1,4 @@
-# HashiCorp Vault, where the supply chain's credentials are kept.
+# HashiCorp Vault, where the secure software supply chain's credentials are kept.
 #
 # One standalone server with file storage on a volume. The installer
 # initialises it, enables a key-value engine and Kubernetes auth, and creates

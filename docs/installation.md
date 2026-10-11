@@ -63,7 +63,7 @@ because on a slow connection almost all of the time is image pulls.
 |---|---|
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
 | cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
-| Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the supply chain's services trusts. |
+| Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the secure software supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
 | SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
 | Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
@@ -74,7 +74,7 @@ because on a slow connection almost all of the time is image pulls.
 | NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
 | Vault | Where the credentials are kept. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Secret Store Identity | *`spiffe` only.* The store's own SPIFFE identity: SPIRE issues it to one ServiceAccount, and a small pod keeps the current JWT-SVID where External Secrets can present it. Skipped with `--vault-addr` and with `--external-secret-store`. |
-| Secret Store | A login to Vault for External Secrets, limited to reading the supply chain's secrets, and the `ClusterSecretStore` that uses it. With `spiffe` the login is that SPIFFE identity and nothing else. Skipped with `--external-secret-store`. |
+| Secret Store | A login to Vault for External Secrets, limited to reading the secure software supply chain's secrets, and the `ClusterSecretStore` that uses it. With `spiffe` the login is that SPIFFE identity and nothing else. Skipped with `--external-secret-store`. |
 | SonarQube | Static analysis, on a PostgreSQL database and volumes of its own |
 
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
@@ -82,7 +82,7 @@ It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key)
 
 ### TLS between the services
 
-Every service of the supply chain is reached over HTTPS only, with a certificate from the private CA above:
+Every service of the secure software supply chain is reached over HTTPS only, with a certificate from the private CA above:
 
 | Service | Address |
 |---|---|
@@ -131,9 +131,43 @@ Rekor sign with, the Merkle trees behind Rekor and the CT log, Vault's unseal ke
 SonarQube database password. If an
 install stops on a timeout, run it again with `--from-step` set to the step it stopped at.
 
+### Checking the install
+
+`supplychain status` reports on everything the installer sets up, at any point during an install or after it:
+
 ```bash
-./bin/supplychain status        # every dependency and whether it is ready
+./bin/supplychain status
 ```
+
+```
+Secure software supply chain dependencies
+
+Certificates
+  ✓ cert-manager                           running (1/1)
+  ✓ cert-manager webhook                   running (1/1)
+  ✓ cert-manager CA injector               running (1/1)
+  ✓ Certificate authority                  ready (ClusterIssuer supply-chain-ca)
+  ✓ TLS rekor-system/rekor-server-tls      issued, renews 2026-12-10
+  …
+SPIRE
+  ✓ Server                                 running (1/1)
+  …
+Credentials
+  ✓ Vault                                  running (1/1)
+  ✓ Secret store                           logged in (Vault, with a SPIFFE identity)
+  …
+Everything is running.
+```
+
+It covers each workload, grouped as Certificates, Tekton, SPIRE, Sigstore, Ingress, Credentials and Code
+analysis; the certificate authority and every TLS certificate issued from it, with the day it is renewed; and
+whether the secret store can log in, and how. `✓` is running, `…` is there but not ready yet, and `✗` is missing.
+
+- A Vault that is sealed shows as `starting (0/1)`: it is not ready until it is unsealed.
+- SPIRE is reported as not installed, without being counted as a problem, when the signing identity is
+  Kubernetes; so is Vault with `--vault-addr` or `--external-secret-store`.
+- The command exits with an error when anything that should be there is missing or not ready, so it can gate a
+  script: `./bin/supplychain status && kubectl apply -k config/samples`.
 
 ## 2. Deploy the operator
 
@@ -250,7 +284,7 @@ External Secrets ── presents it ──► Vault auth/jwt
   node. No other pod can obtain it. The `Secret Store Identity` step creates it with the rest of the SPIRE
   identities.
 - **Vault** has JWT auth at `auth/jwt` pointed at SPIRE's OIDC discovery endpoint, which it verifies against
-  the supply chain's CA, and one role:
+  the secure software supply chain's CA, and one role:
 
   ```bash
   vault write auth/jwt/config oidc_discovery_url=<SPIRE OIDC discovery> bound_issuer=<the same> \
@@ -286,7 +320,7 @@ spec:
       server: https://vault.vault.svc.cluster.local:8200
       path: secret              # the key-value (version 2) engine
       version: v2
-      caProvider:               # Vault's certificate comes from the supply chain's CA
+      caProvider:               # Vault's certificate comes from the secure software supply chain's CA
         type: ConfigMap
         name: supply-chain-ca
         key: ca.crt

@@ -6,7 +6,7 @@ the caption for each is the italic line under it.
 
 # A record that said "Signed" had never looked at the signature
 
-*Part 2 of 2 on building a software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. [Part 1](LINK-TO-PART-1) covered who is allowed to sign.*
+*Part 2 of 2 on building a secure software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. [Part 1](LINK-TO-PART-1) covered who is allowed to sign.*
 
 Part 1 ended with every image carrying proof from two identities: the build, which signs and attests that it was authorized, and Tekton Chains, which signs and attests how the image was built.
 

@@ -194,7 +194,7 @@ func registryHost(server string) string {
 }
 
 // HTTPClient returns the client the transparency log is read with. An
-// in-cluster log serves a certificate from the supply chain's own CA, which
+// in-cluster log serves a certificate from the secure software supply chain's own CA, which
 // is trusted here in addition to the public CAs; caPEM is empty for a public
 // log.
 func HTTPClient(caPEM string) *http.Client {

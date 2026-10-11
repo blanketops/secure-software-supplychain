@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package store says where the supply chain's credentials are kept.
+// Package store says where the secure software supply chain's credentials are kept.
 //
 // They live in HashiCorp Vault, in its key-value engine, and reach a build as
 // ordinary Secrets through External Secrets Operator: every ExternalSecret the

@@ -62,7 +62,7 @@ run() {
 }
 
 echo "============================================================"
-echo " Demo 1: only what the supply chain built may run"
+echo " Demo 1: only what the secure software supply chain built may run"
 echo
 echo " Three images of the same repository are run in a namespace"
 echo " the policy controller guards. One was built by the pipeline,"

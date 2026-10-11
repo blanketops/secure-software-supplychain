@@ -44,8 +44,8 @@ kubectl delete pod pushed-and-built -n "$ADMISSION_NS" --ignore-not-found >/dev/
 
 step "a commit, and a push"
 cd "$CLONE" || exit 1
-echo "\$ git commit --allow-empty -m 'Trigger the supply chain'"
-git commit -q --allow-empty -m 'Trigger the supply chain'
+echo "\$ git commit --allow-empty -m 'Trigger the secure software supply chain'"
+git commit -q --allow-empty -m 'Trigger the secure software supply chain'
 sha=$(git rev-parse HEAD)
 git log --oneline -1
 echo

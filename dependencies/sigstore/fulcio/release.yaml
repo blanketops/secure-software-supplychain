@@ -485,7 +485,7 @@ spec:
         # https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
         - name: SSL_CERT_FILE
           value: /var/run/fulcio/ca.crt
-        # And the supply chain's CA, for SPIRE's OIDC discovery when workloads
+        # And the secure software supply chain's CA, for SPIRE's OIDC discovery when workloads
         # sign with SPIFFE identities.
         - name: SSL_CERT_DIR
           value: /etc/supply-chain-ca
@@ -641,7 +641,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        # Fulcio's certificate comes from the supply chain's CA, which is
+        # Fulcio's certificate comes from the secure software supply chain's CA, which is
         # trusted here in addition to the image's public CAs.
         - name: SSL_CERT_DIR
           value: /etc/supply-chain-ca:/etc/ssl/certs

@@ -96,7 +96,7 @@ spec:
 ---
 # The identity External Secrets logs in to Vault with. Vault's role is bound
 # to exactly this SPIFFE ID, so only a pod running as this ServiceAccount, in
-# this namespace, on an attested node, can read the supply chain's secrets.
+# this namespace, on an attested node, can read the secure software supply chain's secrets.
 # Its JWT-SVIDs are short-lived; see dependencies/vault/spiffe.
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterStaticEntry

@@ -1,4 +1,4 @@
-# The private certificate authority every service of the supply chain gets its
+# The private certificate authority every service of the secure software supply chain gets its
 # TLS certificate from: Rekor, Fulcio, the CT log, Vault and SPIRE's OIDC
 # discovery. cert-manager issues and renews the certificates; clients trust
 # this one CA, which the installer copies to where they read it.

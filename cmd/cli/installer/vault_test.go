@@ -137,7 +137,7 @@ func clientFor(t *testing.T, fake *fakeVault) *vaultClient {
 	return &vaultClient{base: server.URL, token: fake.token, http: server.Client()}
 }
 
-// The store may read the supply chain's secrets and nothing else, and only
+// The store may read the secure software supply chain's secrets and nothing else, and only
 // one ServiceAccount is given that. Configuring twice changes nothing.
 func TestConfigureKubernetesAuth(t *testing.T) {
 	fake := newFakeVault()
@@ -165,7 +165,7 @@ func TestConfigureKubernetesAuth(t *testing.T) {
 
 	policy := fake.policies[vaultPolicy]
 	if !strings.Contains(policy, `path "secret/data/supplychain/*"`) || !strings.Contains(policy, `["read"]`) {
-		t.Errorf("policy does not grant read on the supply chain's secrets:\n%s", policy)
+		t.Errorf("policy does not grant read on the secure software supply chain's secrets:\n%s", policy)
 	}
 	for _, more := range []string{"create", "update", "delete", "list", "sudo", `"*"`} {
 		if strings.Contains(policy, more) {

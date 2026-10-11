@@ -2,6 +2,9 @@
 
 [← Back to the README](../README.md)
 
+Start with `supplychain status`. It shows which part of the stack is missing or not ready, including the
+certificates and the secret store's login, and most of what follows starts from one of its lines.
+
 **The installer stalls or a setup Job fails.** Image pulls dominate install time. The kubelet pulls one image
 at a time by default; on kind, allow parallel pulls by adding `serializeImagePulls: false` and
 `maxParallelImagePulls: 8` to `/var/lib/kubelet/config.yaml` on the node and restarting the kubelet. The

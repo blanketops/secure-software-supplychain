@@ -2,7 +2,7 @@
 #
 # rekor-server only listens on plain HTTP. It is bound to the pod's loopback
 # address, where nothing outside the pod can reach it, and the "tls" container
-# in the same pod serves it on 8443 with a certificate from the supply chain's
+# in the same pod serves it on 8443 with a certificate from the secure software supply chain's
 # CA. The Service exposes only that port, as 443.
 ---
 apiVersion: cert-manager.io/v1

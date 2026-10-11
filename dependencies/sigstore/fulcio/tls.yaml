@@ -4,7 +4,7 @@
 # certificate, so both are set up as Rekor is: the server listens on its pod's
 # loopback address, where nothing outside the pod can reach it, and the "tls"
 # container in the same pod serves it on 8443 with a certificate from the
-# supply chain's CA. Each Service exposes only that port, as 443.
+# secure software supply chain's CA. Each Service exposes only that port, as 443.
 #
 # Fulcio is the CT log's client: it submits every certificate it issues. It
 # verifies the CT log's certificate against the CA, which cert-manager puts in

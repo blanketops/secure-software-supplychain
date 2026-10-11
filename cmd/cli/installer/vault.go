@@ -88,7 +88,7 @@ const (
 
 var podGVR = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
-// vaultReadPolicy lets its holder read the supply chain's secrets and nothing
+// vaultReadPolicy lets its holder read the secure software supply chain's secrets and nothing
 // else: not write them, not list or read anything outside their folder.
 func vaultReadPolicy() string {
 	return fmt.Sprintf("path \"%s/data/%s/*\" {\n  capabilities = [\"read\"]\n}\n", store.Mount, store.Prefix)
@@ -204,7 +204,7 @@ func (i *Installer) startVault(ctx context.Context) error {
 
 // ensureSecretStore gives External Secrets a way into Vault and nothing more
 // than it needs there: a login for one ServiceAccount, a policy that can read
-// the supply chain's secrets, and the ClusterSecretStore that uses them.
+// the secure software supply chain's secrets, and the ClusterSecretStore that uses them.
 //
 // The Vault is the one the installer runs, or, with --vault-addr, one that
 // already exists. Nothing here is specific to a build, so it can be run again.
@@ -498,7 +498,7 @@ func configureSPIFFEAuth(ctx context.Context, vault *vaultClient, trustDomain, c
 	config := map[string]any{
 		"oidc_discovery_url": spireOIDCIssuer,
 		"bound_issuer":       spireOIDCIssuer,
-		// Discovery is served with a certificate from the supply chain's CA.
+		// Discovery is served with a certificate from the secure software supply chain's CA.
 		"oidc_discovery_ca_pem": ca,
 	}
 	if _, err := vault.call(ctx, http.MethodPost, "/v1/auth/"+vaultSPIFFEAuthMount+"/config", config, nil); err != nil {
@@ -559,7 +559,7 @@ func secretStore() *unstructured.Unstructured {
 					"server":  vaultAddress,
 					"path":    store.Mount,
 					"version": "v2",
-					// Vault's certificate comes from the supply chain's CA.
+					// Vault's certificate comes from the secure software supply chain's CA.
 					"caProvider": map[string]any{
 						"type":      "ConfigMap",
 						"name":      caConfigMap,

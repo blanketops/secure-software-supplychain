@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// The services of the supply chain talk to each other over TLS, with
+// The services of the secure software supply chain talk to each other over TLS, with
 // certificates cert-manager issues from one private CA. See
 // dependencies/cert-manager/ca.
 const (
@@ -122,16 +122,16 @@ func conditionTrue(obj *unstructured.Unstructured, kind string) bool {
 func (i *Installer) supplyChainCA(ctx context.Context) (string, error) {
 	ca, err := i.readSecretValue(ctx, certManagerNamespace, caSecret, "tls.crt")
 	if err != nil {
-		return "", fmt.Errorf("reading the supply chain's CA: %w", err)
+		return "", fmt.Errorf("reading the secure software supply chain's CA: %w", err)
 	}
 	if !strings.Contains(ca, "BEGIN CERTIFICATE") {
-		return "", errors.New("the supply chain's CA has not been issued yet")
+		return "", errors.New("the secure software supply chain's CA has not been issued yet")
 	}
 	return ca, nil
 }
 
 // publishCA copies the CA's certificate into a namespace, for the workloads
-// there that connect to the supply chain's services.
+// there that connect to the secure software supply chain's services.
 func (i *Installer) publishCA(ctx context.Context, namespace string) error {
 	ca, err := i.supplyChainCA(ctx)
 	if err != nil {
@@ -149,7 +149,7 @@ func (i *Installer) publishCA(ctx context.Context, namespace string) error {
 	}})
 }
 
-// trustCAIn makes a Deployment's first container trust the supply chain's CA,
+// trustCAIn makes a Deployment's first container trust the secure software supply chain's CA,
 // in addition to the public CAs its image ships.
 func (i *Installer) trustCAIn(ctx context.Context, namespace, name string) error {
 	if err := i.publishCA(ctx, namespace); err != nil {
@@ -214,7 +214,7 @@ func addCATrust(deployment *unstructured.Unstructured) error {
 
 // httpsToPod opens a connection to a port of one of a Deployment's pods and
 // returns the URL to use and a client that verifies the pod's certificate
-// against the supply chain's CA, as serverName. The CLI reaches the cluster's
+// against the secure software supply chain's CA, as serverName. The CLI reaches the cluster's
 // services this way, and holds them to the same certificate their clients in
 // the cluster see.
 func (i *Installer) httpsToPod(
@@ -226,7 +226,7 @@ func (i *Installer) httpsToPod(
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(ca)) {
-		return "", nil, nil, errors.New("the supply chain's CA is not a certificate")
+		return "", nil, nil, errors.New("the secure software supply chain's CA is not a certificate")
 	}
 	pods, err := i.dynamic.Resource(podGVR).Namespace(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
