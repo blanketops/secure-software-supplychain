@@ -161,32 +161,23 @@ func statusCmd() *cobra.Command {
 }
 
 func observeCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "observe [rbac]",
-		Short: "Open the secure software supply chain observer UI in your browser",
-		Long: `Starts kubectl proxy and opens the embedded secure software supply chain observer UI.
-
-  supplychain observe        builds, signatures, the live transparency log and who is trusted
-  supplychain observe rbac   who may build, sign and write admission policy, and why
+	return &cobra.Command{
+		Use:   "observe",
+		Short: "Open the secure software supply chain observer in your browser",
+		Long: `Opens one page that shows a namespace's supply chains, webhooks and builds, every
+signature and attestation recorded for an image, what Rekor, Fulcio and the CT
+log themselves say, who may build, sign and write admission policy and why, the
+admission policies, and the secret store.
 
 The page is served from this machine and reads the cluster through kubectl proxy,
 including Rekor, Fulcio and the CT log. It changes nothing in the cluster.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-
-			page := "supply_chain.html"
-			if len(args) > 0 && args[0] == "rbac" {
-				page = "rbac.html"
-			}
-
 			fmt.Println("  Secure Software Supply Chain observer")
-			fmt.Println("  ────────────────────────────────")
-
-			return ui.Serve(ctx, page)
+			fmt.Println("  ─────────────────────────────────────")
+			return ui.Serve(context.Background())
 		},
 	}
-
-	return cmd
 }
 
 // initSonarQubeCmd bootstraps SonarQube after a fresh install.

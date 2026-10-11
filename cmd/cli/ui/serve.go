@@ -31,7 +31,7 @@ import (
 	"time"
 )
 
-//go:embed supply_chain.html rbac.html observer.css
+//go:embed observer.html observer.css
 var static embed.FS
 
 const (
@@ -44,7 +44,7 @@ const (
 // all /api/ and /apis/ requests to kubectl proxy on :8001.
 // This avoids CORS entirely — the browser talks only to :8002.
 // Blocks until Ctrl+C.
-func Serve(ctx context.Context, page string) error {
+func Serve(ctx context.Context) error {
 	// ── 1. start kubectl proxy ──────────────────────────────────────────
 	proxyCtx, proxyCancel := context.WithCancel(ctx)
 	defer proxyCancel()
@@ -67,34 +67,27 @@ func Serve(ctx context.Context, page string) error {
 	// ── 4. routes ───────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 
-	// The pages. "/" is the one that was asked for; both are always there,
-	// so that each can link to the other.
-	servePage := func(file, contentType string) http.HandlerFunc {
+	// The page and its stylesheet.
+	serveFile := func(file, contentType string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			data, err := static.ReadFile(file)
 			if err != nil {
-				http.Error(w, "page not found", http.StatusNotFound)
+				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
 			w.Header().Set("Content-Type", contentType)
 			_, _ = w.Write(data)
 		}
 	}
-	const html = "text/html; charset=utf-8"
-	if page == "" {
-		page = "supply_chain.html"
-	}
-	first := servePage(page, html)
+	page := serveFile("observer.html", "text/html; charset=utf-8")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		first(w, r)
+		page(w, r)
 	})
-	mux.HandleFunc("/overview", servePage("supply_chain.html", html))
-	mux.HandleFunc("/permissions", servePage("rbac.html", html))
-	mux.HandleFunc("/observer.css", servePage("observer.css", "text/css; charset=utf-8"))
+	mux.HandleFunc("/observer.css", serveFile("observer.css", "text/css; charset=utf-8"))
 
 	// Kubernetes core API — forwarded to kubectl proxy
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

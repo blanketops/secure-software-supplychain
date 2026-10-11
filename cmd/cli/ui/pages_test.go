@@ -22,44 +22,35 @@ import (
 	"testing"
 )
 
-// The pages are opened on a machine that may have no way out but to the
-// cluster. They load nothing from anywhere else, share one stylesheet, and
-// reach the cluster through the server that served them, whatever address
-// that is.
-func TestPagesAreSelfContained(t *testing.T) {
+// The page is opened on a machine that may have no way out but to the
+// cluster. It loads nothing from anywhere else, and reaches the cluster
+// through the server that served it, whatever address that is.
+func TestThePageIsSelfContained(t *testing.T) {
 	external := regexp.MustCompile(`(?i)(src|href)\s*=\s*["']https?://|@import|url\(\s*["']?https?://`)
-	for _, page := range []string{"supply_chain.html", "rbac.html"} {
-		data, err := static.ReadFile(page)
+	for _, file := range []string{"observer.html", "observer.css"} {
+		data, err := static.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := string(data)
-		if found := external.FindString(text); found != "" {
-			t.Errorf("%s loads something from elsewhere: %s", page, found)
+		if found := external.FindString(string(data)); found != "" {
+			t.Errorf("%s loads something from elsewhere: %s", file, found)
 		}
-		if !strings.Contains(text, `<link rel="stylesheet" href="/observer.css">`) {
-			t.Errorf("%s does not use the shared stylesheet", page)
-		}
-		if strings.Contains(text, "localhost") || strings.Contains(text, "127.0.0.1") {
-			t.Errorf("%s names an address; it has to work wherever it is served from", page)
-		}
-		for _, link := range []string{`href="/overview"`, `href="/permissions"`} {
-			if !strings.Contains(text, link) {
-				t.Errorf("%s does not link to %s", page, link)
-			}
-		}
-		// What comes from the cluster or the log is written as text.
-		if !strings.Contains(text, "const esc = ") {
-			t.Errorf("%s has no escaping of what it shows", page)
+		if strings.Contains(string(data), "localhost") || strings.Contains(string(data), "127.0.0.1") {
+			t.Errorf("%s names an address; it has to work wherever it is served from", file)
 		}
 	}
-	css, err := static.ReadFile("observer.css")
-	if err != nil {
-		t.Fatal(err)
+	page, _ := static.ReadFile("observer.html")
+	// What comes from the cluster or the log is written as text.
+	if !strings.Contains(string(page), "const esc = ") {
+		t.Error("the page has no escaping of what it shows")
 	}
-	if found := external.FindString(string(css)); found != "" {
-		t.Errorf("the stylesheet loads something from elsewhere: %s", found)
+	// Everything is on the one page: each part of it is a section to jump to.
+	for _, section := range []string{"chains", "webhooks", "builds", "trust", "log", "permissions", "admission", "secrets", "activity"} {
+		if !strings.Contains(string(page), `<section id="`+section+`">`) || !strings.Contains(string(page), `href="#`+section+`"`) {
+			t.Errorf("the page has no section %q, or no link to it", section)
+		}
 	}
+	css, _ := static.ReadFile("observer.css")
 	if !strings.Contains(string(css), "prefers-color-scheme: dark") {
 		t.Error("the stylesheet has no dark colours")
 	}

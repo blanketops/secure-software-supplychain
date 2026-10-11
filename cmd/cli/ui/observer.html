@@ -15,10 +15,6 @@
         <h1>Secure Software Supply Chain</h1>
         <p>What was built, who signed it, and where that is recorded.</p>
       </div>
-      <div class="pagelinks" aria-label="Pages">
-        <a href="/overview" aria-current="page">Overview</a>
-        <a href="/permissions">Permissions</a>
-      </div>
       <label class="conn" for="ns">Namespace
         <select id="ns" onchange="loadAll()">
           <option value="default">default</option>
@@ -36,6 +32,7 @@
       <a href="#builds">Builds</a>
       <a href="#trust">Who is trusted</a>
       <a href="#log">Transparency log</a>
+      <a href="#permissions">Permissions</a>
       <a href="#admission">Admission</a>
       <a href="#secrets">Credentials</a>
       <a href="#activity">Activity</a>
@@ -89,6 +86,17 @@
       <div id="log-body"></div>
     </section>
 
+    <section id="permissions">
+      <h2>Permissions</h2>
+      <p class="lede">A ServiceAccount is given a signing identity, or has admission policy rendered for it, only
+        while it passes three checks. Each is a question put to the cluster's own access control. Open one to
+        see which role grants it, and what to apply when it is refused.</p>
+      <h3 class="group">Who may build and sign</h3>
+      <div class="list" id="builder-list"></div>
+      <h3 class="group">Who may write admission policy</h3>
+      <div class="list" id="writer-list"></div>
+    </section>
+
     <section id="admission">
       <h2>Admission</h2>
       <p class="lede">The policies that decide which images may run, and whose signatures they accept.</p>
@@ -114,6 +122,7 @@
 
   <script>
     const GROUP = '/apis/supplychain.blanketops.dev/v1alpha1';
+    const RBAC = '/apis/rbac.authorization.k8s.io/v1';
     const $ = id => document.getElementById(id);
 
     // Everything read from the cluster or the log is text, never markup.
@@ -217,6 +226,7 @@
             ${proof('May start builds', a.intent)}
             ${proof('May record signatures', a.output)}
           </ul>
+          <p class="small" style="margin-top:10px"><a class="linkish" href="#permissions">Where these come from</a></p>
         </div>`;
       }).join('');
     }
@@ -387,6 +397,139 @@
     function clearSearch() { $('q').value = ''; latestEntries(); }
     function lookup(index) { $('q').value = index; searchLog(); $('log').scrollIntoView(); }
 
+    // ── Permissions ──
+    // What each check is for, in the order the operator makes them.
+    const QUESTIONS = {
+      build: { scope: 'May it read this supply chain?', intent: 'May it start builds?', output: 'May it record signatures?' },
+      policy: { scope: 'May it read the supply chain?', intent: 'May it write admission policy here?', output: 'May it create the cluster-wide policies?' },
+    };
+    // What is asked when the operator has not recorded an answer yet.
+    const EXPECTED = {
+      build: {
+        scope: { group: 'supplychain.blanketops.dev', resource: 'supplychains', verb: 'get' },
+        intent: { group: 'supplychain.blanketops.dev', resource: 'imagebuilds', verb: 'create' },
+        output: { group: 'supplychain.blanketops.dev', resource: 'imagesignatures', verb: 'create' },
+      },
+      policy: {
+        scope: { group: 'supplychain.blanketops.dev', resource: 'supplychains', verb: 'get' },
+        intent: { group: 'supplychain.blanketops.dev', resource: 'supplychainpolicies', verb: 'create' },
+        output: { group: 'policy.sigstore.dev', resource: 'clusterimagepolicies', verb: 'create' },
+      },
+    };
+
+    const has = (values, want) => (values || []).some(v => v === '*' || v === want);
+    const grants = (rule, need) => has(rule.apiGroups, need.group) && has(rule.resources, need.resource) && has(rule.verbs, need.verb);
+    const isSubject = (binding, namespace, sa) => (binding.subjects || []).some(s =>
+      s.kind === 'ServiceAccount' && s.name === sa && (s.namespace || binding.metadata.namespace) === namespace);
+
+    // Which bindings give a ServiceAccount what a check asks for.
+    function sources(rbac, namespace, sa, need) {
+      const found = [];
+      const consider = (binding, scope) => {
+        if (!isSubject(binding, namespace, sa)) return;
+        const ref = binding.roleRef || {};
+        const role = ref.kind === 'ClusterRole' ? rbac.clusterRoles[ref.name] : rbac.roles[ref.name];
+        if (role && (role.rules || []).some(rule => grants(rule, need))) {
+          found.push({ binding: binding.metadata.name, bindingKind: binding.kind || scope, role: ref.name, roleKind: ref.kind });
+        }
+      };
+      rbac.clusterRoleBindings.forEach(b => consider(b, 'ClusterRoleBinding'));
+      rbac.roleBindings.forEach(b => consider(b, 'RoleBinding'));
+      return found;
+    }
+
+    function fixManifest(namespace, sa, missing) {
+      const name = `${sa}-supply-chain`;
+      const cluster = missing.some(m => m.resource === 'clusterimagepolicies');
+      const kind = cluster ? 'ClusterRole' : 'Role';
+      const meta = cluster ? `  name: ${name}` : `  name: ${name}\n  namespace: ${namespace}`;
+      const rules = missing.map(m => `- apiGroups: ["${m.group}"]\n  resources: ["${m.resource}"]\n  verbs: ["${m.verb}"]`).join('\n');
+      return `apiVersion: rbac.authorization.k8s.io/v1
+kind: ${kind}
+metadata:
+${meta}
+rules:
+${rules}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ${kind}Binding
+metadata:
+${meta}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ${kind}
+  name: ${name}
+subjects:
+- kind: ServiceAccount
+  name: ${sa}
+  namespace: ${namespace}
+`;
+    }
+
+    let manifests = [];
+    function copyManifest(i, btn) {
+      navigator.clipboard.writeText(manifests[i]).then(() => {
+        btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+      });
+    }
+
+    function subjectCard(kind, obj, sa, rbac, saExists) {
+      const namespace = obj.metadata.namespace, auth = obj.status?.authorization || {};
+      const rows = [], missing = [];
+      let denied = 0, unknown = 0;
+      for (const key of ['scope', 'intent', 'output']) {
+        const proof = auth[key], need = proof ? { group: proof.group, resource: proof.resource, verb: proof.verb } : EXPECTED[kind][key];
+        const from = sources(rbac, namespace, sa, need);
+        const allowed = proof ? proof.allowed : null;
+        if (allowed === false) { denied++; missing.push(need); } else if (allowed === null) unknown++;
+        rows.push(`<tr>
+          <td>${mark(allowed)}</td>
+          <td>${esc(QUESTIONS[kind][key])}<div class="small"><code>${esc(need.verb)} ${esc(need.resource)}</code> in <code>${esc(need.group)}</code></div></td>
+          <td>${from.length ? from.map(f => `${esc(f.roleKind)} <code>${esc(f.role)}</code><div class="small">through ${esc(f.bindingKind)} ${esc(f.binding)}</div>`).join('')
+            : `<span class="small">${allowed === true ? 'granted by a rule this page cannot see, such as one for a group' : 'no role grants this'}</span>`}</td>
+          <td>${proof ? `${esc(ago(proof.evaluatedAt))}${proof.allowed ? '' : `<div class="small">${esc(proof.reason || '')}</div>`}` : '<span class="small">not asked yet</span>'}</td>
+        </tr>`);
+      }
+      const state = denied ? pill(`${denied} of 3 refused`, 'bad') : unknown ? pill('not checked yet', 'wait') : pill('all three allowed', 'good');
+      const identity = kind === 'build'
+        ? `<dt>Signing identity</dt><dd>${obj.status?.signingIdentity ? `<code>${esc(obj.status.signingIdentity)}</code>` : '<span class="small">none: it cannot get a signing certificate</span>'}</dd>` : '';
+      let fix = '';
+      if (missing.length) {
+        const i = manifests.push(fixManifest(namespace, sa, missing)) - 1;
+        fix = `<h4>To allow it</h4>
+          <p class="small">Apply this, then the next check will pass. It grants exactly what was refused and nothing more.</p>
+          <div class="manifest"><button type="button" onclick="copyManifest(${i}, this)">Copy</button><pre>${esc(manifests[i])}</pre></div>
+          <p class="small" style="margin-top:8px">To ask the cluster yourself: <code>kubectl auth can-i ${esc(missing[0].verb)} ${esc(missing[0].resource)}.${esc(missing[0].group)} -n ${esc(namespace)} --as=system:serviceaccount:${esc(namespace)}:${esc(sa)}</code></p>`;
+      }
+      return `<details class="row"${denied ? ' open' : ''}>
+        <summary>
+          <span class="title">${esc(sa)}</span>${state}
+          <span class="meta">${kind === 'build' ? 'builds' : 'writes policy for'} ${esc(kind === 'build' ? obj.metadata.name : (obj.spec?.supplyChainRef?.name || obj.metadata.name))}${saExists ? '' : ' · the ServiceAccount does not exist yet'}</span>
+        </summary>
+        <div class="body">
+          <dl style="margin-top:0">
+            <dt>ServiceAccount</dt><dd><code>system:serviceaccount:${esc(namespace)}:${esc(sa)}</code></dd>
+            ${identity}
+          </dl>
+          <h4>The three checks</h4>
+          <div class="tablewrap"><table class="inner"><thead><tr><th></th><th>Question</th><th>Granted by</th><th>Last asked</th></tr></thead>
+            <tbody>${rows.join('')}</tbody></table></div>
+          ${fix}
+        </div>
+      </details>`;
+    }
+
+    function renderPermissions(chains, policies, rbac, accounts) {
+      manifests = [];
+      const exists = new Set(accounts.map(a => a.metadata.name));
+      const builders = chains.map(c => [c, c.spec?.serviceAccountName || 'supply-chain-runner']);
+      const writers = policies.map(p => [p, p.spec?.serviceAccountName || 'supply-chain-policy-runner']);
+      $('builder-list').innerHTML = builders.map(([c, sa]) => subjectCard('build', c, sa, rbac, exists.has(sa))).join('') ||
+        `<div class="empty">No supply chains here, so nothing in this namespace may build or sign.</div>`;
+      $('writer-list').innerHTML = writers.map(([p, sa]) => subjectCard('policy', p, sa, rbac, exists.has(sa))).join('') ||
+        `<div class="empty">No admission policy here, so nothing is rendered on anyone's behalf.</div>`;
+    }
+
     // ── Admission ──
     function renderPolicies(policies) {
       if (!policies.length) {
@@ -483,28 +626,39 @@
     async function loadAll() {
       $('refresh').textContent = 'Refreshing…';
       $('notice').hidden = true;
+      // What the reader has opened stays open across a refresh.
+      const loaded = !!$('stamp').textContent;
+      const wasOpen = new Set([...document.querySelectorAll('details[open] .title')].map(e => e.textContent));
       try {
         await get('/api');   // is the cluster reachable at all?
         await loadNamespaces();
         const n = ns(), base = `${GROUP}/namespaces/${n}`;
-        const [chains, builds, results, policies, hooks, stores, secrets, events, summary] = await Promise.all([
+        const [chains, builds, results, policies, hooks, stores, secrets, events, summary,
+          crbs, rbs, crs, rs, accounts] = await Promise.all([
           list(`${base}/supplychains`), list(`${base}/imagebuilds`), list(`${base}/imagebuildresults`),
           list(`${base}/supplychainpolicies`), list(`${base}/githubwebhooks`),
           list('/apis/external-secrets.io/v1/clustersecretstores'),
           list(`/apis/external-secrets.io/v1/namespaces/${n}/externalsecrets`),
           list(`/api/v1/namespaces/${n}/events`),
           get(`/sigstore/summary?namespace=${encodeURIComponent(n)}`).catch(() => null),
+          list(`${RBAC}/clusterrolebindings`), list(`${RBAC}/namespaces/${n}/rolebindings`),
+          list(`${RBAC}/clusterroles`), list(`${RBAC}/namespaces/${n}/roles`),
+          list(`/api/v1/namespaces/${n}/serviceaccounts`),
         ]);
+        const byName = items => Object.fromEntries(items.map(i => [i.metadata.name, i]));
+        const rbac = { clusterRoleBindings: crbs, roleBindings: rbs, clusterRoles: byName(crs), roles: byName(rs) };
         $('dot').className = 'dot ok'; $('conn').textContent = 'Connected to the cluster';
         renderTiles(chains, builds, summary);
         renderChains(chains);
         renderWebhooks(hooks);
         renderBuilds(builds, results);
         renderTrust(summary);
+        renderPermissions(chains, policies, rbac, accounts);
         renderPolicies(policies);
         renderStores(stores);
         renderSecrets(secrets);
         renderEvents(events);
+        if (loaded) document.querySelectorAll('details.row').forEach(d => { d.open = wasOpen.has(d.querySelector('.title')?.textContent); });
         if (!searching) await latestEntries();
         $('stamp').textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
       } catch (e) {
@@ -516,7 +670,7 @@
     }
 
     loadAll();
-    setInterval(() => { if (!document.querySelector('details[open]') && !searching) loadAll(); }, 30000);
+    setInterval(() => { if (!searching && !document.querySelector('tr[id^="entry-"]:not([hidden])')) loadAll(); }, 30000);
   </script>
 </body>
 

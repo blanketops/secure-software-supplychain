@@ -144,8 +144,7 @@ supplychain secrets get <key>                    # the value Vault holds for one
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
 supplychain status                               # every dependency, certificate and the store; fails if one is not ready
 supplychain uninstall                            # remove them
-supplychain observe                              # builds, signatures, the live transparency log and who is trusted
-supplychain observe rbac                         # the same, opened on the Permissions page
+supplychain observe                              # one page: builds, signatures, the live log, permissions, credentials
 ```
 
 ## The observer
@@ -154,7 +153,7 @@ supplychain observe rbac                         # the same, opened on the Permi
 supplychain observe
 ```
 
-opens a page in your browser, served from your machine, that shows one namespace at a time:
+opens one page in your browser, served from your machine, that shows one namespace at a time:
 
 - **Supply chains**: what each builds, the identity it signs as, and the three permission checks it has to pass.
 - **GitHub webhooks**: the webhook registered on each repository, where it delivers, GitHub's ID for it, and
@@ -168,6 +167,9 @@ opens a page in your browser, served from your machine, that shows one namespace
 - **Transparency log**: the latest entries, decoded: what was signed, by which identity, vouched for by which
   provider, and whether the log returned a proof of inclusion. Search by log index, entry ID, or the SHA-256 of
   what was signed.
+- **Permissions**: who may build and sign, and who may write admission policy. For each ServiceAccount it shows
+  the three checks the operator made, which role and binding grant each one, and, when a check is refused, the
+  exact Role and binding to apply to allow it.
 - **Admission**: the policies and whose signatures they accept.
 - **Credentials**: the secret store, where it is, how it logs in (a SPIFFE identity, a ServiceAccount, or a
   stored token) and whether it is reached over verified HTTPS; then what builds are reading from it right now,
@@ -179,11 +181,6 @@ proxies to. It therefore works wherever `kubectl` does, needs your kubeconfig to
 `services/proxy` in the three sigstore namespaces, and changes nothing in the cluster. The Kubernetes API does
 not verify a Service's certificate when it proxies to it, which is why what is read is checked against the
 trust anchors rather than taken on the connection's word.
-
-The **Permissions** page, linked from the top and opened directly by `supplychain observe rbac`, answers who
-may build and sign and who may write admission policy. For each ServiceAccount it shows the three checks the
-operator made, which role and binding grant each one, and, when a check is refused, the exact Role and binding
-to apply to allow it.
 
 ## Remove a SupplyChain
 
