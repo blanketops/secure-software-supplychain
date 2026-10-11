@@ -39,7 +39,11 @@ the gate: update the base image.
 
 **A build fails at `git-clone` with "Permission denied (publickey)".** The key in the store cannot read the
 repository. Check what is set with `supplychain secrets list`, and replace the key with
-`supplychain secrets set git ssh-privatekey=@<file>`; the build's Secret follows within a minute.
+`supplychain secrets set git/ssh-privatekey=@<file>`; the build's Secret follows within a minute.
+
+**A `GitHubWebhook` stays `Failed` with "GitHub API returned 401".** GitHub refused the token in the store.
+Replace it with `supplychain secrets set github/token=@<file>`. The operator tries again every two minutes, so
+the webhook registers by itself once the new token has synced.
 
 **A build waits for its secrets and never starts.** The `ExternalSecret` objects cannot be synced. Look at the
 store first:
@@ -51,8 +55,21 @@ kubectl get pods -n vault
 
 A store that is not `Valid` usually means Vault is sealed or still starting: `vault-0` shows `1/2` until its
 sidecar has unsealed it, which takes a few seconds after a restart. If it stays sealed, the `vault-unseal` Secret
-is missing. A store that is `Valid` with an `ExternalSecret` in `SecretSyncedError` means a field is missing in
+is missing. A store that is `Valid` with an `ExternalSecret` in `SecretSyncedError` means a key is missing in
 Vault; `supplychain secrets list` shows which.
+
+With SPIFFE identities the store presents a JWT-SVID, so also check where that comes from:
+
+```bash
+kubectl get pods -n vault -l app.kubernetes.io/name=supply-chain-svid     # 2/2 when a current JWT is published
+kubectl logs -n vault deploy/supply-chain-svid -c svid --tail=5           # "JWT SVID updated"
+kubectl get clusterstaticentry supply-chain-secrets                       # the identity SPIRE may issue
+```
+
+`1/2` means SPIRE has not issued the identity: the entry is missing, or the SPIRE agent is not running on the
+node. Re-run `supplychain install --only-step "SPIRE Identities"` and then `--only-step "Secret Store"` with the
+same `--signing-identity` and `--trust-domain` as the install. If SPIRE itself was reinstalled its signing keys
+changed, and the same two steps make Vault trust the new ones.
 
 **Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
 controller reads the image's signatures and attestations from the registry, once for each of the four policies,

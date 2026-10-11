@@ -38,6 +38,10 @@ with an identity that was registered for it. The pipeline's sign, attest and
 verify steps and the default signers of every `SupplyChainPolicy` follow, because they all read the identity from
 the Chains config (`signers.x509.fulcio.provider` and `.issuer`) and the trust domain from Tekton's `config-spire`.
 
+The same identity system opens Vault. With `spiffe`, the store every build's credentials are read through logs
+in to Vault with a JWT-SVID of its own, and Vault accepts that one SPIFFE ID and nothing else; see
+[How the store is set up](installation.md#how-the-store-is-set-up).
+
 The three authorization proofs are unaffected: they are about the Kubernetes ServiceAccount the API server
 reviewed, whatever name the certificate carries.
 

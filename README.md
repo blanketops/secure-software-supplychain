@@ -129,7 +129,7 @@ Installation takes seven phases, from an empty cluster to a first verified build
 ```
 0  Prerequisites      a cluster, tools, External Secrets Operator
 1  Dependencies       supplychain install     Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube
-2  Operator           make install deploy     the CRDs and the controller
+2  Operator           mage install deploy     the CRDs and the controller, built with ko
 3  Credentials        supplychain secrets set   git, registry and GitHub credentials, kept in Vault
 4  SonarQube          supplychain init-sonarqube
 5  Resources          kubectl apply -k config/samples
@@ -159,11 +159,12 @@ goes wrong.
 This is a working proof of concept, exercised end to end on a single-node kind cluster. Things to know before
 relying on it:
 
-- Credentials are kept in a Vault the installer runs, and reach builds through External Secrets. Vault's unseal
+- Credentials are kept in a Vault the installer runs, and reach builds through External Secrets. With SPIFFE
+  identities the store logs in to Vault with a short-lived JWT-SVID and no stored credential. Vault's unseal
   key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
   demonstration and not for production. Any other External Secrets provider can be
   [used instead](docs/installation.md#using-a-secret-store-of-your-own).
-- Fulcio, Rekor and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
+- Fulcio, Rekor, Vault and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
 - The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
   half of the proof has not been run.
 - Branch names containing `/` cannot trigger a build yet.
@@ -177,10 +178,16 @@ relying on it:
 ## Development
 
 ```bash
-make manifests generate   # after changing *_types.go or kubebuilder markers
-make test                 # unit and controller tests (envtest)
-make test-e2e             # creates its own kind cluster; allow 15-30 minutes
+mage manifests generate   # after changing *_types.go or kubebuilder markers
+mage test                 # unit and controller tests (envtest)
+mage lint                 # golangci-lint
+mage testE2E              # creates its own kind cluster; allow 15-30 minutes
+mage -l                   # every target
 ```
+
+The build is a [magefile](https://magefile.org) in [`magefiles/`](magefiles/), and the controller's image is built
+with [ko](https://ko.build) from [`.ko.yaml`](.ko.yaml): there is no Makefile and no Dockerfile. Without mage
+installed, `go run mage.go <target>` does the same.
 
 The e2e suite deploys the operator and the real policy-controller, and checks that a `SupplyChainPolicy` is
 rendered, that an unsigned image is rejected, that warn mode admits it, and that deleting the policy cleans up.

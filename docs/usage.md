@@ -137,8 +137,10 @@ names the policy that refused it.
 
 ```bash
 supplychain install --webhook-host <host>        # install the dependencies (--ui-host for the UIs)
-supplychain secrets set <secret> <field>=<value|@file>   # store or rotate a credential in Vault
-supplychain secrets list                         # which fields are set; never prints a value
+supplychain install --only-step "Secret Store"   # set up, or repair, the store's login to Vault
+supplychain secrets set <key>=<value|@file>      # store or rotate a credential in Vault
+supplychain secrets list                         # which keys are set; never prints a value
+supplychain secrets get <key>                    # the value Vault holds for one key
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
 supplychain status                               # check the dependencies
 supplychain uninstall                            # remove them
@@ -149,8 +151,8 @@ supplychain observe rbac                         # RBAC audit dashboard
 ## Uninstall
 
 ```bash
-make undeploy
-make uninstall
+mage undeploy
+mage uninstall
 supplychain uninstall
 ```
 
