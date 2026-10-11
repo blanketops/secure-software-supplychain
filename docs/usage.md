@@ -144,9 +144,46 @@ supplychain secrets get <key>                    # the value Vault holds for one
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
 supplychain status                               # every dependency, certificate and the store; fails if one is not ready
 supplychain uninstall                            # remove them
-supplychain observe                              # secure software supply chain dashboard
-supplychain observe rbac                         # RBAC audit dashboard
+supplychain observe                              # builds, signatures, the live transparency log and who is trusted
+supplychain observe rbac                         # the same, opened on the Permissions page
 ```
+
+## The observer
+
+```bash
+supplychain observe
+```
+
+opens a page in your browser, served from your machine, that shows one namespace at a time:
+
+- **Supply chains**: what each builds, the identity it signs as, and the three permission checks it has to pass.
+- **GitHub webhooks**: the webhook registered on each repository, where it delivers, GitHub's ID for it, and
+  whether deliveries are signed with a shared secret.
+- **Builds**: each build's steps, what the scans found, and every signature and attestation recorded for the
+  image, with a link from each to its entry in the log.
+- **Who is trusted**: read live from Fulcio, Rekor and the CT log. The log's signing key and Fulcio's root are
+  compared with the trust anchors builds and admission verify against, so a log or a CA that is not the one the
+  cluster trusts shows as such. It also shows which identity provider Fulcio issues certificates for, and how
+  many signing certificates have been issued.
+- **Transparency log**: the latest entries, decoded: what was signed, by which identity, vouched for by which
+  provider, and whether the log returned a proof of inclusion. Search by log index, entry ID, or the SHA-256 of
+  what was signed.
+- **Admission**: the policies and whose signatures they accept.
+- **Credentials**: the secret store, where it is, how it logs in (a SPIFFE identity, a ServiceAccount, or a
+  stored token) and whether it is reached over verified HTTPS; then what builds are reading from it right now,
+  never the values.
+- **Activity**: recent events.
+
+It reads everything through `kubectl proxy`, including Rekor, Fulcio and the CT log, which the Kubernetes API
+proxies to. It therefore works wherever `kubectl` does, needs your kubeconfig to allow `get` on
+`services/proxy` in the three sigstore namespaces, and changes nothing in the cluster. The Kubernetes API does
+not verify a Service's certificate when it proxies to it, which is why what is read is checked against the
+trust anchors rather than taken on the connection's word.
+
+The **Permissions** page, linked from the top and opened directly by `supplychain observe rbac`, answers who
+may build and sign and who may write admission policy. For each ServiceAccount it shows the three checks the
+operator made, which role and binding grant each one, and, when a check is refused, the exact Role and binding
+to apply to allow it.
 
 ## Remove a SupplyChain
 

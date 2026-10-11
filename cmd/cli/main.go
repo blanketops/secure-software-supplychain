@@ -166,8 +166,11 @@ func observeCmd() *cobra.Command {
 		Short: "Open the secure software supply chain observer UI in your browser",
 		Long: `Starts kubectl proxy and opens the embedded secure software supply chain observer UI.
 
-  supplychain observe        open the secure software supply chain dashboard
-  supplychain observe rbac   open the RBAC audit dashboard`,
+  supplychain observe        builds, signatures, the live transparency log and who is trusted
+  supplychain observe rbac   who may build, sign and write admission policy, and why
+
+The page is served from this machine and reads the cluster through kubectl proxy,
+including Rekor, Fulcio and the CT log. It changes nothing in the cluster.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
