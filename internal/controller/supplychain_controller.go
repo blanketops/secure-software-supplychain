@@ -153,12 +153,12 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// ── Trigger layer ─────────────────────────────────────────────────────
-	if err := triggers.EnsureTriggerBinding(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
+	if err := triggers.EnsureTriggerBinding(ctx, r.Client, r.Scheme, &sc); err != nil {
 		logger.Error(err, "failed to reconcile TriggerBinding")
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
 
-	if err := triggers.EnsureTriggerTemplate(ctx, r.Client, sc.Namespace, sc.Name); err != nil {
+	if err := triggers.EnsureTriggerTemplate(ctx, r.Client, r.Scheme, &sc); err != nil {
 		logger.Error(err, "failed to reconcile TriggerTemplate")
 		return r.setPhase(ctx, &sc, "Degraded", err)
 	}
@@ -213,17 +213,21 @@ func (r *SupplyChainReconciler) ensureServiceAccount(
 	err := r.Get(ctx, client.ObjectKey{Namespace: sc.Namespace, Name: name}, &existing)
 	if apierrors.IsNotFound(err) {
 		logger.Info("Creating ServiceAccount", "name", name)
-		return r.Create(ctx, &corev1.ServiceAccount{
+		created := &corev1.ServiceAccount{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: sc.Namespace,
 				Labels: map[string]string{
-					"blanketops.dev/managed":      "true",
+					managedLabel:                  "true",
 					"blanketops.dev/supply-chain": sc.Name,
 				},
 			},
 			ImagePullSecrets: pullSecrets,
-		})
+		}
+		if _, err := shareWith(sc, created, r.Scheme); err != nil {
+			return err
+		}
+		return r.Create(ctx, created)
 	}
 	if err != nil {
 		return err
@@ -232,6 +236,15 @@ func (r *SupplyChainReconciler) ensureServiceAccount(
 	// The ServiceAccount may predate this, or have been created by hand; add
 	// what is missing and leave anything else on it alone.
 	changed := false
+	// One this operator created belongs to every SupplyChain that builds with
+	// it, and is removed with the last of them. One made by hand is not ours
+	// to remove.
+	if managed(&existing) {
+		var err error
+		if changed, err = shareWith(sc, &existing, r.Scheme); err != nil {
+			return err
+		}
+	}
 	for _, want := range pullSecrets {
 		found := false
 		for _, have := range existing.ImagePullSecrets {
@@ -248,7 +261,7 @@ func (r *SupplyChainReconciler) ensureServiceAccount(
 	if !changed {
 		return nil
 	}
-	logger.Info("Adding registry credentials to ServiceAccount", "name", name)
+	logger.Info("Updating ServiceAccount", "name", name)
 	return r.Update(ctx, &existing)
 }
 
@@ -368,7 +381,10 @@ func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1
 		task := desired
 		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, &task, func() error {
 			task.Spec = desired.Spec
-			return nil
+			// Every SupplyChain in the namespace runs these Tasks; they go
+			// when the last of them does.
+			_, err := shareWith(sc, &task, r.Scheme)
+			return err
 		})
 		if err != nil {
 			return fmt.Errorf("reconciling Task %q: %w", task.Name, err)

@@ -25,6 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 )
 
 // EnsureTriggerTemplate ensures the TriggerTemplate exists for the given
@@ -38,9 +41,10 @@ import (
 func EnsureTriggerTemplate(
 	ctx context.Context,
 	c client.Client,
-	namespace string,
-	supplyChainName string,
+	scheme *runtime.Scheme,
+	sc *supplyv1alpha1.SupplyChain,
 ) error {
+	namespace, supplyChainName := sc.Namespace, sc.Name
 	name := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 
 	imageBuildTemplate := map[string]interface{}{
@@ -109,6 +113,10 @@ func EnsureTriggerTemplate(
 	var existing triggersv1beta1.TriggerTemplate
 	err = c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &existing)
 	if apierrors.IsNotFound(err) {
+		// It is this SupplyChain's alone, and is removed with it.
+		if err := controllerutil.SetControllerReference(sc, desired, scheme); err != nil {
+			return err
+		}
 		return c.Create(ctx, desired)
 	}
 	if err != nil {
@@ -116,5 +124,9 @@ func EnsureTriggerTemplate(
 	}
 
 	existing.Spec = desired.Spec
+	// One made before it had an owner is given one now.
+	if err := controllerutil.SetControllerReference(sc, &existing, scheme); err != nil {
+		return err
+	}
 	return c.Update(ctx, &existing)
 }

@@ -148,6 +148,20 @@ supplychain observe                              # supply chain dashboard
 supplychain observe rbac                         # RBAC audit dashboard
 ```
 
+## Remove a SupplyChain
+
+```bash
+kubectl delete githubwebhook <name>-webhook      # takes the webhook off the GitHub repository
+kubectl delete supplychainpolicy <name>          # removes its ClusterImagePolicies and TrustRoot
+kubectl delete supplychain <name>
+```
+
+Deleting a `SupplyChain` removes what it created: its builds and their runs, the trigger objects, the
+EventListener and its ingress, and its SPIFFE registration. The build ServiceAccount and the three Tasks the
+operator adds to the namespace are shared by every `SupplyChain` there, so they go with the last one; the same
+holds for a policy's ServiceAccount. A ServiceAccount you created yourself is never removed, and neither are the
+roles you applied from `config/samples`.
+
 ## Uninstall
 
 ```bash

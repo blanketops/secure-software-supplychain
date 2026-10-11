@@ -209,6 +209,9 @@ func (r *SupplyChainPolicyReconciler) trustAnchors(
 
 // ensureServiceAccount creates the policy's ServiceAccount if it is missing.
 // What it may do is granted separately, by an administrator.
+//
+// One this operator created belongs to every policy that uses it and is
+// removed with the last of them; one made by hand is left as it is.
 func (r *SupplyChainPolicyReconciler) ensureServiceAccount(
 	ctx context.Context,
 	scp *supplychainv1alpha1.SupplyChainPolicy,
@@ -219,18 +222,31 @@ func (r *SupplyChainPolicyReconciler) ensureServiceAccount(
 	}
 	var existing corev1.ServiceAccount
 	err := r.Get(ctx, types.NamespacedName{Namespace: scp.Namespace, Name: name}, &existing)
+	if err == nil {
+		if !managed(&existing) {
+			return nil
+		}
+		changed, err := shareWith(scp, &existing, r.Scheme)
+		if err != nil || !changed {
+			return err
+		}
+		return r.Update(ctx, &existing)
+	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
 	logf.FromContext(ctx).Info("Creating ServiceAccount", "name", name)
-	err = r.Create(ctx, &corev1.ServiceAccount{
+	created := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: scp.Namespace,
-			Labels:    map[string]string{"blanketops.dev/managed": "true"},
+			Labels:    map[string]string{managedLabel: "true"},
 		},
-	})
-	return client.IgnoreAlreadyExists(err)
+	}
+	if _, err := shareWith(scp, created, r.Scheme); err != nil {
+		return err
+	}
+	return client.IgnoreAlreadyExists(r.Create(ctx, created))
 }
 
 // apply creates or updates one rendered resource. It refuses to touch a

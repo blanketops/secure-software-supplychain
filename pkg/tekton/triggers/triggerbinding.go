@@ -22,7 +22,11 @@ import (
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
 )
 
 // EnsureTriggerBinding ensures the TriggerBinding exists for the given
@@ -31,9 +35,10 @@ import (
 func EnsureTriggerBinding(
 	ctx context.Context,
 	c client.Client,
-	namespace string,
-	supplyChainName string,
+	scheme *runtime.Scheme,
+	sc *supplyv1alpha1.SupplyChain,
 ) error {
+	namespace, supplyChainName := sc.Namespace, sc.Name
 	name := fmt.Sprintf("secure-software-supplychain-github-binding-%s", supplyChainName)
 
 	desired := &triggersv1beta1.TriggerBinding{
@@ -79,11 +84,19 @@ func EnsureTriggerBinding(
 	var existing triggersv1beta1.TriggerBinding
 	err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &existing)
 	if apierrors.IsNotFound(err) {
+		// It is this SupplyChain's alone, and is removed with it.
+		if err := controllerutil.SetControllerReference(sc, desired, scheme); err != nil {
+			return err
+		}
 		return c.Create(ctx, desired)
 	}
 	if err != nil {
 		return fmt.Errorf("fetching TriggerBinding: %w", err)
 	}
 	existing.Spec = desired.Spec
+	// One made before it had an owner is given one now.
+	if err := controllerutil.SetControllerReference(sc, &existing, scheme); err != nil {
+		return err
+	}
 	return c.Update(ctx, &existing)
 }
