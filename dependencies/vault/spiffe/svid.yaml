@@ -102,6 +102,10 @@ spec:
       app.kubernetes.io/name: supply-chain-svid
   template:
     metadata:
+      annotations:
+        # Changing this restarts the pod, so that it fetches a JWT-SVID with
+        # the issuer SPIRE now writes.
+        supply-chain.blanketops.dev/jwt-issuer: https
       labels:
         app.kubernetes.io/name: supply-chain-svid
     spec:

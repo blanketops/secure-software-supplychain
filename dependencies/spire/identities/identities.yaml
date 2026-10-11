@@ -3,7 +3,7 @@
 #     -n spire-server --no-hooks \
 #     --set global.spire.trustDomain=trust-domain.placeholder.invalid \
 #     --set global.spire.clusterName=blanketops \
-#     --set global.spire.jwtIssuer=http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local \
+#     --set global.spire.jwtIssuer=https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local \
 #     --set spiffe-oidc-discovery-provider.tls.spire.enabled=false
 #
 # trust-domain.placeholder.invalid is replaced with --trust-domain at install time.

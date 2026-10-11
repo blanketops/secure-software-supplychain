@@ -240,3 +240,80 @@ func TestChainsReachesSigstoreOverTLS(t *testing.T) {
 		}
 	}
 }
+
+// Vault is set up as the sigstore services are: on loopback, behind the tls
+// container, with a certificate for the address the store is given. External
+// Secrets verifies it against the CA; a Vault of the user's own is not held
+// to this cluster's CA.
+func TestVaultIsOnlyReachableOverTLS(t *testing.T) {
+	objects := manifestObjects(t, "dependencies/vault/server/vault.yaml")
+	config, _, _ := unstructured.NestedString(find(t, objects, "ConfigMap", "vault-config").Object, "data", "vault.hcl")
+	if !strings.Contains(config, `address     = "127.0.0.1:8200"`) || strings.Contains(config, "0.0.0.0") {
+		t.Errorf("Vault must listen on loopback only:\n%s", config)
+	}
+	ports, _, _ := unstructured.NestedSlice(find(t, objects, "Service", "vault").Object, "spec", "ports")
+	if len(ports) != 1 || fmt.Sprint(ports[0].(map[string]any)["targetPort"]) != "https" {
+		t.Errorf("the Service exposes %v; want only the tls container's port", ports)
+	}
+
+	cert := find(t, manifestObjects(t, "dependencies/vault/server/tls.yaml"), "Certificate", "vault-tls")
+	names, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
+	host, isHTTPS := strings.CutPrefix(vaultAddress, "https://")
+	host, _, _ = strings.Cut(host, ":")
+	if !isHTTPS || !slices.Contains(names, host) || !slices.Contains(names, vaultServerName) {
+		t.Errorf("the certificate is for %v, which has to include %s and %s", names, host, vaultServerName)
+	}
+
+	want := map[string]any{"type": "ConfigMap", "name": caConfigMap, "key": caKey, "namespace": vaultNamespace}
+	for name, obj := range map[string]*unstructured.Unstructured{"kubernetes": secretStore(), "spiffe": spiffeSecretStore()} {
+		if ca, _, _ := unstructured.NestedMap(obj.Object, "spec", "provider", "vault", "caProvider"); !reflect.DeepEqual(ca, want) {
+			t.Errorf("the %s store verifies Vault against %v, want %v", name, ca, want)
+		}
+	}
+	external := externalSecretStore("https://vault.example:8200")
+	if _, found, _ := unstructured.NestedMap(external.Object, "spec", "provider", "vault", "caProvider"); found {
+		t.Error("a Vault of the user's own is held to this cluster's CA")
+	}
+}
+
+// SPIRE's discovery address is the issuer inside every JWT-SVID. It is https
+// in the one place the installer names it and the two places SPIRE is told
+// it, and a change of it restarts everything that would otherwise keep
+// handing out the old one.
+func TestSPIREDiscoveryIsHTTPS(t *testing.T) {
+	if !strings.HasPrefix(spireOIDCIssuer, "https://") {
+		t.Fatalf("the issuer is %s", spireOIDCIssuer)
+	}
+	data, err := manifests.Dependencies.ReadFile("dependencies/spire/release/release.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), `"jwt_issuer": "`+spireOIDCIssuer+`"`); got != 2 {
+		t.Errorf("%d of SPIRE's two jwt_issuer settings are %s", got, spireOIDCIssuer)
+	}
+	if strings.Contains(string(data), "allow_insecure_scheme") {
+		t.Error("discovery still allows plain HTTP")
+	}
+
+	objects := manifestObjects(t, "dependencies/spire/release/release.yaml")
+	ports, _, _ := unstructured.NestedSlice(
+		find(t, objects, "Service", "spire-spiffe-oidc-discovery-provider").Object, "spec", "ports")
+	if len(ports) != 1 || fmt.Sprint(ports[0].(map[string]any)["port"]) != "443" {
+		t.Errorf("the discovery Service exposes %v, want 443 alone", ports)
+	}
+	for kind, name := range map[string]string{
+		"Deployment": "spire-spiffe-oidc-discovery-provider", "StatefulSet": "spire-server", "DaemonSet": "spire-agent",
+	} {
+		annotations, _, _ := unstructured.NestedStringMap(
+			find(t, objects, kind, name).Object, "spec", "template", "metadata", "annotations")
+		if annotations["supply-chain.blanketops.dev/jwt-issuer"] != "https" {
+			t.Errorf("%s %s would not restart on a change of issuer", kind, name)
+		}
+	}
+
+	cert := find(t, manifestObjects(t, "dependencies/spire/release/tls.yaml"), "Certificate", "spire-oidc-tls")
+	names, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
+	if !slices.Contains(names, strings.TrimPrefix(spireOIDCIssuer, "https://")) {
+		t.Errorf("the certificate is for %v, which does not include the issuer", names)
+	}
+}

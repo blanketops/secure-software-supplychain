@@ -34,7 +34,7 @@ spec:
   # A signer outside this namespace is stated by its exact certificate subject
   # and issuer, which pins it regardless of the cluster's signing identity:
   # - subject: spiffe://blanketops.dev/ns/release/sa/release-signer
-  #   issuer: http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
+  #   issuer: https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
 
   # The sigstore instance signatures and attestations are verified against.
   # Rendered as the policy-controller TrustRoot.

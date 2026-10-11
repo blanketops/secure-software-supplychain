@@ -42,9 +42,13 @@ const (
 	vaultNamespace = "vault"
 	vaultPod       = "vault-0"
 	vaultSTS       = "vault"
-	vaultPort      = 8200
-	// vaultAddress is where the cluster reaches Vault.
-	vaultAddress = "http://vault.vault.svc.cluster.local:8200"
+	// vaultTLSPort is the port of the pod's "tls" container, which is how
+	// Vault is reached from outside its pod.
+	vaultTLSPort = 8443
+	// vaultAddress is where the cluster reaches Vault, and vaultServerName
+	// a name its certificate is issued for.
+	vaultAddress    = "https://vault.vault.svc.cluster.local:8200"
+	vaultServerName = "vault.vault.svc"
 
 	// vaultKeysSecret holds what initialising Vault returns: the key that
 	// unseals it and the root token. See dependencies/vault/vault.yaml for
@@ -214,9 +218,20 @@ func (i *Installer) ensureSecretStore(ctx context.Context) error {
 		return err
 	}
 
+	if i.opts.VaultAddr == "" {
+		// External Secrets verifies Vault's certificate against the CA.
+		if err := i.publishCA(ctx, vaultNamespace); err != nil {
+			return err
+		}
+	}
+
 	var desired *unstructured.Unstructured
 	if i.spiffeLogin() {
-		if err := configureSPIFFEAuth(ctx, vault, i.opts.TrustDomain); err != nil {
+		ca, err := i.supplyChainCA(ctx)
+		if err != nil {
+			return err
+		}
+		if err := configureSPIFFEAuth(ctx, vault, i.opts.TrustDomain, ca); err != nil {
 			return err
 		}
 		desired = spiffeSecretStore()
@@ -476,11 +491,16 @@ func configureJWTAuth(ctx context.Context, vault *vaultClient, issuer string, pu
 //
 // The Kubernetes login an earlier install may have set up is taken away, so
 // that the SPIFFE identity is the only one that can read the secrets.
-func configureSPIFFEAuth(ctx context.Context, vault *vaultClient, trustDomain string) error {
+func configureSPIFFEAuth(ctx context.Context, vault *vaultClient, trustDomain, ca string) error {
 	if err := ensureAuthMethod(ctx, vault, vaultSPIFFEAuthMount, "jwt"); err != nil {
 		return err
 	}
-	config := map[string]any{"oidc_discovery_url": spireOIDCIssuer, "bound_issuer": spireOIDCIssuer}
+	config := map[string]any{
+		"oidc_discovery_url": spireOIDCIssuer,
+		"bound_issuer":       spireOIDCIssuer,
+		// Discovery is served with a certificate from the supply chain's CA.
+		"oidc_discovery_ca_pem": ca,
+	}
 	if _, err := vault.call(ctx, http.MethodPost, "/v1/auth/"+vaultSPIFFEAuthMount+"/config", config, nil); err != nil {
 		return fmt.Errorf("pointing Vault at SPIRE's OIDC discovery at %s: %w", spireOIDCIssuer, err)
 	}
@@ -539,6 +559,13 @@ func secretStore() *unstructured.Unstructured {
 					"server":  vaultAddress,
 					"path":    store.Mount,
 					"version": "v2",
+					// Vault's certificate comes from the supply chain's CA.
+					"caProvider": map[string]any{
+						"type":      "ConfigMap",
+						"name":      caConfigMap,
+						"key":       caKey,
+						"namespace": vaultNamespace,
+					},
 					"auth": map[string]any{
 						"kubernetes": map[string]any{
 							"mountPath": vaultAuthMount,
@@ -561,6 +588,8 @@ func secretStore() *unstructured.Unstructured {
 func externalSecretStore(server string) *unstructured.Unstructured {
 	obj := secretStore()
 	_ = unstructured.SetNestedField(obj.Object, server, "spec", "provider", "vault", "server")
+	// A Vault of the user's own has a certificate of the user's own.
+	unstructured.RemoveNestedField(obj.Object, "spec", "provider", "vault", "caProvider")
 	_ = unstructured.SetNestedMap(obj.Object, map[string]any{
 		"jwt": map[string]any{
 			"path": vaultJWTAuthMount,
@@ -608,9 +637,9 @@ func (i *Installer) connectToVault(ctx context.Context) (*vaultClient, func(), e
 	var last error
 	for time.Now().Before(deadline) {
 		if i.vaultServerRunning(ctx) {
-			base, stop, err := i.forwardToPod(ctx, vaultNamespace, vaultPod, vaultPort)
+			base, client, stop, err := i.httpsToPod(ctx, vaultNamespace, "app=vault", vaultTLSPort, vaultServerName)
 			if err == nil {
-				vault := &vaultClient{base: base, http: &http.Client{Timeout: 30 * time.Second}}
+				vault := &vaultClient{base: base, http: client}
 				if _, err = vault.call(ctx, http.MethodGet, "/v1/sys/seal-status", nil, nil); err == nil {
 					return vault, stop, nil
 				}
@@ -690,11 +719,11 @@ func (i *Installer) openVault(ctx context.Context) (*vaultClient, func(), error)
 		return nil, nil, fmt.Errorf("vault is not set up (run `supplychain install`, or set %s for a Vault of your own): %w",
 			vaultAddrEnv, err)
 	}
-	base, stop, err := i.forwardToPod(ctx, vaultNamespace, vaultPod, vaultPort)
+	base, client, stop, err := i.httpsToPod(ctx, vaultNamespace, "app=vault", vaultTLSPort, vaultServerName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reaching Vault: %w", err)
 	}
-	return &vaultClient{base: base, token: token, http: &http.Client{Timeout: 30 * time.Second}}, stop, nil
+	return &vaultClient{base: base, token: token, http: client}, stop, nil
 }
 
 // existingVaultToken finds a token the way the vault CLI does.

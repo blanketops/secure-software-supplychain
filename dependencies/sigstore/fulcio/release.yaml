@@ -485,6 +485,10 @@ spec:
         # https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
         - name: SSL_CERT_FILE
           value: /var/run/fulcio/ca.crt
+        # And the supply chain's CA, for SPIRE's OIDC discovery when workloads
+        # sign with SPIFFE identities.
+        - name: SSL_CERT_DIR
+          value: /etc/supply-chain-ca
         volumeMounts:
         - name: fulcio-config
           mountPath: /etc/fulcio-config

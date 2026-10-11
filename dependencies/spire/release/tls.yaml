@@ -1,0 +1,31 @@
+# The certificate SPIRE's OIDC discovery is served with, from the supply
+# chain's CA. The nginx container of the discovery provider's pod serves it;
+# see the provider's ConfigMap in release.yaml.
+#
+# The address is not only where the keys are fetched: it is the issuer written
+# into every JWT-SVID, which Fulcio, Vault and the admission policies all
+# match exactly.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spire-oidc-tls
+  namespace: spire-server
+spec:
+  secretName: spire-oidc-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+  dnsNames:
+    - spire-spiffe-oidc-discovery-provider
+    - spire-spiffe-oidc-discovery-provider.spire-server
+    - spire-spiffe-oidc-discovery-provider.spire-server.svc
+    - spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
+  issuerRef:
+    name: supply-chain-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

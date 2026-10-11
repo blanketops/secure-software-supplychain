@@ -48,7 +48,7 @@ const (
 	// spireOIDCIssuer is where SPIRE serves OIDC discovery for its JWT-SVIDs,
 	// and the issuer written into them. The SPIRE manifests were rendered with
 	// this value; Fulcio and Chains must be given the same one.
-	spireOIDCIssuer = "http://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local"
+	spireOIDCIssuer = "https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local"
 
 	// SPIFFE Workload API as the SPIFFE CSI driver exposes it in a pod.
 	spiffeCSIDriver   = "csi.spiffe.io"

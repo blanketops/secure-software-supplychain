@@ -50,10 +50,13 @@ data:
   vault.hcl: |
     ui            = false
     disable_mlock = true
-    api_addr      = "http://vault.vault.svc.cluster.local:8200"
+    api_addr      = "https://vault.vault.svc.cluster.local:8200"
 
+    # Loopback only, where nothing outside the pod can reach it. The "tls"
+    # container serves Vault to the cluster over HTTPS; see tls.yaml. The
+    # unseal sidecar and `kubectl exec ... vault` use this address.
     listener "tcp" {
-      address     = "0.0.0.0:8200"
+      address     = "127.0.0.1:8200"
       tls_disable = 1
     }
 
@@ -74,10 +77,11 @@ spec:
   # Reachable while sealed too: the installer and the sidecar have to talk to
   # a sealed Vault in order to open it.
   publishNotReadyAddresses: true
+  # HTTPS only: the "tls" container.
   ports:
-    - name: http
+    - name: https
       port: 8200
-      targetPort: http
+      targetPort: https
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -113,16 +117,6 @@ spec:
           env:
             - name: VAULT_ADDR
               value: http://127.0.0.1:8200
-          ports:
-            - name: http
-              containerPort: 8200
-          # Ready means initialised and unsealed: able to serve secrets.
-          readinessProbe:
-            httpGet:
-              path: /v1/sys/health
-              port: http
-            periodSeconds: 5
-            failureThreshold: 2
           resources:
             requests:
               cpu: 50m
@@ -141,6 +135,53 @@ spec:
               mountPath: /vault/data
             - name: config
               mountPath: /vault/config
+        - name: tls
+          image: docker.io/nginxinc/nginx-unprivileged:1.30.0-alpine
+          command: ["/bin/sh", "/etc/nginx/conf.d/run.sh"]
+          ports:
+            - name: https
+              containerPort: 8443
+          # Vault listens on loopback, which the kubelet cannot probe, so the
+          # pod's health is read through this container. Ready means
+          # initialised and unsealed: able to serve secrets.
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+            failureThreshold: 2
+          # Alive means Vault answers at all, sealed or not: a sealed Vault is
+          # waiting for its key, and restarting it would not help.
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?sealedcode=200&uninitcode=200&standbyok=true
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: tls-proxy
+              mountPath: /etc/nginx/conf.d
         - name: unseal
           image: hashicorp/vault:2.0.3
           command: ["/bin/sh", "-c"]
@@ -179,6 +220,12 @@ spec:
         - name: config
           configMap:
             name: vault-config
+        - name: tls
+          secret:
+            secretName: vault-tls
+        - name: tls-proxy
+          configMap:
+            name: vault-tls-proxy
         - name: unseal
           secret:
             secretName: vault-unseal

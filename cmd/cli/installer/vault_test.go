@@ -523,12 +523,13 @@ func TestConfigureSPIFFEAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := configureSPIFFEAuth(ctx, vault, "your-domain.example"); err != nil {
+		if err := configureSPIFFEAuth(ctx, vault, "your-domain.example", "the CA"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	config := fake.configs[vaultSPIFFEAuthMount]
-	if config["oidc_discovery_url"] != spireOIDCIssuer || config["bound_issuer"] != spireOIDCIssuer {
+	if config["oidc_discovery_url"] != spireOIDCIssuer || config["bound_issuer"] != spireOIDCIssuer ||
+		config["oidc_discovery_ca_pem"] != "the CA" || !strings.HasPrefix(spireOIDCIssuer, "https://") {
 		t.Errorf("JWT auth config = %v, want SPIRE's OIDC discovery", config)
 	}
 	want := map[string]any{
