@@ -135,7 +135,7 @@ spec:
       url: http://fulcio-server.fulcio-system.svc.cluster.local
       pemRef: {name: blanketops-sigstore-roots, key: fulcio-root.pem}
     rekor:
-      url: http://rekor-server.rekor-system.svc.cluster.local
+      url: https://rekor-server.rekor-system.svc.cluster.local
       pemRef: {name: blanketops-sigstore-roots, key: rekor.pub}
     ctLog:
       url: http://ctlog.ctlog-system.svc/fulcio

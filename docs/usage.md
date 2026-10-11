@@ -32,7 +32,7 @@ spec:
       projectKey: your-org_your-app
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
-    rekorURL: http://rekor-server.rekor-system.svc.cluster.local
+    rekorURL: https://rekor-server.rekor-system.svc.cluster.local
     ctLogURL: http://ctlog.ctlog-system.svc/fulcio
 ```
 
@@ -101,7 +101,7 @@ Supply chain policy verification
   Authorization:  verified (scope, intent, output allowed)
   Chains signer:  spiffe://<your-domain>/ns/tekton-chains/sa/tekton-chains-controller
   Chains:         verified (image signature, SLSA provenance)
-  Rekor:          http://rekor-server.rekor-system.svc.cluster.local
+  Rekor:          https://rekor-server.rekor-system.svc.cluster.local
   Result:         PASS
 ```
 

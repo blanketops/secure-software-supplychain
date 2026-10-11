@@ -128,7 +128,7 @@ Installation takes seven phases, from an empty cluster to a first verified build
 
 ```
 0  Prerequisites      a cluster, tools, External Secrets Operator
-1  Dependencies       supplychain install     Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube
+1  Dependencies       supplychain install     cert-manager, Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube
 2  Operator           mage install deploy     the CRDs and the controller, built with ko
 3  Credentials        supplychain secrets set   git, registry and GitHub credentials, kept in Vault
 4  SonarQube          supplychain init-sonarqube
@@ -164,7 +164,8 @@ relying on it:
   key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
   demonstration and not for production. Any other External Secrets provider can be
   [used instead](docs/installation.md#using-a-secret-store-of-your-own).
-- Fulcio, Rekor, Vault and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
+- Rekor is served over HTTPS with a certificate from a private CA. Fulcio, the CT log, Vault and SPIRE's OIDC
+  discovery are still reached over plain HTTP inside the cluster; they are next.
 - The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
   half of the proof has not been run.
 - Branch names containing `/` cannot trigger a build yet.

@@ -7,7 +7,7 @@ a push; phase 7 checks the whole thing with one build.
 
 ```
 0  Prerequisites           a cluster, tools, External Secrets Operator
-1  Dependencies            supplychain install       Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube   (≈ 20 min to hours)
+1  Dependencies            supplychain install       cert-manager, Tekton, Sigstore, SPIRE, Vault, ingress, SonarQube   (≈ 20 min to hours)
 2  Operator                mage install deploy       the CRDs and the controller, built with ko
 3  Credentials             supplychain secrets set   git, registry and GitHub credentials, kept in Vault
 4  SonarQube               supplychain init-sonarqube
@@ -62,10 +62,12 @@ because on a slow connection almost all of the time is image pulls.
 | Step | What it sets up |
 |---|---|
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
+| cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
+| Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
 | SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
 | Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
-| Rekor | The transparency log, with its Trillian database and a signing key that survives restarts |
+| Rekor | The transparency log, served over HTTPS, with its Trillian database and a signing key that survives restarts |
 | Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
 | Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
@@ -77,6 +79,36 @@ because on a slow connection almost all of the time is image pulls.
 
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
 `blanketops-sigstore-roots` ConfigMap, which the pipeline and the policies verify against.
+
+### TLS between the services
+
+The services of the supply chain are being moved to HTTPS, each with a certificate from the private CA above.
+Rekor is the first:
+
+| Service | Address | |
+|---|---|---|
+| Rekor | `https://rekor-server.rekor-system.svc.cluster.local` | HTTPS only |
+| Fulcio, CT log, Vault, SPIRE OIDC discovery | `http://…` | still plain HTTP inside the cluster |
+
+Rekor itself only speaks plain HTTP. It listens on its pod's loopback address, where nothing outside the pod
+reaches it, and a `tls` container in the same pod serves it on the Service's port 443. cert-manager renews the
+certificate (90 days, renewed after 60) and the container picks the new one up within the hour.
+
+Everything that talks to Rekor trusts the CA and nothing else new:
+
+- the pipeline's cosign steps and the operator read it from the `ca.crt` key of the `blanketops-sigstore-roots`
+  ConfigMap, next to the sigstore trust anchors;
+- Tekton Chains and the policy controller get it from a `supply-chain-ca` ConfigMap in their namespace.
+
+In each case it is added to the public CAs the image already trusts, so registries keep verifying.
+
+To use a CA of your own, put its certificate and key in the Secret `cert-manager/supply-chain-ca` (`tls.crt`,
+`tls.key`) before installing. To look at what is issued:
+
+```bash
+kubectl get clusterissuer supply-chain-ca
+kubectl get certificates -A
+```
 
 **Re-running it is safe.** What must only be made once is never made again: the keys Fulcio, the CT log and
 Rekor sign with, the Merkle trees behind Rekor and the CT log, Vault's unseal key and root token, and the
@@ -276,7 +308,8 @@ spec:
 ```
 
 > **Before production.** Three things here are set up for a self-contained demonstration, and are yours to
-> change: Vault and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster, so give both TLS;
+> change: Vault and SPIRE's OIDC discovery are still reached over plain HTTP inside the cluster (see
+> [TLS between the services](#tls-between-the-services));
 > Vault runs as a single server on a file volume; and its unseal key is kept next to it, as the next note says.
 
 > **Vault's own keys are in the cluster.** Vault seals itself whenever its pod restarts, and a sidecar unseals
