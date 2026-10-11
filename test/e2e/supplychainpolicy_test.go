@@ -144,9 +144,9 @@ spec:
   steps:
     sign: true
   signing:
-    fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
+    fulcioURL: https://fulcio-server.fulcio-system.svc.cluster.local
     rekorURL: https://rekor-server.rekor-system.svc.cluster.local
-    ctLogURL: http://ctlog.ctlog-system.svc/fulcio
+    ctLogURL: https://ctlog.ctlog-system.svc/fulcio
 ---
 apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChainPolicy
@@ -161,7 +161,7 @@ spec:
   - serviceAccountName: supply-chain-runner
   trustRoot:
     fulcio:
-      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      url: https://fulcio-server.fulcio-system.svc.cluster.local
       pemRef:
         name: %[3]s
         key: %[4]s

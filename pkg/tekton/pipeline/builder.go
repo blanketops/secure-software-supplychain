@@ -361,17 +361,23 @@ echo "SPIFFE Workload API socket present"`
 				Params: []tektonv1.ParamSpec{
 					{Name: "FULCIO_URL", Type: tektonv1.ParamTypeString},
 				},
-				Volumes: []corev1.Volume{source.volume},
+				Volumes: []corev1.Volume{source.volume, tlsCAVolumeSource()},
 				Steps: []tektonv1.Step{
 					{
 						Name:         "verify-fulcio",
 						Image:        "curlimages/curl:latest",
-						VolumeMounts: []corev1.VolumeMount{source.mount},
+						VolumeMounts: []corev1.VolumeMount{source.mount, tlsCAMount()},
 						Script: `#!/bin/sh
 set -e
 ` + check + `
+# An in-cluster Fulcio serves a certificate from the supply chain's own CA.
+# It is trusted in addition to the public CAs, when there is one.
+cat /etc/ssl/certs/ca-certificates.crt > /tmp/trusted.crt
+if [ -s ` + tlsCAMountPath + "/" + signing.RootsCAKey + ` ]; then
+  cat ` + tlsCAMountPath + "/" + signing.RootsCAKey + ` >> /tmp/trusted.crt
+fi
 echo "Verifying Fulcio endpoint: $(params.FULCIO_URL)"
-curl -sf $(params.FULCIO_URL)/api/v1/rootCert > /dev/null
+curl -sf --cacert /tmp/trusted.crt $(params.FULCIO_URL)/api/v1/rootCert > /dev/null
 echo "Fulcio reachable and ready"
 `,
 					},

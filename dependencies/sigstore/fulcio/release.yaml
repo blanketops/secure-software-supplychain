@@ -257,10 +257,11 @@ metadata:
   namespace: ctlog-system
 spec:
   ports:
-  - name: 6962-tcp
-    port: 80
+  # HTTPS only: the "tls" container. Plain HTTP is not exposed; see tls.yaml.
+  - name: https
+    port: 443
     protocol: TCP
-    targetPort: 6962
+    targetPort: 8443
   - name: 6963-tcp
     port: 6963
     protocol: TCP
@@ -284,14 +285,12 @@ metadata:
   namespace: fulcio-system
 spec:
   ports:
-  - name: http
-    port: 80
+  # HTTPS only: the "tls" container. Plain HTTP and gRPC are not exposed;
+  # see tls.yaml.
+  - name: https
+    port: 443
     protocol: TCP
-    targetPort: 5555
-  - name: grpc
-    port: 5554
-    protocol: TCP
-    targetPort: 5554
+    targetPort: 8443
   - name: 2112-tcp
     port: 2112
     protocol: TCP
@@ -339,20 +338,11 @@ spec:
         image: "ghcr.io/sigstore/scaffolding/ct_server:v0.7.31@sha256:66664ba563e7c2564ba32fb5d0e8fdeb42d7f0d5ce45f0df5d80074daea5126c"
         imagePullPolicy: IfNotPresent
         args:
-        - "--http_endpoint=0.0.0.0:6962"
+        # Loopback only: the "tls" container in this pod is the way in.
+        - "--http_endpoint=127.0.0.1:6962"
         - "--metrics_endpoint=0.0.0.0:6963"
         - "--log_config=/ctfe-keys/config"
         - "--alsologtostderr"
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 6962
-          initialDelaySeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 6962
-          initialDelaySeconds: 10
         volumeMounts:
         - name: keys
           mountPath: "/ctfe-keys"
@@ -362,6 +352,51 @@ spec:
           protocol: TCP
         - containerPort: 6963
           protocol: TCP
+      - name: tls
+        image: docker.io/nginxinc/nginx-unprivileged:1.30.0-alpine
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "/etc/nginx/conf.d/run.sh"]
+        ports:
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        # The server listens on loopback, which the kubelet cannot probe, so the
+        # pod's health is read through this container: /healthz answers only when
+        # the server does.
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          failureThreshold: 6
+        securityContext:
+          runAsUser: 101
+          runAsGroup: 101
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: true
+        - name: tls-proxy
+          mountPath: /etc/nginx/conf.d
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -369,6 +404,12 @@ spec:
       - name: keys
         secret:
           secretName: ctlog-secret
+      - name: tls
+        secret:
+          secretName: ctlog-tls
+      - name: tls-proxy
+        configMap:
+          name: ctlog-tls-proxy
 ---
 # Source: fulcio/templates/fulcio-deployment.yaml
 # BlanketOps patches applied:
@@ -417,7 +458,11 @@ spec:
           protocol: TCP
         args:
         - "serve"
+        # Loopback only, HTTP and gRPC both: the "tls" container in this pod
+        # is the way in.
+        - "--host=127.0.0.1"
         - "--port=5555"
+        - "--grpc-host=127.0.0.1"
         - "--grpc-port=5554"
         - "--ca=fileca"
         - "--fileca-key"
@@ -426,7 +471,8 @@ spec:
         - "/var/run/fulcio-secrets/cert.pem"
         - "--fileca-key-passwd"
         - "$(PASSWORD)"
-        - "--ct-log-url=http://ctlog.ctlog-system.svc/fulcio"
+        - "--ct-log-url=https://ctlog.ctlog-system.svc/fulcio"
+        - "--ct-log.tls-ca-cert=/etc/supply-chain-ca/ca.crt"
         - "--config-path=/etc/fulcio-config/config.json"
         env:
         - name: PASSWORD
@@ -439,24 +485,6 @@ spec:
         # https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
         - name: SSL_CERT_FILE
           value: /var/run/fulcio/ca.crt
-        livenessProbe:
-          failureThreshold: 3
-          httpGet:
-            path: /healthz
-            port: 5555
-            scheme: HTTP
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 1
-        readinessProbe:
-          failureThreshold: 3
-          httpGet:
-            path: /healthz
-            port: 5555
-            scheme: HTTP
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 1
         volumeMounts:
         - name: fulcio-config
           mountPath: /etc/fulcio-config
@@ -465,6 +493,54 @@ spec:
         - name: fulcio-cert
           mountPath: "/var/run/fulcio-secrets"
           readOnly: true
+        - name: tls-ca
+          mountPath: /etc/supply-chain-ca
+          readOnly: true
+      - name: tls
+        image: docker.io/nginxinc/nginx-unprivileged:1.30.0-alpine
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "/etc/nginx/conf.d/run.sh"]
+        ports:
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        # The server listens on loopback, which the kubelet cannot probe, so the
+        # pod's health is read through this container: /healthz answers only when
+        # the server does.
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          failureThreshold: 6
+        securityContext:
+          runAsUser: 101
+          runAsGroup: 101
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: true
+        - name: tls-proxy
+          mountPath: /etc/nginx/conf.d
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -489,6 +565,19 @@ spec:
             path: key.pem
           - key: cert
             path: cert.pem
+      - name: tls
+        secret:
+          secretName: fulcio-server-tls
+      - name: tls-proxy
+        configMap:
+          name: fulcio-server-tls-proxy
+      # The CA alone, for verifying the CT log's certificate.
+      - name: tls-ca
+        secret:
+          secretName: fulcio-server-tls
+          items:
+          - key: ca.crt
+            path: ca.crt
 ---
 # Source: fulcio/charts/ctlog/templates/createctconfig-job.yaml
 apiVersion: batch/v1
@@ -540,7 +629,7 @@ spec:
         - "--configmap=ctlog-config"
         - "--secret=ctlog-secret"
         - "--pubkeysecret=ctlog-public-key"
-        - "--fulcio-url=http://fulcio-server.fulcio-system.svc"
+        - "--fulcio-url=https://fulcio-server.fulcio-system.svc"
         - "--trillian-server=trillian-logserver.trillian-system:8091"
         - "--log-prefix=fulcio"
         env:
@@ -548,6 +637,21 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # Fulcio's certificate comes from the supply chain's CA, which is
+        # trusted here in addition to the image's public CAs.
+        - name: SSL_CERT_DIR
+          value: /etc/supply-chain-ca:/etc/ssl/certs
+        volumeMounts:
+        - name: tls-ca
+          mountPath: /etc/supply-chain-ca
+          readOnly: true
+      volumes:
+      - name: tls-ca
+        secret:
+          secretName: ctlog-tls
+          items:
+          - key: ca.crt
+            path: ca.crt
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -622,29 +726,3 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
----
-# Source: fulcio/templates/fulcio-http-ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  labels:
-    helm.sh/chart: fulcio-2.7.5
-    app.kubernetes.io/name: fulcio
-    app.kubernetes.io/instance: fulcio
-    app.kubernetes.io/version: "1.8.5"
-    app.kubernetes.io/managed-by: Helm
-  name: fulcio-server-http
-  namespace: fulcio-system
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: "fulcio.localhost"
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: fulcio-server
-            port:
-              number: 80

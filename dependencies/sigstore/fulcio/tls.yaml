@@ -1,0 +1,123 @@
+# Fulcio and the CT log over HTTPS.
+#
+# Neither serves its HTTP API over TLS in a way that follows a renewed
+# certificate, so both are set up as Rekor is: the server listens on its pod's
+# loopback address, where nothing outside the pod can reach it, and the "tls"
+# container in the same pod serves it on 8443 with a certificate from the
+# supply chain's CA. Each Service exposes only that port, as 443.
+#
+# Fulcio is the CT log's client: it submits every certificate it issues. It
+# verifies the CT log's certificate against the CA, which cert-manager puts in
+# every certificate's Secret as ca.crt.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ctlog-tls
+  namespace: ctlog-system
+spec:
+  secretName: ctlog-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+  dnsNames:
+    - ctlog
+    - ctlog.ctlog-system
+    - ctlog.ctlog-system.svc
+    - ctlog.ctlog-system.svc.cluster.local
+  issuerRef:
+    name: supply-chain-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ctlog-tls-proxy
+  namespace: ctlog-system
+data:
+  default.conf: |
+    server {
+      listen 8443 ssl;
+      ssl_certificate     /tls/tls.crt;
+      ssl_certificate_key /tls/tls.key;
+      ssl_protocols       TLSv1.2 TLSv1.3;
+
+      location / {
+        proxy_pass http://127.0.0.1:6962;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+      }
+    }
+  run.sh: |
+    # nginx reads a certificate when it starts. cert-manager renews it in
+    # place, so nginx is told to read it again every hour.
+    nginx -g 'daemon off;' &
+    nginx_pid=$!
+    trap 'kill -QUIT "$nginx_pid"; wait "$nginx_pid"; exit 0' TERM INT
+    while kill -0 "$nginx_pid" 2>/dev/null; do
+      sleep 3600 &
+      wait $!
+      nginx -s reload 2>/dev/null || true
+    done
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: fulcio-server-tls
+  namespace: fulcio-system
+spec:
+  secretName: fulcio-server-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+  dnsNames:
+    - fulcio-server
+    - fulcio-server.fulcio-system
+    - fulcio-server.fulcio-system.svc
+    - fulcio-server.fulcio-system.svc.cluster.local
+  issuerRef:
+    name: supply-chain-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fulcio-server-tls-proxy
+  namespace: fulcio-system
+data:
+  default.conf: |
+    server {
+      listen 8443 ssl;
+      ssl_certificate     /tls/tls.crt;
+      ssl_certificate_key /tls/tls.key;
+      ssl_protocols       TLSv1.2 TLSv1.3;
+
+      location / {
+        proxy_pass http://127.0.0.1:5555;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+      }
+    }
+  run.sh: |
+    # nginx reads a certificate when it starts. cert-manager renews it in
+    # place, so nginx is told to read it again every hour.
+    nginx -g 'daemon off;' &
+    nginx_pid=$!
+    trap 'kill -QUIT "$nginx_pid"; wait "$nginx_pid"; exit 0' TERM INT
+    while kill -0 "$nginx_pid" 2>/dev/null; do
+      sleep 3600 &
+      wait $!
+      nginx -s reload 2>/dev/null || true
+    done

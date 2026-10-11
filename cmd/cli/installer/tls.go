@@ -50,8 +50,11 @@ const (
 	// caMountDir is where a workload given the CA finds it.
 	caMountDir = "/etc/supply-chain-ca"
 
-	// rekorURL is where the cluster reaches Rekor.
-	rekorURL = "https://rekor-server.rekor-system.svc.cluster.local"
+	// Where the cluster reaches Rekor, Fulcio and the CT log. Each name is
+	// one its certificate is issued for.
+	rekorURL  = "https://rekor-server.rekor-system.svc.cluster.local"
+	fulcioURL = "https://fulcio-server.fulcio-system.svc.cluster.local"
+	ctLogURL  = "https://ctlog.ctlog-system.svc/fulcio"
 )
 
 var clusterIssuerGVR = schema.GroupVersionResource{

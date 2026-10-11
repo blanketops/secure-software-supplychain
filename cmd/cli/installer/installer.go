@@ -1004,7 +1004,6 @@ func chainsConfig(opts Options) map[string]any {
 		// slsa/v2alpha4 is Chains' name for SLSA v1.0 provenance. "in-toto" and
 		// "slsa/v1" are both the older v0.2 predicate.
 		provenanceFormat = "slsa/v2alpha4"
-		fulcioURL        = "http://fulcio-server.fulcio-system.svc.cluster.local"
 	)
 	config := map[string]any{
 		"artifacts.taskrun.format":                     provenanceFormat,

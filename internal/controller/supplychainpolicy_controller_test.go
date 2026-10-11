@@ -255,7 +255,7 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		cas, _, _ := unstructured.NestedSlice(trustRoot.Object, "spec", "sigstoreKeys", "certificateAuthorities")
 		Expect(cas).To(HaveLen(1))
-		Expect(cas[0]).To(HaveKeyWithValue("uri", "http://fulcio-server.fulcio-system.svc.cluster.local"))
+		Expect(cas[0]).To(HaveKeyWithValue("uri", "https://fulcio-server.fulcio-system.svc.cluster.local"))
 
 		cip, err := getRendered(policy.ClusterImagePolicyGVK)
 		Expect(err).NotTo(HaveOccurred())

@@ -43,7 +43,7 @@ spec:
   trustRoot:
     # The CA that must have issued the signer's certificate.
     fulcio:
-      url: http://fulcio-server.fulcio-system.svc.cluster.local
+      url: https://fulcio-server.fulcio-system.svc.cluster.local
       pemRef:
         name: blanketops-sigstore-roots
         key: fulcio-root.pem
@@ -55,7 +55,7 @@ spec:
         key: rekor.pub
     # The log that must have witnessed the signer's certificate.
     ctLog:
-      url: http://ctlog.ctlog-system.svc/fulcio
+      url: https://ctlog.ctlog-system.svc/fulcio
       pemRef:
         name: blanketops-sigstore-roots
         key: ctfe.pub

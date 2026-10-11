@@ -67,7 +67,7 @@ func yourAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 				},
 			},
 			Signing: &supplychainv1alpha1.SigningSpec{
-				FulcioURL: "http://fulcio-server.fulcio-system.svc.cluster.local",
+				FulcioURL: "https://fulcio-server.fulcio-system.svc.cluster.local",
 				RekorURL:  "https://rekor-server.rekor-system.svc.cluster.local",
 			},
 		},
@@ -157,7 +157,7 @@ var _ = Describe("SupplyChain Controller", func() {
 		var sc supplychainv1alpha1.SupplyChain
 		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
 		Expect(sc.Spec.Signing).NotTo(BeNil())
-		Expect(sc.Spec.Signing.FulcioURL).To(Equal("http://fulcio-server.fulcio-system.svc.cluster.local"))
+		Expect(sc.Spec.Signing.FulcioURL).To(Equal("https://fulcio-server.fulcio-system.svc.cluster.local"))
 		Expect(sc.Spec.Signing.RekorURL).To(Equal("https://rekor-server.rekor-system.svc.cluster.local"))
 	})
 
