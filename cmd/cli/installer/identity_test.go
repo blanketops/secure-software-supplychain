@@ -297,8 +297,9 @@ func TestStepsToRunFromStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if steps[0].Name != "Tekton Chains" {
-		t.Errorf("resumes at %q, want Tekton Chains", steps[0].Name)
+	// The images of what is left are pulled ahead first; see images.go.
+	if !steps[0].PullsImages || steps[1].Name != "Tekton Chains" {
+		t.Errorf("resumes at %q, want Tekton Chains", steps[1].Name)
 	}
 	for _, s := range steps {
 		// The steps that generate keys come before it and must not run again.
@@ -308,8 +309,8 @@ func TestStepsToRunFromStep(t *testing.T) {
 	}
 
 	i.opts.FromStep = "Policy Controller"
-	if steps, _ := i.stepsToRun(); steps[0].Name != "Policy Controller" {
-		t.Errorf("resumes at %q, want Policy Controller", steps[0].Name)
+	if steps, _ := i.stepsToRun(); steps[1].Name != "Policy Controller" {
+		t.Errorf("resumes at %q, want Policy Controller", steps[1].Name)
 	}
 
 	i.opts.FromStep = "no such step"

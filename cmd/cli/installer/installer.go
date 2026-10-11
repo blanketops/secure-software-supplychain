@@ -110,6 +110,9 @@ type step struct {
 	// RegistersCRDs makes the installer re-read the API after the step, so the
 	// kinds it defined can be applied by the steps that follow.
 	RegistersCRDs bool
+	// PullsImages makes the step pull the images of every step after it,
+	// instead of applying anything of its own.
+	PullsImages bool
 }
 
 // onlyForSPIFFE skips a step unless the signing identity is SPIFFE.
@@ -117,6 +120,13 @@ func onlyForSPIFFE(i *Installer) bool { return !i.spiffe() }
 
 // installOrder defines the sequence in which dependencies are applied.
 var installOrder = []step{
+	{
+		// Asks the node for every image the install will use, at once, so
+		// that it downloads from the start instead of one step at a time.
+		Name:        "Images",
+		Skip:        func(i *Installer) bool { return i.opts.NoImagePull },
+		PullsImages: true,
+	},
 	{
 		Name:  "MetalLB Install",
 		Paths: []string{"dependencies/metallb/release"},
@@ -534,11 +544,18 @@ func (i *Installer) Install(ctx context.Context) error {
 		return err
 	}
 	if i.opts.FromStep != "" {
-		fmt.Printf("   Resuming from: %s\n\n", steps[0].Name)
+		fmt.Printf("   Resuming from: %s\n\n", i.opts.FromStep)
 	}
 
 	for idx, s := range steps {
 		fmt.Printf("[%d/%d] %s\n", idx+1, len(steps), s.Name)
+
+		if s.PullsImages {
+			if !i.dryRun {
+				i.prePullImages(ctx, steps[idx+1:])
+			}
+			continue
+		}
 
 		if s.PreHook != nil && !i.dryRun {
 			if err := s.PreHook(ctx, i); err != nil {
@@ -644,6 +661,11 @@ func (i *Installer) stepsToRun() ([]step, error) {
 		if strings.EqualFold(s.Name, wanted) {
 			if only {
 				return steps[idx : idx+1], nil
+			}
+			// Resuming still pulls ahead, for the steps that are left. What
+			// is already on the node is not downloaded again.
+			if idx > 0 && steps[0].PullsImages {
+				return append([]step{steps[0]}, steps[idx:]...), nil
 			}
 			return steps[idx:], nil
 		}

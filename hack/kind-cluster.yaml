@@ -1,0 +1,17 @@
+# A kind cluster for the secure software supply chain.
+#
+#   kind create cluster --name <name> --config hack/kind-cluster.yaml
+#
+# The one setting that matters is how images are pulled. A kubelet downloads
+# one image at a time by default, and the install needs about sixty; with
+# this it downloads up to eight at once. For a cluster that already exists,
+# hack/kind-parallel-pulls.sh makes the same change.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        serializeImagePulls: false
+        maxParallelImagePulls: 8

@@ -24,6 +24,15 @@ Every name in angle brackets is yours to fill in. The examples use `your-org/you
 - A Kubernetes cluster. Everything here is tested on a single-node [kind](https://kind.sigs.k8s.io/) cluster.
   Give it room: as a rough guide, 8 GB of memory and 40 GB of free disk for images and volumes. SonarQube's search index
   stops working when the node's disk is more than 90% full.
+
+  The install pulls about fifty images, and a kubelet downloads one at a time unless it is told otherwise.
+  Letting it download several at once is the single largest saving in install time. On kind, create the
+  cluster with the configuration in this repository, or change one that already exists:
+
+  ```bash
+  kind create cluster --name <cluster> --config hack/kind-cluster.yaml
+  hack/kind-parallel-pulls.sh <cluster>          # for a cluster you already have
+  ```
 - `kubectl`, Go 1.25, `helm`, and `git`. [mage](https://magefile.org) is optional: every `mage <target>` below
   can be run as `go run mage.go <target>`. No Docker is needed to build the operator.
 - A container registry you can push to, a GitHub repository with a `Dockerfile` at its root, and a GitHub token
@@ -53,14 +62,25 @@ go build -o bin/supplychain ./cmd/cli
 | `--trust-domain` | The SPIFFE trust domain, for example your organisation's domain. Identities look like `spiffe://<your-domain>/ns/<namespace>/sa/<serviceaccount>`. |
 | `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
 | `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
+| `--no-image-pull` | Do not pull every image at the start; each step then pulls its own when it is reached. |
 | `--vault-addr` | Use a Vault that already exists, at this address, instead of running one. See [Using a Vault you already have](#using-a-vault-you-already-have). |
 | `--external-secret-store` | No Vault at all; you provide the secret store. See [Using a secret store of your own](#using-a-secret-store-of-your-own). |
 
-The installer applies the steps below in order and waits for each to be ready. Each wait allows up to an hour,
-because on a slow connection almost all of the time is image pulls.
+The installer applies the steps below in order and waits for each to be ready. Almost all of the time is image
+pulls, so the first step starts all of them:
+
+```
+[1/24] Images
+  ⠹ Pulling images: 31 of 54 done · waiting for fulcio:v1.8.5, redis, vault:2.0.3 and 20 more
+```
+
+It tells you when the node pulls one image at a time, and how to change that on kind. An image it cannot pull
+does not stop the install: it is named, and the step that uses it pulls it again. Each later wait still allows
+up to an hour.
 
 | Step | What it sets up |
 |---|---|
+| Images | Nothing of its own: it asks the node for every image the steps below will use, all at once, and shows which it is waiting for. The node then downloads from the first minute instead of one step at a time. Left out with `--no-image-pull`. |
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
 | cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the secure software supply chain's services trusts. |

@@ -81,6 +81,9 @@ type Options struct {
 	// cluster reaches it. The installer then runs no Vault of its own; it
 	// configures that one and points the store at it.
 	VaultAddr string
+	// NoImagePull leaves out the step that pulls every image ahead of the
+	// steps that use them.
+	NoImagePull bool
 }
 
 func (o *Options) defaultAndValidate() error {

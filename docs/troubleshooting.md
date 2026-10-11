@@ -5,9 +5,13 @@
 Start with `supplychain status`. It shows which part of the stack is missing or not ready, including the
 certificates and the secret store's login, and most of what follows starts from one of its lines.
 
-**The installer stalls or a setup Job fails.** Image pulls dominate install time. The kubelet pulls one image
-at a time by default; on kind, allow parallel pulls by adding `serializeImagePulls: false` and
-`maxParallelImagePulls: 8` to `/var/lib/kubelet/config.yaml` on the node and restarting the kubelet. The
+**The install is slow.** Image pulls are nearly all of it. The first step, `Images`, starts every pull and
+shows which images it is still waiting for; if it says the node pulls one image at a time, run
+`hack/kind-parallel-pulls.sh <cluster>` on kind (it changes the kubelet's `serializeImagePulls` and restarts
+the kubelet, not any pod), or create the cluster with `hack/kind-cluster.yaml`. An image shown as `(retrying)`
+failed to download and is being tried again, which on an unreliable connection is normal.
+
+**A setup Job fails.** The
 sigstore setup Jobs give up after six attempts; if one ran before the service it needs was up (for example
 `rekor-trillian-createdb` before MySQL), delete it and re-apply it from `dependencies/`.
 
