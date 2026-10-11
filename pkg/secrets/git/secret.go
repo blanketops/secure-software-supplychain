@@ -80,15 +80,15 @@ func (r *GitSSHSecretReconciler) Reconcile(
 				"data": []any{
 					map[string]any{
 						"secretKey": "id_rsa",
-						"remoteRef": store.RemoteRef(store.Git, store.GitPrivateKey),
+						"remoteRef": store.RemoteRef(store.GitPrivateKey),
 					},
 					map[string]any{
 						"secretKey": "known_hosts",
-						"remoteRef": store.RemoteRef(store.Git, store.GitKnownHosts),
+						"remoteRef": store.RemoteRef(store.GitKnownHosts),
 					},
 					map[string]any{
 						"secretKey": "config",
-						"remoteRef": store.RemoteRef(store.Git, store.GitSSHConfig),
+						"remoteRef": store.RemoteRef(store.GitSSHConfig),
 					},
 				},
 			},

@@ -23,6 +23,8 @@ limitations under the License.
 // and holds no Vault credential.
 package store
 
+import "strings"
+
 const (
 	// Name and Kind identify the ClusterSecretStore, which the installer
 	// creates and points at Vault.
@@ -36,46 +38,59 @@ const (
 	Prefix = "supplychain"
 )
 
-// The secrets, one per kind of credential, and the fields each one holds.
+// The store's keys. Each is one secret in Vault holding a single value, in
+// the field named by Field. A build asks the store for exactly these, so a
+// store of any other kind has to serve the same keys.
 const (
-	// Git is the SSH identity builds clone the source with.
-	Git              = Prefix + "/git"
-	GitPrivateKey    = "ssh-privatekey"
-	GitPublicKey     = "ssh-publickey"
-	GitKnownHosts    = "known-hosts"
-	GitSSHConfig     = "ssh-config"
-	Registry         = Prefix + "/registry"
-	RegistryConfig   = "config" // a Docker config.json with push access
-	GitHub           = Prefix + "/github"
-	GitHubToken      = "token" // manages the repository's webhooks
-	SonarQube        = Prefix + "/sonarqube"
-	SonarQubeToken   = "token" // written by `supplychain init-sonarqube`
-	groupPrefixSlash = Prefix + "/"
+	// The SSH identity builds clone the source with.
+	GitPrivateKey = Prefix + "/git/ssh-privatekey"
+	GitKnownHosts = Prefix + "/git/known-hosts"
+	GitSSHConfig  = Prefix + "/git/ssh-config"
+	// A Docker config.json with push access to the registry.
+	RegistryConfig = Prefix + "/registry/config"
+	// A token that can manage the repository's webhooks.
+	GitHubToken = Prefix + "/github/token"
+	// Written by `supplychain init-sonarqube`.
+	SonarQubeToken = Prefix + "/sonarqube/token"
+
+	// Field is the field of each secret that holds its value.
+	Field = "value"
 )
+
+// Keys are the store's keys in the order they are listed, each with what it
+// is for.
+var Keys = []struct{ Key, Purpose string }{
+	{GitPrivateKey, "SSH key that can read the repository"},
+	{GitKnownHosts, "the git host's keys (ssh-keyscan github.com)"},
+	{GitSSHConfig, "SSH client configuration for the git host"},
+	{RegistryConfig, "Docker config.json with push access"},
+	{GitHubToken, "token that can manage the repository's webhooks"},
+	{SonarQubeToken, "written by `supplychain init-sonarqube`"},
+}
 
 // RefreshInterval is how often External Secrets reads each secret again. A
 // credential rotated in Vault reaches the builds within this time, with
 // nothing to delete or recreate.
 const RefreshInterval = "1m"
 
-// Groups are the secrets by the short name the CLI takes ("git"), with the
-// fields a working install needs in each.
-var Groups = map[string][]string{
-	"git":       {GitPrivateKey, GitKnownHosts, GitSSHConfig},
-	"registry":  {RegistryConfig},
-	"github":    {GitHubToken},
-	"sonarqube": {SonarQubeToken},
+// Key completes a key given without the prefix every key shares, which is how
+// the CLI takes them: "git/ssh-privatekey" is supplychain/git/ssh-privatekey.
+// A key that already has the prefix is returned as it is.
+func Key(name string) string {
+	name = strings.Trim(name, "/")
+	if name == Prefix || strings.HasPrefix(name, Prefix+"/") {
+		return name
+	}
+	return Prefix + "/" + name
 }
-
-// Path is the Vault path of a group, as an ExternalSecret names it.
-func Path(group string) string { return groupPrefixSlash + group }
 
 // Ref is the secretStoreRef of an ExternalSecret.
 func Ref() map[string]any {
 	return map[string]any{"name": Name, "kind": Kind}
 }
 
-// RemoteRef is the remoteRef of one field of one secret.
-func RemoteRef(path, field string) map[string]any {
-	return map[string]any{"key": path, "property": field}
+// RemoteRef is the remoteRef of one key: the secret, and the field its value
+// is in.
+func RemoteRef(key string) map[string]any {
+	return map[string]any{"key": key, "property": Field}
 }

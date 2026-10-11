@@ -77,6 +77,10 @@ type Options struct {
 	// ClusterSecretStore the user provides, under the same name and with the
 	// same secrets and fields.
 	ExternalSecretStore bool
+	// VaultAddr is the address of a Vault that already exists, as the
+	// cluster reaches it. The installer then runs no Vault of its own; it
+	// configures that one and points the store at it.
+	VaultAddr string
 }
 
 func (o *Options) defaultAndValidate() error {

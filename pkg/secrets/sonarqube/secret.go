@@ -88,7 +88,7 @@ func (r *SonarQubeSecretReconciler) Reconcile(
 					map[string]any{
 						// Tekton sonarqube task reads env var from secret key "token"
 						"secretKey": "token",
-						"remoteRef": store.RemoteRef(store.SonarQube, store.SonarQubeToken),
+						"remoteRef": store.RemoteRef(store.SonarQubeToken),
 					},
 				},
 			},

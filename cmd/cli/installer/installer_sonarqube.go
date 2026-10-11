@@ -222,13 +222,12 @@ func (i *Installer) sonarTokenStore(ctx context.Context, tokenFile string) (*son
 		return nil, nil, fmt.Errorf("%w; with a secret store of your own, pass --token-file", err)
 	}
 	return &sonarTokens{
-		where: "Vault at " + store.Mount + "/" + store.SonarQube,
+		where: "Vault at " + store.Mount + "/" + store.SonarQubeToken,
 		get: func(ctx context.Context) (string, error) {
-			fields, err := vault.read(ctx, store.SonarQube)
-			return fields[store.SonarQubeToken], err
+			return vault.read(ctx, store.SonarQubeToken)
 		},
 		put: func(ctx context.Context, token string) error {
-			return vault.write(ctx, store.SonarQube, map[string]string{store.SonarQubeToken: token})
+			return vault.write(ctx, store.SonarQubeToken, token)
 		},
 	}, closeVault, nil
 }

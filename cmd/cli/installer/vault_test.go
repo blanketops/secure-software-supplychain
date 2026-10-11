@@ -18,7 +18,14 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"maps"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,7 +48,7 @@ type fakeVault struct {
 	token    string
 	mounts   map[string]any
 	auths    map[string]any
-	config   map[string]any
+	configs  map[string]map[string]any
 	policies map[string]string
 	roles    map[string]map[string]any
 	secrets  map[string]map[string]string
@@ -51,12 +58,21 @@ type fakeVault struct {
 func newFakeVault() *fakeVault {
 	return &fakeVault{
 		token:    "root",
-		mounts:   map[string]any{"sys/": struct{}{}},
-		auths:    map[string]any{"token/": struct{}{}},
+		mounts:   map[string]any{"sys/": map[string]any{"type": "system"}},
+		auths:    map[string]any{"token/": map[string]any{"type": "token"}},
+		configs:  map[string]map[string]any{},
 		policies: map[string]string{},
 		roles:    map[string]map[string]any{},
 		secrets:  map[string]map[string]string{},
 	}
+}
+
+// listing answers the way Vault does: the entries under "data", and again at
+// the top level beside fields that are not entries at all.
+func (f *fakeVault) listing(entries map[string]any) map[string]any {
+	out := map[string]any{"request_id": "0000", "lease_duration": 0, "data": entries}
+	maps.Copy(out, entries)
+	return out
 }
 
 func (f *fakeVault) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,21 +86,28 @@ func (f *fakeVault) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/v1/")
 	switch {
 	case path == "sys/mounts" && r.Method == http.MethodGet:
-		_ = json.NewEncoder(w).Encode(f.mounts)
+		_ = json.NewEncoder(w).Encode(f.listing(f.mounts))
 	case strings.HasPrefix(path, "sys/mounts/"):
 		f.mounts[strings.TrimPrefix(path, "sys/mounts/")+"/"] = body
 		f.enabled++
 	case path == "sys/auth" && r.Method == http.MethodGet:
-		_ = json.NewEncoder(w).Encode(f.auths)
+		_ = json.NewEncoder(w).Encode(f.listing(f.auths))
 	case strings.HasPrefix(path, "sys/auth/"):
 		f.auths[strings.TrimPrefix(path, "sys/auth/")+"/"] = body
 		f.enabled++
-	case path == "auth/kubernetes/config":
-		f.config = body
+	case path == "auth/token/lookup-self":
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	case strings.HasPrefix(path, "auth/") && strings.HasSuffix(path, "/config"):
+		f.configs[strings.TrimSuffix(strings.TrimPrefix(path, "auth/"), "/config")] = body
 	case strings.HasPrefix(path, "sys/policies/acl/"):
 		f.policies[strings.TrimPrefix(path, "sys/policies/acl/")], _ = body["policy"].(string)
-	case strings.HasPrefix(path, "auth/kubernetes/role/"):
-		f.roles[strings.TrimPrefix(path, "auth/kubernetes/role/")] = body
+	case strings.HasPrefix(path, "auth/") && strings.Contains(path, "/role/"):
+		if r.Method == http.MethodDelete {
+			delete(f.roles, strings.TrimPrefix(path, "auth/"))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		f.roles[strings.TrimPrefix(path, "auth/")] = body
 	case strings.HasPrefix(path, "secret/data/"):
 		name := strings.TrimPrefix(path, "secret/data/")
 		if r.Method == http.MethodGet {
@@ -116,13 +139,16 @@ func clientFor(t *testing.T, fake *fakeVault) *vaultClient {
 
 // The store may read the supply chain's secrets and nothing else, and only
 // one ServiceAccount is given that. Configuring twice changes nothing.
-func TestConfigureVault(t *testing.T) {
+func TestConfigureKubernetesAuth(t *testing.T) {
 	fake := newFakeVault()
 	vault := clientFor(t, fake)
 	ctx := context.Background()
 
 	for range 2 {
-		if err := configureVault(ctx, vault); err != nil {
+		if err := ensureSecretEngine(ctx, vault); err != nil {
+			t.Fatal(err)
+		}
+		if err := configureKubernetesAuth(ctx, vault); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,8 +159,8 @@ func TestConfigureVault(t *testing.T) {
 	if engine["type"] != "kv" || engine["options"].(map[string]any)["version"] != "2" {
 		t.Errorf("secret/ = %v, want a version 2 key-value engine", engine)
 	}
-	if fake.config["kubernetes_host"] != "https://kubernetes.default.svc" {
-		t.Errorf("Kubernetes auth config = %v", fake.config)
+	if got := fake.configs["kubernetes"]; got["kubernetes_host"] != "https://kubernetes.default.svc" {
+		t.Errorf("Kubernetes auth config = %v", got)
 	}
 
 	policy := fake.policies[vaultPolicy]
@@ -150,7 +176,7 @@ func TestConfigureVault(t *testing.T) {
 		t.Errorf("policy covers more than one path:\n%s", policy)
 	}
 
-	role := fake.roles[vaultRole]
+	role := fake.roles["kubernetes/role/"+vaultRole]
 	if got := role["bound_service_account_names"]; !reflect.DeepEqual(got, []any{vaultServiceAccount}) {
 		t.Errorf("role is bound to ServiceAccounts %v, want only %s", got, vaultServiceAccount)
 	}
@@ -162,35 +188,30 @@ func TestConfigureVault(t *testing.T) {
 	}
 }
 
-// The key-value engine replaces a secret whole. Setting one field must not
-// lose the others: rotating the registry password should not delete a key.
-func TestVaultWriteKeepsOtherFields(t *testing.T) {
+// Each of the store's keys is one secret holding one value. Setting one key
+// leaves the others as they are, and a key that is not set reads as empty.
+func TestVaultReadAndWrite(t *testing.T) {
 	fake := newFakeVault()
 	vault := clientFor(t, fake)
 	ctx := context.Background()
 
-	if got, err := vault.read(ctx, store.Git); err != nil || len(got) != 0 {
-		t.Fatalf("a secret that does not exist read as %v, %v; want no fields and no error", got, err)
+	if got, err := vault.read(ctx, store.GitPrivateKey); err != nil || got != "" {
+		t.Fatalf("a key that is not set read as %q, %v; want empty and no error", got, err)
 	}
-	first := map[string]string{store.GitPrivateKey: "key-1", store.GitKnownHosts: "hosts"}
-	if err := vault.write(ctx, store.Git, first); err != nil {
+	if err := vault.write(ctx, store.GitPrivateKey, "first\nkey\n"); err != nil {
 		t.Fatal(err)
 	}
-	if err := vault.write(ctx, store.Git, map[string]string{store.GitPrivateKey: "key-2"}); err != nil {
+	if err := vault.write(ctx, store.GitKnownHosts, "hosts"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := vault.read(ctx, store.Git)
-	if err != nil {
+	if err := vault.write(ctx, store.GitPrivateKey, "rotated\nkey\n"); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{store.GitPrivateKey: "key-2", store.GitKnownHosts: "hosts"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("after rotating one field the secret is %v, want %v", got, want)
+	if got, _ := vault.read(ctx, store.GitPrivateKey); got != "rotated\nkey\n" {
+		t.Errorf("after rotating, the key reads %q", got)
 	}
-
-	vault.token = "wrong"
-	if _, err := vault.read(ctx, store.Git); err == nil || !strings.Contains(err.Error(), "permission denied") {
-		t.Errorf("a refused read returned %v, want Vault's reason", err)
+	if got, _ := vault.read(ctx, store.GitKnownHosts); got != "hosts" {
+		t.Errorf("rotating one key changed another: %q", got)
 	}
 }
 
@@ -224,20 +245,30 @@ func TestSecretStoreLogsInWithAServiceAccount(t *testing.T) {
 
 // The manifests start Vault; what can only be made once is not in them.
 func TestVaultManifests(t *testing.T) {
-	data, err := manifests.Dependencies.ReadFile("dependencies/vault/vault.yaml")
+	data, err := manifests.Dependencies.ReadFile("dependencies/vault/server/vault.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
+	identity, err := manifests.Dependencies.ReadFile("dependencies/vault/identity/identity.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The ServiceAccount the store logs in as is needed with any Vault, so it
+	// is not in the manifests that are skipped when Vault runs elsewhere.
+	if !strings.Contains(string(identity), "name: "+vaultServiceAccount) ||
+		strings.Contains(string(data), "name: "+vaultServiceAccount) {
+		t.Errorf("ServiceAccount %s must be in the identity manifest and only there", vaultServiceAccount)
+	}
 	manifest := string(data)
 	for _, want := range []string{
-		"kind: StatefulSet", "volumeClaimTemplates:", "name: " + vaultServiceAccount,
+		"kind: StatefulSet", "volumeClaimTemplates:",
 		"secretName: " + vaultKeysSecret, "optional: true", "system:auth-delegator",
 	} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("Vault manifest does not contain %q", want)
 		}
 	}
-	for _, obj := range decodeAll(t, "dependencies/vault/vault.yaml") {
+	for _, obj := range decodeAll(t, "dependencies/vault/server/vault.yaml") {
 		if obj.GetKind() == "Secret" {
 			t.Errorf("the manifests ship Secret %s; Vault's keys are made by the installer, once", obj.GetName())
 		}
@@ -252,11 +283,11 @@ func TestParseAssignments(t *testing.T) {
 	if err := os.WriteFile(file, []byte("line one\nline two\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := parseAssignments([]string{"token=abc=def", "ssh-privatekey=@" + file})
+	got, err := parseAssignments([]string{"github/token=abc=def", "git/ssh-privatekey=@" + file})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"token": "abc=def", "ssh-privatekey": "line one\nline two\n"}
+	want := map[string]string{"github/token": "abc=def", "git/ssh-privatekey": "line one\nline two\n"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parsed %v, want %v", got, want)
 	}
@@ -290,18 +321,150 @@ func TestExternalSecretStoreSkipsVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range steps {
-		if s.Name == "Vault" {
-			t.Error("the Vault step runs although the store is provided by the user")
+		if s.Name == "Vault" || s.Name == "Secret Store" {
+			t.Errorf("step %q runs although the store is provided by the user", s.Name)
 		}
 	}
-	i.opts.ExternalSecretStore = false
-	steps, _ = i.stepsToRun()
-	found := false
-	for _, s := range steps {
-		found = found || s.Name == "Vault"
+}
+
+// With a Vault that already exists, the installer runs none of its own but
+// still sets up the store; by default it does both.
+func TestExistingVaultIsConfiguredNotInstalled(t *testing.T) {
+	names := func(opts Options) map[string]bool {
+		t.Helper()
+		steps, err := (&Installer{opts: opts}).stepsToRun()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, s := range steps {
+			out[s.Name] = true
+		}
+		return out
 	}
-	if !found {
-		t.Error("the Vault step is missing from a default install")
+	if got := names(Options{VaultAddr: "http://vault.example:8200"}); got["Vault"] || !got["Secret Store"] {
+		t.Errorf("with --vault-addr: Vault step %v, Secret Store step %v; want false, true",
+			got["Vault"], got["Secret Store"])
+	}
+	if got := names(Options{}); !got["Vault"] || !got["Secret Store"] {
+		t.Errorf("by default: Vault step %v, Secret Store step %v; want both", got["Vault"], got["Secret Store"])
+	}
+}
+
+// A Vault outside the cluster verifies tokens itself. It must accept only
+// this cluster's issuer, only tokens made for Vault, and only the one
+// ServiceAccount.
+func TestConfigureJWTAuth(t *testing.T) {
+	fake := newFakeVault()
+	vault := clientFor(t, fake)
+	ctx := context.Background()
+	keys := []string{"-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n"}
+
+	for range 2 {
+		if err := configureJWTAuth(ctx, vault, "https://kubernetes.default.svc.cluster.local", keys); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fake.enabled != 1 {
+		t.Errorf("the auth method was enabled %d times in two runs, want once", fake.enabled)
+	}
+	if method, _ := fake.auths[vaultJWTAuthMount+"/"].(map[string]any); method["type"] != "jwt" {
+		t.Errorf("auth method at %s/ = %v, want jwt", vaultJWTAuthMount, method)
+	}
+	config := fake.configs[vaultJWTAuthMount]
+	if config["bound_issuer"] != "https://kubernetes.default.svc.cluster.local" ||
+		!reflect.DeepEqual(config["jwt_validation_pubkeys"], []any{keys[0]}) {
+		t.Errorf("JWT auth config = %v", config)
+	}
+	role := fake.roles[vaultJWTAuthMount+"/role/"+vaultRole]
+	want := map[string]any{
+		"role_type":       "jwt",
+		"user_claim":      "sub",
+		"bound_subject":   "system:serviceaccount:vault:supply-chain-secrets",
+		"bound_audiences": []any{vaultJWTAudience},
+		"token_policies":  []any{vaultPolicy},
+		"token_ttl":       "1h",
+	}
+	if !reflect.DeepEqual(role, want) {
+		t.Errorf("role = %v, want %v", role, want)
+	}
+
+	// A mount of that name that is something else belongs to someone else.
+	fake.auths["taken/"] = map[string]any{"type": "userpass"}
+	if err := ensureAuthMethod(ctx, vault, "taken", "jwt"); err == nil {
+		t.Error("an auth method of another type was taken over")
+	}
+}
+
+// The engine has to be version 2: the store reads secret/data/..., which a
+// version 1 engine does not have.
+func TestEnsureSecretEngineRefusesTheWrongKind(t *testing.T) {
+	fake := newFakeVault()
+	fake.mounts["secret/"] = map[string]any{"type": "kv", "options": map[string]any{"version": "1"}}
+	if err := ensureSecretEngine(context.Background(), clientFor(t, fake)); err == nil {
+		t.Error("a version 1 key-value engine was accepted")
+	}
+	fake.mounts["secret/"] = map[string]any{"type": "kv", "options": map[string]any{"version": "2"}}
+	if err := ensureSecretEngine(context.Background(), clientFor(t, fake)); err != nil {
+		t.Errorf("an existing version 2 engine was refused: %v", err)
+	}
+	if fake.enabled != 0 {
+		t.Error("an existing engine was mounted again")
+	}
+}
+
+// The store for an outside Vault names its address and logs in with a token
+// made for Vault; it still holds no credential.
+func TestExternalSecretStore(t *testing.T) {
+	obj := externalSecretStore("http://vault.example:8200")
+	vault, _, _ := unstructured.NestedMap(obj.Object, "spec", "provider", "vault")
+	if vault["server"] != "http://vault.example:8200" {
+		t.Errorf("server = %v", vault["server"])
+	}
+	auth, _, _ := unstructured.NestedMap(obj.Object, "spec", "provider", "vault", "auth")
+	if len(auth) != 1 {
+		t.Fatalf("auth methods = %v, want only jwt", auth)
+	}
+	token, _, _ := unstructured.NestedMap(auth, "jwt", "kubernetesServiceAccountToken")
+	ref, _, _ := unstructured.NestedStringMap(token, "serviceAccountRef")
+	if ref["name"] != vaultServiceAccount || ref["namespace"] != vaultNamespace ||
+		!reflect.DeepEqual(token["audiences"], []any{vaultJWTAudience}) {
+		t.Errorf("token request = %v", token)
+	}
+	raw, _ := json.Marshal(obj.Object)
+	for _, forbidden := range []string{"tokenSecretRef", "secretRef", "password"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Errorf("the store refers to a stored credential (%s)", forbidden)
+		}
+	}
+}
+
+func TestPublicKeysFromJWKS(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawURLEncoding.EncodeToString
+	jwks, _ := json.Marshal(map[string]any{"keys": []any{map[string]any{
+		"kty": "RSA", "use": "sig", "alg": "RS256", "kid": "k1",
+		"n": enc(key.N.Bytes()), "e": enc(big.NewInt(int64(key.E)).Bytes()),
+	}}})
+	keys, err := publicKeysFromJWKS(jwks)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("keys = %v, err = %v", keys, err)
+	}
+	block, _ := pem.Decode([]byte(keys[0]))
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := parsed.(*rsa.PublicKey); !ok || got.N.Cmp(key.N) != 0 || got.E != key.E {
+		t.Error("the PEM key is not the key in the set")
+	}
+	for _, bad := range []string{`{"keys":[]}`, `{"keys":[{"kty":"oct"}]}`, `not json`} {
+		if _, err := publicKeysFromJWKS([]byte(bad)); err == nil {
+			t.Errorf("publicKeysFromJWKS(%s) succeeded", bad)
+		}
 	}
 }
 
@@ -325,12 +488,141 @@ func TestSampleStoreMatchesWhatTheInstallerCreates(t *testing.T) {
 	if !reflect.DeepEqual(sample.Object["spec"], created.Object["spec"]) {
 		t.Errorf("sample spec %v differs from the installer's %v", sample.Object["spec"], created.Object["spec"])
 	}
-	// The comment in the sample lists every secret and field the operator asks for.
-	for group, fields := range store.Groups {
-		for _, want := range append([]string{store.Path(group)}, fields...) {
-			if !strings.Contains(string(data), want) {
-				t.Errorf("the sample does not mention %q", want)
-			}
+	// The comment in the sample lists every key the operator asks for.
+	for _, entry := range store.Keys {
+		if !strings.Contains(string(data), entry.Key) {
+			t.Errorf("the sample does not mention %q", entry.Key)
+		}
+	}
+}
+
+// The Vault step and the Secret Store step are each run on their own: the
+// first is skipped for a Vault somewhere else, and either can be re-run with
+// --only-step. Each therefore has to bring the namespace its objects are in.
+func TestEachVaultStepDeclaresItsNamespace(t *testing.T) {
+	for _, file := range []string{"dependencies/vault/server/vault.yaml", "dependencies/vault/identity/identity.yaml"} {
+		data, err := manifests.Dependencies.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "kind: Namespace\nmetadata:\n  name: vault\n") {
+			t.Errorf("%s does not declare the vault namespace", file)
+		}
+	}
+}
+
+// With SPIFFE, Vault accepts one identity: the JWT-SVID SPIRE issues to the
+// secrets ServiceAccount, made for Vault. The Kubernetes login an earlier
+// install set up is removed, so nothing else gets in.
+func TestConfigureSPIFFEAuth(t *testing.T) {
+	fake := newFakeVault()
+	vault := clientFor(t, fake)
+	ctx := context.Background()
+
+	if err := configureKubernetesAuth(ctx, vault); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := configureSPIFFEAuth(ctx, vault, "your-domain.example"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := fake.configs[vaultSPIFFEAuthMount]
+	if config["oidc_discovery_url"] != spireOIDCIssuer || config["bound_issuer"] != spireOIDCIssuer {
+		t.Errorf("JWT auth config = %v, want SPIRE's OIDC discovery", config)
+	}
+	want := map[string]any{
+		"role_type":       "jwt",
+		"user_claim":      "sub",
+		"bound_subject":   "spiffe://your-domain.example/ns/vault/sa/supply-chain-secrets",
+		"bound_audiences": []any{"vault"},
+		"token_policies":  []any{vaultPolicy},
+		"token_ttl":       "10m",
+	}
+	if role := fake.roles[vaultSPIFFEAuthMount+"/role/"+vaultRole]; !reflect.DeepEqual(role, want) {
+		t.Errorf("role = %v, want %v", role, want)
+	}
+	if role, ok := fake.roles[vaultAuthMount+"/role/"+vaultRole]; ok {
+		t.Errorf("the Kubernetes login is still there: %v", role)
+	}
+}
+
+func TestSPIFFESecretStore(t *testing.T) {
+	auth, _, _ := unstructured.NestedMap(spiffeSecretStore().Object, "spec", "provider", "vault", "auth")
+	want := map[string]any{"jwt": map[string]any{
+		"path": "jwt",
+		"role": vaultRole,
+		"secretRef": map[string]any{
+			"name": "supply-chain-vault-jwt", "namespace": "vault", "key": "jwt",
+		},
+	}}
+	if !reflect.DeepEqual(auth, want) {
+		t.Errorf("auth = %v, want %v", auth, want)
+	}
+}
+
+// The SPIFFE login is for the Vault this cluster runs. A Vault elsewhere
+// cannot reach SPIRE's discovery endpoint, and a store of the user's own is
+// not ours to configure.
+func TestSPIFFELoginOnlyForTheBuiltInVault(t *testing.T) {
+	for _, tc := range []struct {
+		opts Options
+		want bool
+	}{
+		{Options{SigningIdentity: IdentitySPIFFE}, true},
+		{Options{SigningIdentity: IdentityKubernetes}, false},
+		{Options{SigningIdentity: IdentitySPIFFE, VaultAddr: "http://vault.example:8200"}, false},
+		{Options{SigningIdentity: IdentitySPIFFE, ExternalSecretStore: true}, false},
+	} {
+		i := &Installer{opts: tc.opts}
+		if got := i.spiffeLogin(); got != tc.want {
+			t.Errorf("spiffeLogin with %+v = %v, want %v", tc.opts, got, tc.want)
+		}
+	}
+}
+
+// The bridge, the SPIRE entry and Vault's role have to name the same
+// ServiceAccount, Secret and audience, in three different files.
+func TestSPIFFEBridgeMatchesTheStore(t *testing.T) {
+	bridge, err := manifests.Dependencies.ReadFile("dependencies/vault/spiffe/svid.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"serviceAccountName: " + vaultServiceAccount,
+		"name: " + vaultSPIFFEBridge,
+		"secrets/" + vaultSPIFFESecret + "?",
+		`\"` + vaultSPIFFESecretKey + `\":`,
+		`jwt_audience = "` + vaultJWTAudience + `"`,
+	} {
+		if !strings.Contains(string(bridge), want) {
+			t.Errorf("the bridge manifest does not contain %q", want)
+		}
+	}
+	identities, err := manifests.Dependencies.ReadFile("dependencies/spire/identities/identities.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(identities), secretsSPIFFEID(trustDomainPlaceholder)) {
+		t.Errorf("SPIRE has no entry for %s", secretsSPIFFEID(trustDomainPlaceholder))
+	}
+}
+
+func TestSPIFFESampleStoreMatchesWhatTheInstallerCreates(t *testing.T) {
+	data, err := os.ReadFile("../../../config/samples/externalsecrets_v1_clustersecretstore_vault_spiffe.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal(data, &sample.Object); err != nil {
+		t.Fatal(err)
+	}
+	if created := spiffeSecretStore(); !reflect.DeepEqual(sample.Object["spec"], created.Object["spec"]) {
+		t.Errorf("sample spec %v differs from the installer's %v", sample.Object["spec"], created.Object["spec"])
+	}
+	for _, entry := range store.Keys {
+		if !strings.Contains(string(data), entry.Key) {
+			t.Errorf("the sample does not mention %q", entry.Key)
 		}
 	}
 }

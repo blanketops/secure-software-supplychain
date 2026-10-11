@@ -205,7 +205,7 @@ func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {
 				"data": []any{
 					map[string]any{
 						"secretKey": p.secretKey,
-						"remoteRef": store.RemoteRef(store.Registry, store.RegistryConfig),
+						"remoteRef": store.RemoteRef(store.RegistryConfig),
 					},
 				},
 			},

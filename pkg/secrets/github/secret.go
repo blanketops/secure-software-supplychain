@@ -32,7 +32,7 @@ import (
 // exists for the GitHubWebhook controller to authenticate with GitHub.
 //
 // The token is sourced from Vault, through the ClusterSecretStore, at
-// supplychain/github (field "token") and materialised as an Opaque Secret with
+// supplychain/github/token and materialised as an Opaque Secret with
 // a single key named "token".
 type GitHubTokenSecretReconciler struct {
 	Client client.Client
@@ -85,7 +85,7 @@ func (r *GitHubTokenSecretReconciler) Reconcile(
 // newGitHubTokenExternalSecret builds the ExternalSecret for the GitHub
 // API token. The token is stored in Vault at:
 //
-//	supplychain/github, field "token"  →  key: "token"
+//	supplychain/github/token  →  key: "token"
 //
 // Mirrors the pattern used by registry and git SSH secrets.
 func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructured.Unstructured {
@@ -118,7 +118,7 @@ func newGitHubTokenExternalSecret(ghw *supplyv1alpha1.GitHubWebhook) *unstructur
 				"data": []any{
 					map[string]any{
 						"secretKey": "token",
-						"remoteRef": store.RemoteRef(store.GitHub, store.GitHubToken),
+						"remoteRef": store.RemoteRef(store.GitHubToken),
 					},
 				},
 			},

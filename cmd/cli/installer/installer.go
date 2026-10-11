@@ -45,6 +45,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 
 	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
@@ -328,20 +329,54 @@ var installOrder = []step{
 		Paths: []string{"dependencies/ingress/routes"},
 	},
 	{
-		// Where the credentials live. External Secrets Operator has to be
-		// installed already: the step ends by creating the store it reads
-		// Vault through.
+		// Where the credentials live, unless a Vault that already exists is
+		// used (--vault-addr) or the store is the user's own.
 		Name:  "Vault",
-		Paths: []string{"dependencies/vault"},
-		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore },
+		Paths: []string{"dependencies/vault/server"},
+		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore || i.opts.VaultAddr != "" },
 		PostHook: func(ctx context.Context, i *Installer) error {
-			vaultSp := newSpinner("Initialising and configuring Vault...")
+			vaultSp := newSpinner("Initialising and unsealing Vault...")
 			vaultSp.start()
-			if err := i.ensureVault(ctx); err != nil {
+			if err := i.startVault(ctx); err != nil {
 				vaultSp.fail("Vault not ready")
 				return err
 			}
-			vaultSp.succeed("Vault ready; ClusterSecretStore " + store.Name + " created")
+			vaultSp.succeed("Vault ready")
+			return nil
+		},
+	},
+	{
+		// The store's own identity, with SPIFFE: SPIRE issues the secrets
+		// ServiceAccount a JWT-SVID, and this keeps it where External Secrets
+		// can present it to Vault.
+		Name:  "Secret Store Identity",
+		Paths: []string{"dependencies/vault/spiffe"},
+		Skip:  func(i *Installer) bool { return !i.spiffeLogin() },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			svidSp := newSpinner("Waiting for SPIRE to issue the secret store its identity...")
+			svidSp.start()
+			if err := i.waitForDeployment(ctx, vaultNamespace, vaultSPIFFEBridge, readyTimeout); err != nil {
+				svidSp.fail("The secret store has no SPIFFE identity")
+				return err
+			}
+			svidSp.succeed("Secret store identified as " + secretsSPIFFEID(i.opts.TrustDomain))
+			return nil
+		},
+	},
+	{
+		// How the credentials are read. External Secrets Operator has to be
+		// installed already: the step ends with the store logged in to Vault.
+		Name:  "Secret Store",
+		Paths: []string{"dependencies/vault/identity"},
+		Skip:  func(i *Installer) bool { return i.opts.ExternalSecretStore },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			storeSp := newSpinner("Giving External Secrets a login to Vault...")
+			storeSp.start()
+			if err := i.ensureSecretStore(ctx); err != nil {
+				storeSp.fail("Secret store not ready")
+				return err
+			}
+			storeSp.succeed("ClusterSecretStore " + store.Name + " logged in to Vault")
 			return nil
 		},
 	},
@@ -1327,32 +1362,37 @@ func (i *Installer) applyObject(ctx context.Context, obj *unstructured.Unstructu
 	} else {
 		dr = i.dynamic.Resource(mapping.Resource)
 	}
-	existing, err := dr.Get(ctx, obj.GetName(), metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		if done, err := i.setupJobAlreadyRan(ctx, obj); err != nil || done {
+	// Controllers write to some of these objects while they are applied: a
+	// running Tekton webhook keeps its own webhook configurations up to date.
+	// An update that loses to such a write is made again on the newer object.
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		existing, err := dr.Get(ctx, obj.GetName(), metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			if done, err := i.setupJobAlreadyRan(ctx, obj); err != nil || done {
+				return err
+			}
+			_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
 			return err
 		}
-		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
+		if err != nil {
+			return err
+		}
+		// A ConfigMap a setup Job has written its result into is left alone.
+		if key, ok := setupResults[obj.GetNamespace()+"/"+obj.GetName()]; ok && obj.GetKind() == "ConfigMap" &&
+			holdsSetupResult(existing, key) {
+			return nil
+		}
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
+		// Some objects cannot be changed once created: a Job's pod template, a
+		// bound PersistentVolumeClaim's spec. The API server rejects the update
+		// as invalid. The object is already there from an earlier run, so a
+		// re-run of the installer keeps it rather than failing.
+		if apierrors.IsInvalid(err) {
+			return nil
+		}
 		return err
-	}
-	if err != nil {
-		return err
-	}
-	// A ConfigMap a setup Job has written its result into is left alone.
-	if key, ok := setupResults[obj.GetNamespace()+"/"+obj.GetName()]; ok && obj.GetKind() == "ConfigMap" &&
-		holdsSetupResult(existing, key) {
-		return nil
-	}
-	obj.SetResourceVersion(existing.GetResourceVersion())
-	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
-	// Some objects cannot be changed once created: a Job's pod template, a
-	// bound PersistentVolumeClaim's spec. The API server rejects the update as
-	// invalid. The object is already there from an earlier run, so a re-run of
-	// the installer keeps it rather than failing.
-	if apierrors.IsInvalid(err) {
-		return nil
-	}
-	return err
+	})
 }
 
 func (i *Installer) deleteObject(ctx context.Context, obj *unstructured.Unstructured) error {

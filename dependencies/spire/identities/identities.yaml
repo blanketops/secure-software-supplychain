@@ -93,3 +93,20 @@ spec:
   parentID: "spiffe://trust-domain.placeholder.invalid/spire/server"
   selectors:
     - "k8s_psat:cluster:blanketops"
+---
+# The identity External Secrets logs in to Vault with. Vault's role is bound
+# to exactly this SPIFFE ID, so only a pod running as this ServiceAccount, in
+# this namespace, on an attested node, can read the supply chain's secrets.
+# Its JWT-SVIDs are short-lived; see dependencies/vault/spiffe.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterStaticEntry
+metadata:
+  name: supply-chain-secrets
+spec:
+  className: "spire-server-spire"
+  spiffeID: "spiffe://trust-domain.placeholder.invalid/ns/vault/sa/supply-chain-secrets"
+  parentID: "spiffe://trust-domain.placeholder.invalid/supply-chain/nodes"
+  selectors:
+    - "k8s:ns:vault"
+    - "k8s:sa:supply-chain-secrets"
+  jwtSVIDTTL: 10m

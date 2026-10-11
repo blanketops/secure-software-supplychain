@@ -226,11 +226,11 @@ func TestSpireManifests(t *testing.T) {
 		}
 	}
 	// Two ClusterSPIFFEIDs, not the chart's three: the default one, which gives
-	// every pod an identity, is left out. Chains and the node alias are
-	// registered as static entries instead.
+	// every pod an identity, is left out. Chains, the secret store's login
+	// to Vault and the node alias are registered as static entries instead.
 	for kind, want := range map[string]int{
 		"CustomResourceDefinition": 3, "StatefulSet": 1, "CSIDriver": 1,
-		"ClusterSPIFFEID": 2, "ClusterStaticEntry": 2,
+		"ClusterSPIFFEID": 2, "ClusterStaticEntry": 3,
 	} {
 		if kinds[kind] != want {
 			t.Errorf("%d %s objects in the SPIRE manifests, want %d", kinds[kind], kind, want)

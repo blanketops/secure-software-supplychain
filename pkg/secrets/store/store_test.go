@@ -21,24 +21,42 @@ import (
 	"testing"
 )
 
-// Vault's policy lets the store read below Prefix only. A secret placed
-// anywhere else would simply not be readable, so every path has to be there.
-func TestEverySecretIsUnderThePrefix(t *testing.T) {
-	for group := range Groups {
-		if path := Path(group); !strings.HasPrefix(path, Prefix+"/") || strings.HasPrefix(path, "/") {
-			t.Errorf("secret %s is at %q, outside %s/", group, path, Prefix)
+// Vault's policy lets the store read below Prefix only. A key placed anywhere
+// else would simply not be readable, so every key has to be there.
+func TestEveryKeyIsUnderThePrefix(t *testing.T) {
+	seen := map[string]bool{}
+	for _, entry := range Keys {
+		if !strings.HasPrefix(entry.Key, Prefix+"/") {
+			t.Errorf("key %q is outside %s/", entry.Key, Prefix)
 		}
+		if seen[entry.Key] || entry.Purpose == "" {
+			t.Errorf("key %q is listed twice or has no purpose", entry.Key)
+		}
+		seen[entry.Key] = true
 	}
-	for _, path := range []string{Git, Registry, GitHub, SonarQube} {
-		if Groups[strings.TrimPrefix(path, Prefix+"/")] == nil {
-			t.Errorf("%s is not one of the CLI's secrets", path)
+	for _, key := range []string{GitPrivateKey, GitKnownHosts, GitSSHConfig, RegistryConfig, GitHubToken, SonarQubeToken} {
+		if !seen[key] {
+			t.Errorf("%s is not in Keys, so the CLI cannot set or list it", key)
 		}
 	}
 }
 
-func TestRemoteRefNamesASecretAndAField(t *testing.T) {
-	ref := RemoteRef(Git, GitPrivateKey)
-	if ref["key"] != "supplychain/git" || ref["property"] != "ssh-privatekey" {
+// The CLI takes keys with or without the prefix they all share.
+func TestKey(t *testing.T) {
+	for given, want := range map[string]string{
+		"git/ssh-privatekey":             GitPrivateKey,
+		"supplychain/git/ssh-privatekey": GitPrivateKey,
+		"registry/config":                RegistryConfig,
+	} {
+		if got := Key(given); got != want {
+			t.Errorf("Key(%q) = %q, want %q", given, got, want)
+		}
+	}
+}
+
+func TestRemoteRefNamesAKeyAndItsField(t *testing.T) {
+	ref := RemoteRef(GitPrivateKey)
+	if ref["key"] != "supplychain/git/ssh-privatekey" || ref["property"] != "value" {
 		t.Errorf("remoteRef = %v", ref)
 	}
 	if got := Ref(); got["name"] != Name || got["kind"] != Kind {

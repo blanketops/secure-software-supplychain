@@ -36,7 +36,7 @@ func externalSecret(key string) *unstructured.Unstructured {
 			"refreshInterval": RefreshInterval,
 			"secretStoreRef":  Ref(),
 			"data": []any{
-				map[string]any{"secretKey": "id_rsa", "remoteRef": RemoteRef(key, GitPrivateKey)},
+				map[string]any{"secretKey": "id_rsa", "remoteRef": RemoteRef(key)},
 			},
 		},
 	}}
@@ -67,7 +67,7 @@ func TestApply(t *testing.T) {
 		return data[0].(map[string]any)["remoteRef"].(map[string]any)["key"]
 	}
 
-	if outcome, err := Apply(ctx, c, externalSecret(Git)); err != nil || outcome != Created {
+	if outcome, err := Apply(ctx, c, externalSecret(GitPrivateKey)); err != nil || outcome != Created {
 		t.Fatalf("first apply: %s, %v; want created", outcome, err)
 	}
 
@@ -77,7 +77,7 @@ func TestApply(t *testing.T) {
 	if err := c.Update(ctx, live); err != nil {
 		t.Fatal(err)
 	}
-	if outcome, err := Apply(ctx, c, externalSecret(Git)); err != nil || outcome != Unchanged {
+	if outcome, err := Apply(ctx, c, externalSecret(GitPrivateKey)); err != nil || outcome != Unchanged {
 		t.Errorf("apply over a defaulted object: %s, %v; want unchanged", outcome, err)
 	}
 
@@ -89,10 +89,10 @@ func TestApply(t *testing.T) {
 	if err := c.Update(ctx, live); err != nil {
 		t.Fatal(err)
 	}
-	if outcome, err := Apply(ctx, c, externalSecret(Git)); err != nil || outcome != Updated {
+	if outcome, err := Apply(ctx, c, externalSecret(GitPrivateKey)); err != nil || outcome != Updated {
 		t.Errorf("apply over a changed object: %s, %v; want updated", outcome, err)
 	}
-	if got := key(read()); got != Git {
-		t.Errorf("after apply the ExternalSecret reads %v, want %s", got, Git)
+	if got := key(read()); got != GitPrivateKey {
+		t.Errorf("after apply the ExternalSecret reads %v, want %s", got, GitPrivateKey)
 	}
 }

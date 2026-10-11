@@ -55,6 +55,7 @@ func installCmd() *cobra.Command {
 	var fromStep string
 	var onlyStep string
 	var externalSecretStore bool
+	var vaultAddr string
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -86,6 +87,7 @@ Example:
 				OnlyStep:        onlyStep,
 
 				ExternalSecretStore: externalSecretStore,
+				VaultAddr:           vaultAddr,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
@@ -105,6 +107,9 @@ Example:
 		"SPIFFE trust domain, used with --signing-identity spiffe")
 	cmd.Flags().BoolVar(&externalSecretStore, "external-secret-store", false,
 		"Do not install Vault; you provide the ClusterSecretStore \"secure-software-supply-chain-store\" yourself, backed by any External Secrets provider")
+	cmd.Flags().StringVar(&vaultAddr, "vault-addr", "",
+		"Use a Vault that already exists, at this address as the cluster reaches it, instead of running one; "+
+			"it is configured with the token in VAULT_TOKEN or ~/.vault-token, through VAULT_ADDR if that is set")
 	cmd.Flags().StringVar(&onlyStep, "only-step", "",
 		"Run this one step and nothing else, for example \"Vault\"")
 	cmd.Flags().StringVar(&fromStep, "from-step", "",
@@ -194,7 +199,7 @@ func initSonarQubeCmd() *cobra.Command {
   1. Waits for SonarQube to be ready
   2. Changes the default admin password
   3. Generates a user token named "supply-chain"
-  4. Stores the token in Vault at secret/supplychain/sonarqube
+  4. Stores the token in Vault at secret/supplychain/sonarqube/token
 
 Run this once after 'supplychain install' completes.
 
@@ -216,7 +221,7 @@ Example:
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().StringVar(&newPassword, "new-password", "", "New admin password for SonarQube (required)")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "",
-		"Write the token to this file instead of to Vault, for a secret store of your own; put it in your store as supplychain/sonarqube, field \"token\"")
+		"Write the token to this file instead of to Vault, for a secret store of your own; put it in your store as supplychain/sonarqube/token, field \"value\"")
 	_ = cmd.MarkFlagRequired("new-password")
 	return cmd
 }
@@ -228,44 +233,66 @@ func secretsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Manage the credentials builds use, which are kept in Vault",
-		Long: `The credentials builds use are kept in the Vault the installer runs, under
-secret/supplychain/. External Secrets syncs them into the Secrets each build
-reads, and picks up a change within a minute.
+		Long: `The credentials builds use are kept in Vault, under secret/supplychain/, one
+secret per key. External Secrets syncs them into the Secrets each build reads,
+and picks up a change within a minute.
 
-  git        ssh-privatekey, known-hosts, ssh-config   clone the source
-  registry   config                                    a Docker config.json with push access
-  github     token                                     manage the repository's webhooks
-  sonarqube  token                                     written by 'supplychain init-sonarqube'`,
+  git/ssh-privatekey   SSH key that can read the repository
+  git/known-hosts      the git host's keys (ssh-keyscan github.com)
+  git/ssh-config       SSH client configuration for the git host
+  registry/config      Docker config.json with push access
+  github/token         token that can manage the repository's webhooks
+  sonarqube/token      written by 'supplychain init-sonarqube'`,
 	}
 	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 
+	open := func() (*installer.Installer, error) {
+		i, err := installer.New(kubeconfig, false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create installer: %w", err)
+		}
+		return i, nil
+	}
 	set := &cobra.Command{
-		Use:   "set <secret> <field>=<value|@file>...",
-		Short: "Set fields of a secret; other fields are kept",
-		Example: `  supplychain secrets set git ssh-privatekey=@$HOME/.ssh/id_ed25519 known-hosts=@known_hosts
-  supplychain secrets set registry config=@config.json
-  supplychain secrets set github token=@token.txt`,
-		Args: cobra.MinimumNArgs(2),
+		Use:   "set <key>=<value|@file>...",
+		Short: "Set the value of one or more of the store's keys",
+		Example: `  supplychain secrets set git/ssh-privatekey=@$HOME/.ssh/id_ed25519 git/known-hosts=@known_hosts
+  supplychain secrets set registry/config=@config.json
+  supplychain secrets set github/token=@token.txt`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			i, err := installer.New(kubeconfig, false)
+			i, err := open()
 			if err != nil {
-				return fmt.Errorf("failed to create installer: %w", err)
+				return err
 			}
-			return i.SetSecret(context.Background(), args[0], args[1:])
+			return i.SetSecrets(context.Background(), args)
+		},
+	}
+	get := &cobra.Command{
+		Use:     "get <key>",
+		Short:   "Print the value Vault holds for one of the store's keys",
+		Example: `  supplychain secrets get git/known-hosts`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			i, err := open()
+			if err != nil {
+				return err
+			}
+			return i.GetSecret(context.Background(), args[0])
 		},
 	}
 	list := &cobra.Command{
 		Use:   "list",
-		Short: "Show which fields of each secret are set, never their values",
+		Short: "Show which of the store's keys are set, never their values",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			i, err := installer.New(kubeconfig, false)
+			i, err := open()
 			if err != nil {
-				return fmt.Errorf("failed to create installer: %w", err)
+				return err
 			}
 			return i.ListSecrets(context.Background())
 		},
 	}
-	cmd.AddCommand(set, list)
+	cmd.AddCommand(set, get, list)
 	return cmd
 }

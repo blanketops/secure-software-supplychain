@@ -1,0 +1,16 @@
+# The identity External Secrets presents to Vault, and the namespace it lives
+# in. This is applied whether Vault runs in this cluster or somewhere else:
+# either way, Vault's role is bound to exactly this ServiceAccount.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+---
+# The identity External Secrets presents to Vault. Vault's Kubernetes auth role
+# is bound to exactly this ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: supply-chain-secrets
+  namespace: vault
