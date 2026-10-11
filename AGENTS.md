@@ -12,7 +12,8 @@ internal/webhook/*             Validation/defaulting (if present)
 config/crd/bases/*             Generated CRDs (DO NOT EDIT)
 config/rbac/role.yaml          Generated RBAC (DO NOT EDIT)
 config/samples/*               Example CRs (edit these)
-Makefile                       Build/test/deploy commands
+magefiles/                     Build/test/deploy targets (mage; `go run mage.go -l` lists them)
+.ko.yaml                       How ko builds the controller image (no Dockerfile)
 PROJECT                        Kubebuilder metadata Auto-generated (DO NOT EDIT)
 ```
 
@@ -37,10 +38,10 @@ Multi-group layout organizes APIs by group name (e.g., `batch`, `apps`). Check t
 ## Critical Rules
 
 ### Never Edit These (Auto-Generated)
-- `config/crd/bases/*.yaml` - from `make manifests`
-- `config/rbac/role.yaml` - from `make manifests`
-- `config/webhook/manifests.yaml` - from `make manifests`
-- `**/zz_generated.*.go` - from `make generate`
+- `config/crd/bases/*.yaml` - from `mage manifests`
+- `config/rbac/role.yaml` - from `mage manifests`
+- `config/webhook/manifests.yaml` - from `mage manifests`
+- `**/zz_generated.*.go` - from `mage generate`
 - `PROJECT` - from `kubebuilder [OPTIONS]`
 
 ### Never Remove Scaffold Markers
@@ -56,18 +57,25 @@ Always use `kubebuilder create api` and `kubebuilder create webhook` to scaffold
 The e2e tests are designed to validate the solution in an isolated environment (similar to GitHub Actions CI).
 Ensure you run them against a dedicated [Kind](https://kind.sigs.k8s.io/) cluster (not your “real” dev/prod cluster).
 
+## Build Tooling
+
+This project uses **mage** instead of make, and **ko** instead of a Dockerfile. Targets take their settings
+from the environment (`IMG`, `KIND_CLUSTER`, `PLATFORMS`). Where Kubebuilder's documentation says
+`make <target>`, the equivalent here is `mage <target>` (`go run mage.go <target>` without mage installed);
+`make docker-build docker-push` is `mage ko:push`. The Helm targets below (`make helm-*`) do not exist here.
+
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**
 ```
-make manifests  # Regenerate CRDs/RBAC from markers
-make generate   # Regenerate DeepCopy methods
+mage manifests  # Regenerate CRDs/RBAC from markers
+mage generate   # Regenerate DeepCopy methods
 ```
 
 **After editing `*.go` files:**
 ```
-make lint-fix   # Auto-fix code style
-make test       # Run unit tests
+mage lintFix    # Auto-fix code style
+mage test       # Run unit tests
 ```
 
 ## CLI Commands Cheat Sheet
@@ -144,8 +152,8 @@ kubebuilder create webhook \
 ## Testing & Development
 
 ```bash
-make test              # Run unit tests (uses envtest: real K8s API + etcd)
-make run               # Run locally (uses current kubeconfig context)
+mage test              # Run unit tests (uses envtest: real K8s API + etcd)
+mage run               # Run locally (uses current kubeconfig context)
 ```
 
 Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.
@@ -154,12 +162,12 @@ Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.
 
 ```bash
 # 1. Regenerate manifests
-make manifests generate
+mage manifests generate
 
 # 2. Build & deploy
 export IMG=<registry>/<project>:tag
-make docker-build docker-push IMG=$IMG  # Or: kind load docker-image $IMG --name <cluster>
-make deploy IMG=$IMG
+mage ko:push   # Or, for kind: KIND_CLUSTER=<cluster> mage ko:build ko:load
+mage deploy
 
 # 3. Test
 kubectl apply -k config/samples/
@@ -254,7 +262,7 @@ Generated code includes: status conditions (`metav1.Condition`), finalizers, own
 
 ```bash
 # Generate dist/install.yaml from Kustomize manifests
-make build-installer IMG=<registry>/<project>:tag
+IMG=<registry>/<project>:tag mage buildInstaller
 ```
 
 **Key points:**
@@ -298,7 +306,7 @@ helm install my-release ./<output-dir>/chart/ --namespace <ns> --create-namespac
 
 ```bash
 export IMG=<registry>/<project>:<version>
-make docker-build docker-push IMG=$IMG
+mage ko:push
 ```
 
 ## References

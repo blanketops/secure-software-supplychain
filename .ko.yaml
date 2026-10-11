@@ -1,0 +1,17 @@
+# How ko builds the controller's image: the Go binary on a base image, with no
+# Dockerfile and no container daemon. See `mage ko:build` and `mage ko:push`.
+#
+# The base has no shell and no package manager, and runs as the unprivileged
+# user 65532, which is what the Deployment's security context expects.
+defaultBaseImage: gcr.io/distroless/static:nonroot
+
+builds:
+- id: manager
+  main: ./cmd
+  env:
+  - CGO_ENABLED=0
+  flags:
+  - -trimpath
+  ldflags:
+  - -s
+  - -w

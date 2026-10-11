@@ -18,6 +18,6 @@ jobs:
           go-version-file: go.mod
 
       - name: Check linter configuration
-        run: make lint-config
+        run: go run mage.go lintConfig
       - name: Run linter
-        run: make lint
+        run: go run mage.go lint

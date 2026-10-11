@@ -1,6 +1,9 @@
 version: "2"
 run:
   allow-parallel-runners: true
+  # The build itself is linted too: magefiles/ is only compiled with this tag.
+  build-tags:
+    - mage
 linters:
   default: none
   enable:

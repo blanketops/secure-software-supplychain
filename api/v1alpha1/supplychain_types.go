@@ -24,7 +24,7 @@ import (
 // SupplyChainSpec defines the desired state of SupplyChain
 type SupplyChainSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Important: Run "mage manifests generate" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 	// Repository is the GitHub repo this supply chain is bound to (owner/name format).
@@ -127,7 +127,7 @@ type SigningSpec struct {
 // SupplyChainStatus defines the observed state of SupplyChain.
 type SupplyChainStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Important: Run "mage manifests generate" to regenerate code after modifying this file
 	// For Kubernetes API conventions, see:
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
 	// conditions represent the current state of the SupplyChain resource.

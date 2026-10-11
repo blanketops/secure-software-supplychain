@@ -111,8 +111,8 @@ cd secure-software-supply-chain
 Install CRDs:
 
 ```bash
-make manifests
-make install
+mage manifests
+mage install
 ```
 
 Verify CRDs:
