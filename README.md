@@ -164,6 +164,9 @@ relying on it:
   key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
   demonstration and not for production. Any other External Secrets provider can be
   [used instead](docs/installation.md#using-a-secret-store-of-your-own).
+- Fulcio's and Rekor's signing keys are files in Kubernetes Secrets by default. `--key-residency vault` keeps
+  them in Vault instead, where they cannot be exported, which is only as strong as Vault's seal; see
+  [Where the signing keys are kept](docs/installation.md#where-the-signing-keys-are-kept).
 - Rekor, Fulcio, the CT log, Vault and SPIRE's OIDC discovery are reached over HTTPS only, with certificates
   cert-manager issues from a private CA the installer creates. Tekton's own services and SonarQube are not part
   of this.

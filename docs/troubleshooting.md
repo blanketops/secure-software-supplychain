@@ -5,11 +5,22 @@
 Start with `supplychain status`. It shows which part of the stack is missing or not ready, including the
 certificates and the secret store's login, and most of what follows starts from one of its lines.
 
-**The install is slow.** Image pulls are nearly all of it. The first step, `Images`, starts every pull and
-shows which images it is still waiting for; if it says the node pulls one image at a time, run
+**The install is slow.** Image pulls are nearly all of it. The first step, `Images`, starts every pull, and
+the line under each later step says how many are on the node; if it says the node pulls one image at a time, run
 `hack/kind-parallel-pulls.sh <cluster>` on kind (it changes the kubelet's `serializeImagePulls` and restarts
 the kubelet, not any pod), or create the cluster with `hack/kind-cluster.yaml`. An image shown as `(retrying)`
 failed to download and is being tried again, which on an unreliable connection is normal.
+
+**After running the installer again, a push no longer starts a build** and
+`tekton-triggers-core-interceptors` is not ready, logging "server key missing". Its certificate Secret was
+emptied. The installer no longer does that; restart the Deployment once and it generates a new one:
+`kubectl rollout restart deployment/tekton-triggers-core-interceptors -n tekton-pipelines`.
+
+**Fulcio or Rekor answers with an error, with `--key-residency vault`.** They sign through Vault, so look
+there first: `kubectl get pods -n vault` (a sealed Vault shows `2/3`), then the service's agent,
+`kubectl logs -n rekor-system deploy/rekor-server -c vault-agent`. "permission denied" means its policy does
+not allow the request; `supplychain install --only-step "Signing Keys"` writes the policies again and never
+replaces a key.
 
 **A setup Job fails.** The
 sigstore setup Jobs give up after six attempts; if one ran before the service it needs was up (for example

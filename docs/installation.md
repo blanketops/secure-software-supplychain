@@ -25,7 +25,7 @@ Every name in angle brackets is yours to fill in. The examples use `your-org/you
   Give it room: as a rough guide, 8 GB of memory and 40 GB of free disk for images and volumes. SonarQube's search index
   stops working when the node's disk is more than 90% full.
 
-  The install pulls about fifty images, and a kubelet downloads one at a time unless it is told otherwise.
+  The install pulls about seventy images, and a kubelet downloads one at a time unless it is told otherwise.
   Letting it download several at once is the single largest saving in install time. On kind, create the
   cluster with the configuration in this repository, or change one that already exists:
 
@@ -62,43 +62,93 @@ go build -o bin/supplychain ./cmd/cli
 | `--trust-domain` | The SPIFFE trust domain, for example your organisation's domain. Identities look like `spiffe://<your-domain>/ns/<namespace>/sa/<serviceaccount>`. |
 | `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
 | `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
+| `--key-residency` | Where Fulcio's and Rekor's signing keys are kept: `cluster` (default) or `vault`. See [Where the signing keys are kept](#where-the-signing-keys-are-kept). |
 | `--no-image-pull` | Do not pull every image at the start; each step then pulls its own when it is reached. |
 | `--vault-addr` | Use a Vault that already exists, at this address, instead of running one. See [Using a Vault you already have](#using-a-vault-you-already-have). |
 | `--external-secret-store` | No Vault at all; you provide the secret store. See [Using a secret store of your own](#using-a-secret-store-of-your-own). |
 
 The installer applies the steps below in order and waits for each to be ready. Almost all of the time is image
-pulls, so the first step starts all of them:
+pulls, so the first step asks the node for every image the install and the first build will use, and does not
+wait: the steps go ahead while the images download, each waiting only for its own.
 
 ```
-[1/24] Images
-  ⠹ Pulling images: 31 of 54 done · waiting for fulcio:v1.8.5, redis, vault:2.0.3 and 20 more
+[1/25] Images
+  ✓ Asked the node for 68 images; the steps go ahead while they download
+[2/25] MetalLB Install
+  ↓ 52 of 68 images are on the node
+  ✓ MetalLB Install applied
 ```
 
-It tells you when the node pulls one image at a time, and how to change that on kind. An image it cannot pull
-does not stop the install: it is named, and the step that uses it pulls it again. Each later wait still allows
-up to an hour.
+What is still downloading when the last step is done, the images only a build uses, is waited for at the end,
+so the first build does not start by pulling a gigabyte. The step tells you when the node pulls one image at a
+time, and how to change that on kind. An image that cannot be pulled does not stop the install: it is named,
+and whatever needs it pulls it again. Each step's own wait still allows up to an hour.
 
 | Step | What it sets up |
 |---|---|
-| Images | Nothing of its own: it asks the node for every image the steps below will use, all at once, and shows which it is waiting for. The node then downloads from the first minute instead of one step at a time. Left out with `--no-image-pull`. |
+| Images | Nothing of its own: it asks the node for every image the steps below and the first build will use, all at once, and lets the steps go ahead while they download. Left out with `--no-image-pull`. |
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
 | cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the secure software supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
 | SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
+| Vault | Where the credentials are kept, and with `--key-residency vault` the signing keys. Skipped with `--vault-addr` and with `--external-secret-store`. |
+| Signing Keys | *`--key-residency vault` only.* Fulcio's and Rekor's keys, made inside Vault, and Fulcio's root certificate issued from the one Vault holds. |
 | Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |
 | Rekor | The transparency log, with its Trillian database and a signing key that survives restarts |
 | Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
 | Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
 | NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
-| Vault | Where the credentials are kept. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Secret Store Identity | *`spiffe` only.* The store's own SPIFFE identity: SPIRE issues it to one ServiceAccount, and a small pod keeps the current JWT-SVID where External Secrets can present it. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Secret Store | A login to Vault for External Secrets, limited to reading the secure software supply chain's secrets, and the `ClusterSecretStore` that uses it. With `spiffe` the login is that SPIFFE identity and nothing else. Skipped with `--external-secret-store`. |
 | SonarQube | Static analysis, on a PostgreSQL database and volumes of its own |
 
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
 `blanketops-sigstore-roots` ConfigMap, which the pipeline and the policies verify against.
+
+### Where the signing keys are kept
+
+Two keys are roots of trust. Whoever holds the key Fulcio signs certificates with can issue a signing
+certificate for any identity; whoever holds the key Rekor signs the log with can make the log vouch for entries
+that were never made. `--key-residency` decides where they live:
+
+| | `cluster` (default) | `vault` |
+|---|---|---|
+| Where the keys are | Files in Kubernetes Secrets | Vault's Transit engine |
+| Who can copy them | Anyone who can read Secrets in `fulcio-system` or `rekor-system` | Nobody: they are not exportable, through Vault's API included |
+| How the services sign | They load the key | They ask Vault to, each for its own key and nothing else |
+| Record of what was signed | None | Vault's audit log, when enabled |
+| Fulcio and Rekor depend on | Nothing else | Vault being up and unsealed |
+
+```bash
+supplychain install --key-residency vault --signing-identity spiffe ...
+```
+
+With `vault`, the `Signing Keys` step creates the two keys in Vault before either service starts, and issues
+Fulcio's root certificate by having Vault sign it, so the installer never sees a private key either. Each
+service's pod gets a `vault-agent` container that logs in as the pod's own ServiceAccount, keeps the token fresh
+and adds it to the service's requests; the service itself holds no Vault credential. The policies are narrow:
+sign and verify with one key, and read its public half. A pod may restart once while it starts, if the service
+is up before its agent has logged in.
+
+```bash
+kubectl exec -n vault vault-0 -c vault -- vault list transit/keys          # fulcio-ca, rekor
+kubectl exec -n vault vault-0 -c vault -- vault read transit/keys/rekor    # public half, exportable: false
+```
+
+This keeps a key the way a hardware security module does, in software. Be clear about what protects it:
+
+- **It is as strong as Vault's seal.** The installer leaves Vault's unseal key in a Secret next to it, so that
+  it can restart unattended. While that is so, the root of trust has moved, not gone. Unsealing Vault from a
+  cloud KMS or a hardware device outside the cluster
+  ([auto-unseal](https://developer.hashicorp.com/vault/docs/concepts/seal#auto-unseal)) is what completes it, and
+  the same configuration is then backed by hardware.
+- **Choose it before the first build, and do not change it afterwards.** The keys are trust anchors: switching
+  residency makes new ones, and nothing signed before verifies against them.
+- **It needs the Vault the installer runs.** It cannot yet be combined with `--vault-addr` or
+  `--external-secret-store`, and other key services (a cloud KMS, a PKCS#11 device), which Fulcio and Rekor
+  both support, are not wired into the installer.
 
 ### TLS between the services
 
