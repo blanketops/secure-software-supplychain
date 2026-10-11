@@ -145,7 +145,7 @@ spec:
     sign: true
   signing:
     fulcioURL: http://fulcio-server.fulcio-system.svc.cluster.local
-    rekorURL: http://rekor-server.rekor-system.svc.cluster.local
+    rekorURL: https://rekor-server.rekor-system.svc.cluster.local
     ctLogURL: http://ctlog.ctlog-system.svc/fulcio
 ---
 apiVersion: supplychain.blanketops.dev/v1alpha1
@@ -166,7 +166,7 @@ spec:
         name: %[3]s
         key: %[4]s
     rekor:
-      url: http://rekor-server.rekor-system.svc.cluster.local
+      url: https://rekor-server.rekor-system.svc.cluster.local
 `,
 		policyNamespace, workloadNamespace, signing.RootsConfigMap,
 		signing.RootsFulcioKey, indent(newRootCertPEM()),
@@ -193,7 +193,7 @@ spec:
 		renderedName,
 		unsignedRegistry + "/" + unsignedName + "**",
 		signing.ServiceAccountIdentity(policyNamespace, "supply-chain-runner"),
-		"http://rekor-server.rekor-system.svc.cluster.local",
+		"https://rekor-server.rekor-system.svc.cluster.local",
 	}))
 
 	By("checking the policy's ServiceAccount passed its three authorization checks")

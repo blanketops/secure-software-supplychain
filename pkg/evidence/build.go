@@ -18,11 +18,15 @@ package evidence
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -101,6 +105,7 @@ func ForBuild(
 		BuildSubject:  identity.Subject(sc.Namespace, serviceAccount),
 		ChainsSubject: identity.ChainsSubject(),
 		Keychain:      keychain,
+		HTTPClient:    HTTPClient(roots.Data[signing.RootsCAKey]),
 	})
 	if err != nil {
 		problems = append(problems, err.Error())
@@ -186,4 +191,27 @@ func registryHost(server string) string {
 		return "index.docker.io"
 	}
 	return host
+}
+
+// HTTPClient returns the client the transparency log is read with. An
+// in-cluster log serves a certificate from the supply chain's own CA, which
+// is trusted here in addition to the public CAs; caPEM is empty for a public
+// log.
+func HTTPClient(caPEM string) *http.Client {
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	if strings.TrimSpace(caPEM) == "" {
+		return httpClient
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM([]byte(caPEM)) {
+		return httpClient
+	}
+	httpClient.Transport = &http.Transport{
+		Proxy:           http.ProxyFromEnvironment,
+		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	}
+	return httpClient
 }

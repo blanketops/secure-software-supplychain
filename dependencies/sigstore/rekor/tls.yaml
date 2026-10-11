@@ -1,0 +1,63 @@
+# Rekor over HTTPS.
+#
+# rekor-server only listens on plain HTTP. It is bound to the pod's loopback
+# address, where nothing outside the pod can reach it, and the "tls" container
+# in the same pod serves it on 8443 with a certificate from the supply chain's
+# CA. The Service exposes only that port, as 443.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rekor-server-tls
+  namespace: rekor-system
+spec:
+  secretName: rekor-server-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+  dnsNames:
+    - rekor-server
+    - rekor-server.rekor-system
+    - rekor-server.rekor-system.svc
+    - rekor-server.rekor-system.svc.cluster.local
+  issuerRef:
+    name: supply-chain-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rekor-server-tls-proxy
+  namespace: rekor-system
+data:
+  default.conf: |
+    server {
+      listen 8443 ssl;
+      ssl_certificate     /tls/tls.crt;
+      ssl_certificate_key /tls/tls.key;
+      ssl_protocols       TLSv1.2 TLSv1.3;
+      client_max_body_size 32m;
+
+      location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+      }
+    }
+  run.sh: |
+    # nginx reads a certificate when it starts. cert-manager renews it in
+    # place, so nginx is told to read it again every hour.
+    nginx -g 'daemon off;' &
+    nginx_pid=$!
+    trap 'kill -QUIT "$nginx_pid"; wait "$nginx_pid"; exit 0' TERM INT
+    while kill -0 "$nginx_pid" 2>/dev/null; do
+      sleep 3600 &
+      wait $!
+      nginx -s reload 2>/dev/null || true
+    done

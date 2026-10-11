@@ -21,6 +21,7 @@ import (
 	"time"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
@@ -390,5 +391,48 @@ func TestPipelineHasOnlyTaskRuns(t *testing.T) {
 			t.Errorf("task %s is a custom task (%s %s); Tekton Chains would not sign the run",
 				task.Name, ref.APIVersion, ref.Kind)
 		}
+	}
+}
+
+// Every cosign step reaches Rekor, which serves a certificate from the supply
+// chain's own CA when it runs in the cluster. Each of them is given that CA
+// as an extra directory of trusted certificates, so the registry's public
+// certificate still verifies.
+func TestCosignStepsTrustTheSupplyChainCA(t *testing.T) {
+	pr := testPipelineRun(t)
+	checked := 0
+	for _, name := range []string{stepSign, stepVerify} {
+		spec := findTask(t, pr, name).TaskSpec.TaskSpec
+		var volume *corev1.Volume
+		for i := range spec.Volumes {
+			if spec.Volumes[i].Name == tlsCAVolume {
+				volume = &spec.Volumes[i]
+			}
+		}
+		if volume == nil || volume.ConfigMap == nil || volume.ConfigMap.Name != signing.RootsConfigMap ||
+			volume.ConfigMap.Optional == nil || !*volume.ConfigMap.Optional {
+			t.Fatalf("task %s has no optional CA volume from the trust anchors: %+v", name, volume)
+		}
+		for _, step := range spec.Steps {
+			if step.Image != cosignImage {
+				continue
+			}
+			checked++
+			mounted, env := false, ""
+			for _, mount := range step.VolumeMounts {
+				mounted = mounted || (mount.Name == tlsCAVolume && mount.MountPath == tlsCAMountPath)
+			}
+			for _, e := range step.Env {
+				if e.Name == "SSL_CERT_DIR" {
+					env = e.Value
+				}
+			}
+			if !mounted || env != tlsCAMountPath+":/etc/ssl/certs" {
+				t.Errorf("step %s of %s: CA mounted=%v, SSL_CERT_DIR=%q", step.Name, name, mounted, env)
+			}
+		}
+	}
+	if checked < 5 {
+		t.Errorf("only %d cosign steps were found; sign, attest and the verifications were expected", checked)
 	}
 }

@@ -34,6 +34,10 @@ const (
 	RootsFulcioKey = "fulcio-root.pem"
 	RootsRekorKey  = "rekor.pub"
 	RootsCTLogKey  = "ctfe.pub"
+	// RootsCAKey is not a sigstore trust anchor: it is the CA of the TLS
+	// certificates the in-cluster Rekor, Fulcio and CT log serve. It is absent
+	// when they are public services, whose certificates public CAs vouch for.
+	RootsCAKey = "ca.crt"
 
 	// KubernetesOIDCIssuer is the issuer of the ServiceAccount tokens exchanged
 	// with Fulcio for signing certs.

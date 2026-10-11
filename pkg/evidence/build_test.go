@@ -18,6 +18,9 @@ package evidence
 
 import (
 	"encoding/base64"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -68,4 +71,27 @@ func TestDockerConfigKeychain(t *testing.T) {
 	if _, err := newDockerConfigKeychain([]byte("not json")); err == nil {
 		t.Error("a malformed Docker config was accepted")
 	}
+}
+
+// An in-cluster log serves a certificate from the supply chain's own CA. The
+// client trusts it when the trust anchors carry one, and is the plain client
+// otherwise, as for a public log.
+func TestHTTPClientTrustsTheSupplyChainCA(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+
+	if _, err := HTTPClient("").Get(server.URL); err == nil {
+		t.Error("a certificate from an unknown CA was accepted without the CA")
+	}
+	if _, err := HTTPClient("not a certificate").Get(server.URL); err == nil {
+		t.Error("a certificate from an unknown CA was accepted with a CA that is not one")
+	}
+	resp, err := HTTPClient(ca).Get(server.URL)
+	if err != nil {
+		t.Fatalf("the supply chain's CA was not trusted: %v", err)
+	}
+	_ = resp.Body.Close()
 }

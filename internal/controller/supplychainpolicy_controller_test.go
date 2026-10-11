@@ -239,7 +239,7 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 			Issuer:  signing.KubernetesOIDCIssuer,
 			Subject: "https://kubernetes.io/namespaces/default/serviceaccounts/supply-chain-runner",
 		}}))
-		Expect(scp.Status.RekorURL).To(Equal("http://rekor-server.rekor-system.svc.cluster.local"))
+		Expect(scp.Status.RekorURL).To(Equal("https://rekor-server.rekor-system.svc.cluster.local"))
 
 		By("recording the three proofs of the policy's ServiceAccount")
 		Expect(scp.Spec.ServiceAccountName).To(Equal(policy.DefaultServiceAccount))

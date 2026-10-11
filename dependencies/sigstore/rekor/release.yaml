@@ -340,10 +340,11 @@ metadata:
   namespace: rekor-system
 spec:
   ports:
-    - name: 3000-tcp
-      port: 80
+    # HTTPS only: the "tls" container. Plain HTTP is not exposed; see tls.yaml.
+    - name: https
+      port: 443
       protocol: TCP
-      targetPort: 3000
+      targetPort: 8443
     - name: 2112-tcp
       port: 2112
       protocol: TCP
@@ -707,7 +708,8 @@ spec:
             - "--trillian_log_server.sharding_config=/sharding/sharding-config.yaml"
             - "--redis_server.address=rekor-redis"
             - "--redis_server.port=6379"
-            - "--rekor_server.address=0.0.0.0"
+            # Loopback only: the "tls" container in this pod is the way in.
+            - "--rekor_server.address=127.0.0.1"
             # Not the chart's "memory": that makes a new signing key every time
             # the pod starts, after which nothing signed before verifies and the
             # stored trust anchor no longer matches. The installer creates the
@@ -730,26 +732,53 @@ spec:
             - name: signing-key
               mountPath: /var/run/rekor-signer
               readOnly: true
-          livenessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /ping
-              port: 3000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          readinessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /ping
-              port: 3000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
           resources:
             {}
+        - name: tls
+          image: docker.io/nginxinc/nginx-unprivileged:1.30.0-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/etc/nginx/conf.d/run.sh"]
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          # Rekor listens on loopback, which the kubelet cannot probe, so the
+          # pod's health is read through this container: /ping answers only
+          # when Rekor does.
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: tls-proxy
+              mountPath: /etc/nginx/conf.d
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
@@ -763,6 +792,12 @@ spec:
         - name: signing-key
           secret:
             secretName: rekor-signing-key
+        - name: tls
+          secret:
+            secretName: rekor-server-tls
+        - name: tls-proxy
+          configMap:
+            name: rekor-server-tls-proxy
 ---
 # Source: rekor/charts/trillian/templates/createdb/createdb-job.yaml
 apiVersion: batch/v1
@@ -862,31 +897,3 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65533
----
-# Source: rekor/templates/server/ingress.yaml
-apiVersion: "networking.k8s.io/v1"
-kind: Ingress
-metadata:
-  labels:
-    app.kubernetes.io/component: "server"
-    app.kubernetes.io/name: rekor
-    app.kubernetes.io/instance: rekor
-    helm.sh/chart: rekor-1.7.9
-    app.kubernetes.io/managed-by: Helm
-  name: rekor-server
-  namespace: rekor-system
-  annotations:
-    {}
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: "root"
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: rekor-server
-                port:
-                  number: 80

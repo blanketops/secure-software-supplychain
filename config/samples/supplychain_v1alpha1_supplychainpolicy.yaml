@@ -49,7 +49,7 @@ spec:
         key: fulcio-root.pem
     # The log every signature and attestation must be recorded in.
     rekor:
-      url: http://rekor-server.rekor-system.svc.cluster.local
+      url: https://rekor-server.rekor-system.svc.cluster.local
       pemRef:
         name: blanketops-sigstore-roots
         key: rekor.pub

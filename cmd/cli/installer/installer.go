@@ -122,6 +122,44 @@ var installOrder = []step{
 		Paths: []string{"dependencies/metallb/release"},
 	},
 	{
+		// Issues and renews the TLS certificates the supply chain's services
+		// serve. A cert-manager that is already in the cluster is used as it
+		// is.
+		Name:          "cert-manager",
+		Paths:         []string{"dependencies/cert-manager/release"},
+		RegistersCRDs: true,
+		Skip:          func(i *Installer) bool { return i.certManagerIsSomeoneElses(context.Background()) },
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for cert-manager to be ready...")
+			waitSp.start()
+			if err := i.waitForCertManager(ctx); err != nil {
+				waitSp.fail("cert-manager not ready")
+				return err
+			}
+			waitSp.succeed("cert-manager ready")
+			return nil
+		},
+	},
+	{
+		// The private CA those certificates come from. Its certificate is
+		// what every client of the supply chain's services trusts.
+		Name:  "Certificate Authority",
+		Paths: []string{"dependencies/cert-manager/ca"},
+		PreHook: func(ctx context.Context, i *Installer) error {
+			return i.waitForCertManager(ctx)
+		},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			caSp := newSpinner("Waiting for the certificate authority...")
+			caSp.start()
+			if err := i.waitForCA(ctx, 5*time.Minute); err != nil {
+				caSp.fail("No certificate authority")
+				return err
+			}
+			caSp.succeed("Certificate authority ready (ClusterIssuer " + caIssuer + ")")
+			return nil
+		},
+	},
+	{
 		Name:  "Tekton Pipelines",
 		Paths: []string{"dependencies/tekton/pipelines"},
 	},
@@ -237,6 +275,11 @@ var installOrder = []step{
 			}
 			cfgSp.succeed("chains-config applied")
 
+			// Chains records what it signs in Rekor, over TLS.
+			if err := i.trustCAIn(ctx, "tekton-chains", "tekton-chains-controller"); err != nil {
+				return fmt.Errorf("giving Tekton Chains the certificate authority: %w", err)
+			}
+
 			// With SPIFFE, Chains signs as its SPIFFE identity: give it the
 			// Workload API socket, and record the trust domain where the
 			// operator reads it.
@@ -282,7 +325,12 @@ var installOrder = []step{
 				return err
 			}
 			waitSp.succeed("Policy Controller ready")
-			return nil
+			// It reads the transparency log when an image's signature does
+			// not carry its own proof of inclusion.
+			if err := i.trustCAIn(ctx, "cosign-system", "policy-controller-webhook"); err != nil {
+				return fmt.Errorf("giving the Policy Controller the certificate authority: %w", err)
+			}
+			return i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", readyTimeout)
 		},
 	},
 	{
@@ -845,10 +893,18 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch Rekor public key: %w", err)
 	}
 
+	// Not a sigstore trust anchor, but needed in the same places: the CA of
+	// the TLS certificates Rekor and the others serve.
+	ca, err := i.supplyChainCA(ctx)
+	if err != nil {
+		return err
+	}
+
 	cmData := map[string]any{
 		"fulcio-root.pem": string(fulcioRoot),
 		"ctfe.pub":        string(ctfePub),
 		"rekor.pub":       string(rekorPub),
+		caKey:             ca,
 	}
 
 	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
@@ -904,109 +960,34 @@ func (i *Installer) readSecretKey(ctx context.Context, namespace, secretName, ke
 	return decoded, nil
 }
 
-// fetchRekorPublicKey spawns a short-lived Job that curls the Rekor public key
-// endpoint from inside the cluster, reads stdout via the pod log API, then
-// cleans up. Rekor exposes no Kubernetes secret for its signing key.
+// fetchRekorPublicKey asks Rekor for the public key it signs the log with.
+// Rekor keeps no copy of it in a Secret, and it is not a secret: what matters
+// is that it comes from Rekor, so the connection is verified against the
+// supply chain's CA.
 func (i *Installer) fetchRekorPublicKey(ctx context.Context) ([]byte, error) {
-	const (
-		jobName = "blanketops-fetch-rekor-pub"
-		jobNS   = "default"
-	)
-	jobGVR := schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}
-	podGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-
-	propagation := metav1.DeletePropagationBackground
-	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
-		PropagationPolicy: &propagation,
-	})
-	time.Sleep(2 * time.Second)
-
-	job := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "batch/v1",
-			"kind":       "Job",
-			"metadata": map[string]any{
-				"name":      jobName,
-				"namespace": jobNS,
-				"labels":    map[string]any{"blanketops.dev/managed": "true"},
-			},
-			"spec": map[string]any{
-				"ttlSecondsAfterFinished": int64(30),
-				"template": map[string]any{
-					"spec": map[string]any{
-						"restartPolicy": "Never",
-						"containers": []any{
-							map[string]any{
-								"name":  "fetch",
-								"image": "curlimages/curl:latest",
-								"command": []any{
-									"curl", "-sf",
-									"http://rekor-server.rekor-system.svc.cluster.local/api/v1/log/publicKey",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	if _, err := i.dynamic.Resource(jobGVR).Namespace(jobNS).Create(ctx, job, metav1.CreateOptions{}); err != nil {
-		return nil, fmt.Errorf("failed to create rekor fetch job: %w", err)
-	}
-
-	// Poll until pod reaches terminal phase.
-	deadline := time.Now().Add(2 * time.Minute)
-	var logPodName string
-	for time.Now().Before(deadline) {
-		time.Sleep(3 * time.Second)
-		pods, err := i.dynamic.Resource(podGVR).Namespace(jobNS).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("job-name=%s", jobName),
-		})
-		if err != nil || len(pods.Items) == 0 {
-			continue
-		}
-		pod := pods.Items[0]
-		phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase")
-		if phase == "Succeeded" || phase == "Failed" {
-			logPodName = pod.GetName()
-			break
-		}
-	}
-	if logPodName == "" {
-		return nil, fmt.Errorf("rekor fetch job timed out waiting for pod")
-	}
-
-	// Use the raw REST request directly — avoids the NegotiatedSerializer
-	// requirement of RESTClientFor by using the config's transport directly.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/log", i.restConfig.Host, jobNS, logPodName),
-		nil,
-	)
+	base, client, closeForward, err := i.httpsToPod(ctx, "rekor-system",
+		"app.kubernetes.io/name=rekor,app.kubernetes.io/component=server", 8443, "rekor-server.rekor-system.svc")
 	if err != nil {
-		return nil, fmt.Errorf("failed to build log request: %w", err)
+		return nil, err
 	}
-	transport, err := rest.TransportFor(i.restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build transport: %w", err)
-	}
-	resp, err := transport.RoundTrip(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pod logs: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read pod log response: %w", err)
-	}
+	defer closeForward()
 
-	_ = i.dynamic.Resource(jobGVR).Namespace(jobNS).Delete(ctx, jobName, metav1.DeleteOptions{
-		PropagationPolicy: &propagation,
-	})
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/log/publicKey", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
 	pub := bytes.TrimSpace(raw)
-	if len(pub) == 0 {
-		return nil, fmt.Errorf("rekor public key fetch returned empty response")
+	if resp.StatusCode != http.StatusOK || !bytes.Contains(pub, []byte("PUBLIC KEY")) {
+		return nil, fmt.Errorf("rekor answered %s and no public key", resp.Status)
 	}
 	return pub, nil
 }
@@ -1024,7 +1005,6 @@ func chainsConfig(opts Options) map[string]any {
 		// "slsa/v1" are both the older v0.2 predicate.
 		provenanceFormat = "slsa/v2alpha4"
 		fulcioURL        = "http://fulcio-server.fulcio-system.svc.cluster.local"
-		rekorURL         = "http://rekor-server.rekor-system.svc.cluster.local"
 	)
 	config := map[string]any{
 		"artifacts.taskrun.format":                     provenanceFormat,

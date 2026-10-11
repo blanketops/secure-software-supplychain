@@ -43,6 +43,11 @@ const (
 	// Chains writes with the slsa/v2alpha4 format.
 	provenancePredicateType = "slsaprovenance1"
 	sigstoreRootsMountPath  = "/etc/sigstore"
+	// tlsCAMountPath holds the CA of the in-cluster services' TLS
+	// certificates, alone, so that it can be given to Go's TLS as a directory
+	// of extra trusted certificates.
+	tlsCAVolume    = "supply-chain-ca"
+	tlsCAMountPath = "/etc/supply-chain-ca"
 	// Steps of one task share /workspace.
 	authorizationPredicatePath = "/workspace/authorization-predicate.json"
 	authorizationPolicyPath    = "/workspace/authorization-policy.cue"
@@ -266,6 +271,34 @@ func buildTaskList(
 	}
 
 	return tasks
+}
+
+// tlsCAVolumeSource is the CA of the in-cluster services' TLS certificates,
+// taken from the trust anchors ConfigMap. It is optional: against public
+// sigstore services there is no such CA, and the volume is then empty.
+func tlsCAVolumeSource() corev1.Volume {
+	optional := true
+	return corev1.Volume{
+		Name: tlsCAVolume,
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: signing.RootsConfigMap},
+				Items:                []corev1.KeyToPath{{Key: signing.RootsCAKey, Path: signing.RootsCAKey}},
+				Optional:             &optional,
+			},
+		},
+	}
+}
+
+func tlsCAMount() corev1.VolumeMount {
+	return corev1.VolumeMount{Name: tlsCAVolume, MountPath: tlsCAMountPath, ReadOnly: true}
+}
+
+// tlsCAEnv makes a step trust that CA in addition to the public CAs in its
+// image: SSL_CERT_DIR adds directories of certificates, and the image's bundle
+// file is still read, so the registry keeps verifying.
+func tlsCAEnv() corev1.EnvVar {
+	return corev1.EnvVar{Name: "SSL_CERT_DIR", Value: tlsCAMountPath + ":/etc/ssl/certs"}
 }
 
 func gitCloneTask() tektonv1.PipelineTask {
@@ -625,6 +658,7 @@ func signImageTask(
 							},
 						},
 					},
+					tlsCAVolumeSource(),
 				},
 				Steps: []tektonv1.Step{
 					awaitChainsSignatureStep(),
@@ -638,8 +672,10 @@ func signImageTask(
 						VolumeMounts: []corev1.VolumeMount{
 							source.mount,
 							{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath},
+							tlsCAMount(),
 						},
 						Env: append([]corev1.EnvVar{
+							tlsCAEnv(),
 							{Name: "COSIGN_EXPERIMENTAL", Value: "1"},
 							{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
 							{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsFulcioKey},
@@ -769,12 +805,13 @@ func verifyTask(
 	policy := signing.AuthorizationPolicyCUE(authz.Principal(sc.Namespace, serviceAccount))
 
 	trust := []corev1.EnvVar{
+		tlsCAEnv(),
 		{Name: "DOCKER_CONFIG", Value: "/workspace/dockerconfig"},
 		{Name: "SIGSTORE_ROOT_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsFulcioKey},
 		{Name: "SIGSTORE_REKOR_PUBLIC_KEY", Value: sigstoreRootsMountPath + "/" + signing.RootsRekorKey},
 		{Name: "SIGSTORE_CT_LOG_PUBLIC_KEY_FILE", Value: sigstoreRootsMountPath + "/" + signing.RootsCTLogKey},
 	}
-	roots := []corev1.VolumeMount{{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath}}
+	roots := []corev1.VolumeMount{{Name: "sigstore-roots", MountPath: sigstoreRootsMountPath}, tlsCAMount()}
 	signer := []string{
 		"--certificate-identity=$(params.IDENTITY)",
 		"--certificate-oidc-issuer=" + as.Issuer,
@@ -819,7 +856,7 @@ func verifyTask(
 							LocalObjectReference: corev1.LocalObjectReference{Name: signing.RootsConfigMap},
 						},
 					},
-				}},
+				}, tlsCAVolumeSource()},
 				Steps: []tektonv1.Step{
 					{
 						// The cosign image has no shell; see withAuthorizationAttestation.
