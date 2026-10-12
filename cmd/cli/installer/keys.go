@@ -38,6 +38,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
 )
 
 // Where the keys everything else is verified against are kept is the
@@ -167,13 +169,16 @@ func (i *Installer) ensureSigningKeys(ctx context.Context) error {
 	if err := ensureKubernetesAuthMount(ctx, vault); err != nil {
 		return err
 	}
+	// A record of every signature: Vault logs each request it serves.
+	if err := ensureAudit(ctx, vault); err != nil {
+		return err
+	}
 	for _, svc := range signingServices {
 		if err := ensureTransitKey(ctx, vault, svc.Key); err != nil {
 			return err
 		}
-		policy := map[string]any{"policy": signerPolicy(svc.Key)}
-		if _, err := vault.call(ctx, http.MethodPut, "/v1/sys/policies/acl/"+svc.Role, policy, nil); err != nil {
-			return fmt.Errorf("writing policy %s: %w", svc.Role, err)
+		if err := ensureSignerPolicy(ctx, vault, svc); err != nil {
+			return err
 		}
 		role := map[string]any{
 			"bound_service_account_names":      []string{svc.ServiceAccount},
@@ -203,7 +208,38 @@ func (i *Installer) ensureSigningKeys(ctx context.Context) error {
 			return err
 		}
 	}
-	return i.ensureFulcioRoot(ctx, vault)
+	if err := i.ensureFulcioRoot(ctx, vault); err != nil {
+		return err
+	}
+	// A cluster that kept its keys in Secrets before has them still. They
+	// sign nothing any more, and a key that is not used should not lie about.
+	for namespace, name := range map[string]string{fulcioNamespace: "fulcio-server-secret", rekorNamespace: "rekor-signing-key"} {
+		err := i.dynamic.Resource(secretGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("removing the key file %s/%s: %w", namespace, name, err)
+		}
+	}
+	return nil
+}
+
+// ensureSignerPolicy writes the policy that lets a service sign with its
+// key. A service that was suspended on purpose stays suspended: running the
+// installer again is not how signing is turned back on.
+func ensureSignerPolicy(ctx context.Context, vault *vaultClient, svc signingService) error {
+	var have struct {
+		Data struct {
+			Policy string `json:"policy"`
+		} `json:"data"`
+	}
+	if _, err := vault.call(ctx, http.MethodGet, "/v1/sys/policies/acl/"+svc.Role, nil, &have); err == nil &&
+		have.Data.Policy == suspendedPolicy(svc.Key) {
+		return nil
+	}
+	policy := map[string]any{"policy": signerPolicy(svc.Key)}
+	if _, err := vault.call(ctx, http.MethodPut, "/v1/sys/policies/acl/"+svc.Role, policy, nil); err != nil {
+		return fmt.Errorf("writing policy %s: %w", svc.Role, err)
+	}
+	return nil
 }
 
 // ensureTransitEngine enables the Transit engine, unless it is there.
@@ -366,27 +402,57 @@ func certifies(certPEM []byte, pub crypto.PublicKey) bool {
 	return ok && isECDSA && have.Equal(want)
 }
 
+// fulcioRootVaultKey is where a second copy of Fulcio's root certificate is
+// kept, in Vault's key-value engine, next to the key it is for.
+const fulcioRootVaultKey = store.Prefix + "/signing/fulcio-root"
+
 // ensureFulcioRoot leaves Fulcio's root certificate where Fulcio and the
-// trust anchors read it. A certificate that is already there for the key in
-// Vault is kept: replacing it would replace the trust anchor.
+// trust anchors read it, a Secret. The certificate is a trust anchor: every
+// signing certificate chains to it, and is only valid while it is. So it is
+// issued once, and never again while a copy of it can be found.
+//
+// The Secret is not a safe only copy. Anything that writes to it replaces
+// the trust anchor, and a new certificate for the same key does not help:
+// it is not valid at the time the earlier signatures were made. A second
+// copy is therefore kept in Vault, and is what the Secret is restored from.
 func (i *Installer) ensureFulcioRoot(ctx context.Context, vault *vaultClient) error {
 	signer, err := newTransitSigner(ctx, vault, fulcioKey)
 	if err != nil {
 		return err
 	}
+	if err := ensureSecretEngine(ctx, vault); err != nil {
+		return err
+	}
+	kept, err := vault.read(ctx, fulcioRootVaultKey)
+	if err != nil {
+		return err
+	}
+	inSecret := ""
 	secrets := i.dynamic.Resource(secretGVR).Namespace(fulcioNamespace)
-	existing, err := secrets.Get(ctx, fulcioRootSecret, metav1.GetOptions{})
-	if err == nil {
+	if existing, err := secrets.Get(ctx, fulcioRootSecret, metav1.GetOptions{}); err == nil {
 		encoded, _, _ := unstructured.NestedString(existing.Object, "data", fulcioRootSecretKey)
-		if have, decodeErr := base64.StdEncoding.DecodeString(encoded); decodeErr == nil && certifies(have, signer.Public()) {
-			return nil
+		if decoded, decodeErr := base64.StdEncoding.DecodeString(encoded); decodeErr == nil {
+			inSecret = string(decoded)
 		}
 	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
-	root, err := fulcioRootCertificate(signer, time.Now())
-	if err != nil {
-		return err
+
+	root, fromVault := chooseFulcioRoot(kept, inSecret, signer.Public())
+	if root == "" {
+		issued, err := fulcioRootCertificate(signer, time.Now())
+		if err != nil {
+			return err
+		}
+		root = string(issued)
+	}
+	if !fromVault {
+		if err := vault.write(ctx, fulcioRootVaultKey, root); err != nil {
+			return fmt.Errorf("keeping a copy of Fulcio's root in Vault: %w", err)
+		}
+	}
+	if root == inSecret {
+		return nil
 	}
 	return i.applyObject(ctx, &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
@@ -396,8 +462,21 @@ func (i *Installer) ensureFulcioRoot(ctx context.Context, vault *vaultClient) er
 			"labels": map[string]any{"blanketops.dev/managed": "true"},
 		},
 		"type":       "Opaque",
-		"stringData": map[string]any{fulcioRootSecretKey: string(root)},
+		"stringData": map[string]any{fulcioRootSecretKey: root},
 	}})
+}
+
+// chooseFulcioRoot picks the root certificate to use from the copies there
+// are: the one kept in Vault if it is for the key, else the one in the
+// Secret if that is. It returns "" when neither is, and one has to be issued.
+func chooseFulcioRoot(inVault, inSecret string, key crypto.PublicKey) (root string, fromVault bool) {
+	switch {
+	case certifies([]byte(inVault), key):
+		return inVault, true
+	case certifies([]byte(inSecret), key):
+		return inSecret, false
+	}
+	return "", false
 }
 
 // ── What changes in the manifests ────────────────────────────────────────────

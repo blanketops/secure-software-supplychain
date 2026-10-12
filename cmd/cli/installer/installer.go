@@ -501,6 +501,8 @@ type Installer struct {
 	// restConfig is kept for operations that need a raw REST client
 	// (e.g. reading pod logs), where the dynamic client is insufficient.
 	restConfig *rest.Config
+	// given is the options as they were given, before defaults.
+	given Options
 	// mutate is the Mutate of the step being applied.
 	mutate func(i *Installer, obj *unstructured.Unstructured) bool
 }
@@ -513,6 +515,9 @@ func New(kubeconfig string, dryRun bool) (*Installer, error) {
 // NewWithOptions creates an Installer. Empty options take their defaults: the
 // UIs on DefaultUIHost, and the Kubernetes signing identity.
 func NewWithOptions(kubeconfig string, dryRun bool, opts Options) (*Installer, error) {
+	// What was said, before anything left out is given a default: an install
+	// fills those from the cluster first.
+	given := opts
 	if err := opts.defaultAndValidate(); err != nil {
 		return nil, err
 	}
@@ -539,6 +544,7 @@ func NewWithOptions(kubeconfig string, dryRun bool, opts Options) (*Installer, e
 		discovery:   disc,
 		mapper:      mapper,
 		dryRun:      dryRun,
+		given:       given,
 		webhookHost: webhookHost,
 		uiHost:      uiHost,
 		opts:        opts,
@@ -554,6 +560,11 @@ func NewWithOptions(kubeconfig string, dryRun bool, opts Options) (*Installer, e
 func (i *Installer) Install(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("🔧 Installing Secure Software Supply Chain dependencies...")
+	if !i.dryRun {
+		if err := i.settle(ctx); err != nil {
+			return err
+		}
+	}
 	if i.webhookHost != "" {
 		fmt.Printf("   Webhook host: %s\n", i.webhookHost)
 	} else {
@@ -565,6 +576,11 @@ func (i *Installer) Install(ctx context.Context) error {
 		fmt.Printf("   Identity:     SPIFFE, trust domain %s\n", i.opts.TrustDomain)
 	} else {
 		fmt.Println("   Identity:     Kubernetes ServiceAccount tokens")
+	}
+	if i.keysInVault() {
+		fmt.Println("   Signing keys: in Vault, not exportable")
+	} else {
+		fmt.Println("   Signing keys: in Kubernetes Secrets")
 	}
 	fmt.Println()
 
@@ -817,16 +833,27 @@ func (i *Installer) waitForDeployment(ctx context.Context, namespace, name strin
 		deploy, err := i.dynamic.Resource(
 			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			replicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
-			desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
-			if replicas >= desired && desired > 0 {
-				return nil
-			}
+		if err == nil && rolledOut(deploy) {
+			return nil
 		}
 		time.Sleep(5 * time.Second)
 	}
 	return fmt.Errorf("deployment %s/%s not ready after %s", namespace, name, timeout)
+}
+
+// rolledOut reports whether a Deployment runs what its spec now says, and
+// only that. Counting available pods is not enough: while a change rolls out
+// the pods of the old version are available too, and they are the ones that
+// answer. The installer reads keys from these services, and would read the
+// one being replaced.
+func rolledOut(deploy *unstructured.Unstructured) bool {
+	desired, _, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas")
+	observed, _, _ := unstructured.NestedInt64(deploy.Object, "status", "observedGeneration")
+	total, _, _ := unstructured.NestedInt64(deploy.Object, "status", "replicas")
+	updated, _, _ := unstructured.NestedInt64(deploy.Object, "status", "updatedReplicas")
+	available, _, _ := unstructured.NestedInt64(deploy.Object, "status", "availableReplicas")
+	return desired > 0 && observed >= deploy.GetGeneration() &&
+		updated == desired && available == desired && total == desired
 }
 
 // ---------------------------------------------------------------------------

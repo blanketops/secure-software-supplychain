@@ -233,7 +233,10 @@ func (i *Installer) httpsToPod(
 		return "", nil, nil, err
 	}
 	for _, pod := range pods.Items {
-		if phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase"); phase != "Running" {
+		// Not one that is on its way out: it may be the last of a version
+		// that is being replaced.
+		if phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase"); phase != "Running" ||
+			pod.GetDeletionTimestamp() != nil {
 			continue
 		}
 		base, closeForward, err := i.forwardToPod(ctx, namespace, pod.GetName(), port)

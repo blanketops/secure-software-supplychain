@@ -87,6 +87,9 @@ type Options struct {
 	// KeyResidency is where Fulcio's and Rekor's signing keys are kept:
 	// ResidencyCluster or ResidencyVault. See keys.go.
 	KeyResidency string
+	// AllowTrustChange lets an install change a setting that decides what
+	// the cluster trusts from what it was installed with. See settings.go.
+	AllowTrustChange bool
 }
 
 func (o *Options) defaultAndValidate() error {

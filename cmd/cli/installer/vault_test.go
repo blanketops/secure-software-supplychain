@@ -56,6 +56,7 @@ type fakeVault struct {
 	secrets     map[string]map[string]string
 	enabled     int
 	transit     map[string]*ecdsa.PrivateKey
+	audit       map[string]any
 	created     []string
 	keyRequests map[string]map[string]any
 }
@@ -63,6 +64,7 @@ type fakeVault struct {
 func newFakeVault() *fakeVault {
 	return &fakeVault{
 		transit:     map[string]*ecdsa.PrivateKey{},
+		audit:       map[string]any{},
 		keyRequests: map[string]map[string]any{},
 		token:       "root",
 		mounts:      map[string]any{"sys/": map[string]any{"type": "system"}},
@@ -107,7 +109,22 @@ func (f *fakeVault) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "auth/") && strings.HasSuffix(path, "/config"):
 		f.configs[strings.TrimSuffix(strings.TrimPrefix(path, "auth/"), "/config")] = body
 	case strings.HasPrefix(path, "sys/policies/acl/"):
-		f.policies[strings.TrimPrefix(path, "sys/policies/acl/")], _ = body["policy"].(string)
+		name := strings.TrimPrefix(path, "sys/policies/acl/")
+		if r.Method == http.MethodGet {
+			policy, ok := f.policies[name]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"errors":[]}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"policy": policy}})
+			return
+		}
+		f.policies[name], _ = body["policy"].(string)
+	case path == "sys/audit" && r.Method == http.MethodGet:
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": f.audit})
+	case strings.HasPrefix(path, "sys/audit/"):
+		f.audit[strings.TrimPrefix(path, "sys/audit/")+"/"] = body
 	case strings.HasPrefix(path, "auth/") && strings.Contains(path, "/role/"):
 		if r.Method == http.MethodDelete {
 			delete(f.roles, strings.TrimPrefix(path, "auth/"))
@@ -127,7 +144,10 @@ func (f *fakeVault) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
 			public := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-				"latest_version": 1, "keys": map[string]any{"1": map[string]any{"public_key": public}},
+				"type": "ecdsa-p256", "exportable": false, "deletion_allowed": false, "latest_version": 1,
+				"keys": map[string]any{"1": map[string]any{
+					"public_key": public, "creation_time": "2026-10-11T20:18:04Z",
+				}},
 			}})
 			return
 		}

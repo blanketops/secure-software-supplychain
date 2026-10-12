@@ -113,3 +113,35 @@ func TestApplyObjectLeavesAFilledPlaceholderSecret(t *testing.T) {
 		t.Errorf("a Secret with a value in the manifest was not applied: %v", data)
 	}
 }
+
+// Ready means the change has rolled out. While it is rolling out, the old
+// pod is still available and still answering; the installer once read
+// Rekor's key at that moment and recorded the key that was being replaced.
+func TestRolledOut(t *testing.T) {
+	deployment := func(generation, observed, total, updated, available int64) *unstructured.Unstructured {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"spec": map[string]any{"replicas": int64(1)},
+			"status": map[string]any{
+				"observedGeneration": observed, "replicas": total,
+				"updatedReplicas": updated, "availableReplicas": available,
+			},
+		}}
+		obj.SetGeneration(generation)
+		return obj
+	}
+	for name, tc := range map[string]struct {
+		deploy *unstructured.Unstructured
+		want   bool
+	}{
+		"steady":                              {deployment(3, 3, 1, 1, 1), true},
+		"changed, not yet seen":               {deployment(4, 3, 1, 1, 1), false},
+		"new pod starting, old one answering": {deployment(4, 4, 2, 1, 1), false},
+		"new pod ready, old one still there":  {deployment(4, 4, 2, 1, 2), false},
+		"new pod not ready, old one gone":     {deployment(4, 4, 1, 1, 0), false},
+		"rolled out":                          {deployment(4, 4, 1, 1, 1), true},
+	} {
+		if got := rolledOut(tc.deploy); got != tc.want {
+			t.Errorf("%s: rolledOut = %v, want %v", name, got, tc.want)
+		}
+	}
+}

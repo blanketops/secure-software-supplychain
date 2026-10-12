@@ -39,6 +39,7 @@ func main() {
 	root.AddCommand(observeCmd())
 	root.AddCommand(initSonarQubeCmd())
 	root.AddCommand(secretsCmd())
+	root.AddCommand(keysCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -57,6 +58,7 @@ func installCmd() *cobra.Command {
 	var externalSecretStore bool
 	var noImagePull bool
 	var keyResidency string
+	var allowTrustChange bool
 	var vaultAddr string
 
 	cmd := &cobra.Command{
@@ -80,13 +82,24 @@ Example:
   supplychain install --webhook-host your-machine.your-tailnet.ts.net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+			// A setting that is not given is left empty, so that an install
+			// keeps what the cluster already has instead of a default.
+			for flag, value := range map[string]*string{
+				"signing-identity": &signingIdentity, "trust-domain": &trustDomain, "key-residency": &keyResidency,
+			} {
+				if !cmd.Flags().Changed(flag) {
+					*value = ""
+				}
+			}
+			cmd.SilenceUsage = true
 			i, err := installer.NewWithOptions(kubeconfig, dryRun, installer.Options{
-				WebhookHost:     webhookHost,
-				UIHost:          uiHost,
-				SigningIdentity: signingIdentity,
-				TrustDomain:     trustDomain,
-				FromStep:        fromStep,
-				OnlyStep:        onlyStep,
+				WebhookHost:      webhookHost,
+				UIHost:           uiHost,
+				SigningIdentity:  signingIdentity,
+				TrustDomain:      trustDomain,
+				AllowTrustChange: allowTrustChange,
+				FromStep:         fromStep,
+				OnlyStep:         onlyStep,
 
 				ExternalSecretStore: externalSecretStore,
 				NoImagePull:         noImagePull,
@@ -112,6 +125,9 @@ Example:
 	cmd.Flags().StringVar(&keyResidency, "key-residency", installer.ResidencyCluster,
 		"Where Fulcio's and Rekor's signing keys are kept: \"cluster\" (files in Kubernetes Secrets) or "+
 			"\"vault\" (made in Vault's Transit engine and never exported; the services ask Vault to sign)")
+	cmd.Flags().BoolVar(&allowTrustChange, "allow-trust-change", false,
+		"Let --signing-identity, --trust-domain or --key-residency differ from what the cluster was installed with. "+
+			"It replaces what the cluster trusts: nothing signed before verifies afterwards")
 	cmd.Flags().BoolVar(&noImagePull, "no-image-pull", false,
 		"Do not pull every image at the start; each step then pulls its own when it is reached")
 	cmd.Flags().BoolVar(&externalSecretStore, "external-secret-store", false,
@@ -300,5 +316,60 @@ and picks up a change within a minute.
 		},
 	}
 	cmd.AddCommand(set, get, list)
+	return cmd
+}
+
+// keysCmd looks at, and controls the use of, the signing keys kept in Vault.
+func keysCmd() *cobra.Command {
+	var kubeconfig string
+
+	cmd := &cobra.Command{
+		Use:   "keys",
+		Short: "Show the signing keys kept in Vault, and stop or allow their use",
+		Long: `With --key-residency vault, the keys Fulcio and Rekor sign with are kept in
+Vault. This shows what Vault holds for each while it is in use: what kind of key
+it is, that it cannot be exported or deleted, which one service may sign with
+it, whether that is allowed now, and how often it has signed according to
+Vault's audit log.
+
+  supplychain keys                    show both keys
+  supplychain keys suspend fulcio     stop Fulcio issuing signing certificates
+  supplychain keys suspend rekor      stop Rekor signing the transparency log
+  supplychain keys resume fulcio      allow it again
+
+Suspending takes effect on the service's next request and changes nothing that
+is already signed: images that verified before still verify. It leaves the key,
+and the service's login, as they are.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			i, err := installer.New(kubeconfig, false)
+			if err != nil {
+				return fmt.Errorf("failed to create installer: %w", err)
+			}
+			return i.ShowKeys(context.Background())
+		},
+	}
+	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
+
+	change := func(use, short string, suspended bool) *cobra.Command {
+		return &cobra.Command{
+			Use:   use + " <fulcio|rekor>",
+			Short: short,
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				cmd.SilenceUsage = true
+				i, err := installer.New(kubeconfig, false)
+				if err != nil {
+					return fmt.Errorf("failed to create installer: %w", err)
+				}
+				return i.SetKeySuspended(context.Background(), args[0], suspended)
+			},
+		}
+	}
+	cmd.AddCommand(
+		change("suspend", "Stop a service signing with its key, without touching the key", true),
+		change("resume", "Let a suspended service sign again", false),
+	)
 	return cmd
 }

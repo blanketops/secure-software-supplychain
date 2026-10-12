@@ -17,6 +17,7 @@ limitations under the License.
 package cli
 
 import (
+	"bufio"
 	"context"
 	"crypto"
 	"crypto/sha256"
@@ -301,5 +302,157 @@ func TestVaultAgentConfig(t *testing.T) {
 	}
 	if strings.Contains(config, "0.0.0.0") {
 		t.Error("the agent listens outside the pod")
+	}
+}
+
+// Suspending a service takes away its right to sign and nothing else, a
+// second install does not quietly give it back, and resuming does.
+func TestSuspendingAKey(t *testing.T) {
+	fake := newFakeVault()
+	vault := clientFor(t, fake)
+	ctx := context.Background()
+	svc, err := signingServiceNamed("rekor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTransitKey(ctx, vault, svc.Key); err != nil {
+		t.Fatal(err)
+	}
+	report := func() KeyReport {
+		t.Helper()
+		r, err := keyReport(ctx, vault, svc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	if err := ensureSignerPolicy(ctx, vault, svc); err != nil {
+		t.Fatal(err)
+	}
+	if r := report(); r.Suspended || r.Exportable || r.Deletable || r.Type != "ecdsa-p256" || r.Version != 1 ||
+		!strings.HasPrefix(r.Fingerprint, "sha256:") || r.ServiceAccount != "rekor-system/rekor-server" {
+		t.Errorf("report of a key in use: %+v", r)
+	}
+
+	fake.policies[svc.Role] = suspendedPolicy(svc.Key)
+	if !report().Suspended {
+		t.Error("a suspended service is reported as able to sign")
+	}
+	if strings.Contains(suspendedPolicy(svc.Key), "path ") {
+		t.Error("the suspended policy still allows something")
+	}
+	// The installer, run again, leaves it suspended.
+	if err := ensureSignerPolicy(ctx, vault, svc); err != nil {
+		t.Fatal(err)
+	}
+	if !report().Suspended {
+		t.Error("running the installer again let a suspended service sign")
+	}
+	// A policy that is merely out of date is brought up to date.
+	fake.policies[svc.Role] = `path "transit/sign/rekor" { capabilities = ["update"] }`
+	if err := ensureSignerPolicy(ctx, vault, svc); err != nil {
+		t.Fatal(err)
+	}
+	if fake.policies[svc.Role] != signerPolicy(svc.Key) {
+		t.Error("an out-of-date policy was left as it was")
+	}
+
+	for name, want := range map[string]string{"fulcio": fulcioKey, "fulcio-ca": fulcioKey, "rekor": rekorKey, "rekor-server": rekorKey} {
+		if svc, err := signingServiceNamed(name); err != nil || svc.Key != want {
+			t.Errorf("signingServiceNamed(%q) = %v, %v", name, svc.Key, err)
+		}
+	}
+	if _, err := signingServiceNamed("vault"); err == nil {
+		t.Error("a name that is neither service was accepted")
+	}
+}
+
+// The audit log is what says how often a key signed. Only requests that
+// succeeded are counted, each for the key it named.
+func TestSignaturesFromAudit(t *testing.T) {
+	log := strings.Join([]string{
+		`==> Vault server started! Log data will stream in below:`,
+		`{"type":"request","time":"2026-10-12T08:00:00Z","request":{"path":"transit/sign/rekor/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:00:00Z","request":{"path":"transit/sign/rekor/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:05:00Z","request":{"path":"transit/sign/rekor/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:06:00Z","request":{"path":"transit/sign/fulcio-ca/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:07:00Z","error":"permission denied","request":{"path":"transit/sign/fulcio-ca/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:08:00Z","request":{"path":"transit/keys/rekor"}}`,
+		`{"type":"response","time":"2026-10-12T08:09:00Z","request":{"path":"secret/data/supplychain/github/token"}}`,
+		`not json at all`,
+	}, "\n")
+	counts, last := signaturesFromAudit(bufio.NewScanner(strings.NewReader(log)))
+	if counts[rekorKey] != 2 || counts[fulcioKey] != 1 || len(counts) != 2 {
+		t.Errorf("counts = %v, want rekor 2 and fulcio-ca 1", counts)
+	}
+	if got := last[rekorKey].Format(time.RFC3339); got != "2026-10-12T08:05:00Z" {
+		t.Errorf("rekor last signed %s", got)
+	}
+}
+
+func TestEnsureAudit(t *testing.T) {
+	fake := newFakeVault()
+	vault := clientFor(t, fake)
+	for range 2 {
+		if err := ensureAudit(context.Background(), vault); err != nil {
+			t.Fatal(err)
+		}
+	}
+	device, _ := fake.audit[auditDevice+"/"].(map[string]any)
+	if len(fake.audit) != 1 || device["type"] != "file" {
+		t.Errorf("audit devices: %v", fake.audit)
+	}
+	// A device somebody else enabled is enough; a second is not added.
+	other := newFakeVault()
+	other.audit["file/"] = map[string]any{"type": "file"}
+	if err := ensureAudit(context.Background(), clientFor(t, other)); err != nil || len(other.audit) != 1 {
+		t.Errorf("an audit device was added next to an existing one: %v, %v", other.audit, err)
+	}
+}
+
+// The root certificate is issued once. Of the copies there may be, the one in
+// Vault wins, because the Secret is the one that gets overwritten; a
+// certificate for another key is never used; and only when there is none for
+// the key is a new one issued.
+func TestChooseFulcioRoot(t *testing.T) {
+	fake := newFakeVault()
+	vault := clientFor(t, fake)
+	ctx := context.Background()
+	for _, key := range []string{fulcioKey, rekorKey} {
+		if err := ensureTransitKey(ctx, vault, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	signer, _ := newTransitSigner(ctx, vault, fulcioKey)
+	other, _ := newTransitSigner(ctx, vault, rekorKey)
+	issue := func(s crypto.Signer, at time.Time) string {
+		t.Helper()
+		pem, err := fulcioRootCertificate(s, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(pem)
+	}
+	original := issue(signer, time.Now().Add(-24*time.Hour))
+	reissued := issue(signer, time.Now()) // same key, not valid yesterday
+	foreign := issue(other, time.Now())   // another CA's root
+
+	for name, tc := range map[string]struct {
+		inVault, inSecret, want string
+		fromVault               bool
+	}{
+		"both the same":                       {original, original, original, true},
+		"the Secret was overwritten":          {original, foreign, original, true},
+		"the Secret was reissued for the key": {original, reissued, original, true},
+		"the Secret was deleted":              {original, "", original, true},
+		"no copy in Vault yet":                {"", original, original, false},
+		"only a foreign certificate":          {"", foreign, "", false},
+		"nothing at all":                      {"", "", "", false},
+	} {
+		got, fromVault := chooseFulcioRoot(tc.inVault, tc.inSecret, signer.Public())
+		if got != tc.want || fromVault != tc.fromVault {
+			t.Errorf("%s: chose a different root than expected (from Vault: %v)", name, fromVault)
+		}
 	}
 }
