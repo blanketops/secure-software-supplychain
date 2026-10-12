@@ -16,6 +16,20 @@ failed to download and is being tried again, which on an unreliable connection i
 emptied. The installer no longer does that; restart the Deployment once and it generates a new one:
 `kubectl rollout restart deployment/tekton-triggers-core-interceptors -n tekton-pipelines`.
 
+**The installer stops with "this cluster was installed with different settings".** A flag asks for a signing
+identity, trust domain or key residency other than the cluster's. Leave the flag out to keep what the cluster
+has, which is almost always what is wanted. `--allow-trust-change` makes the change, and replaces what the
+cluster trusts: nothing signed before verifies afterwards.
+
+**Images that used to be admitted are refused after the installer was run again.** A version of the installer
+from before it remembered its settings fell back to defaults for any flag left out, and replaced Fulcio's CA
+and Rekor's key. Run it again with the settings the cluster had and `--allow-trust-change`; with
+`--key-residency vault` the keys are still in Vault and the original root certificate is restored from the copy
+kept there.
+
+**Builds fail at the sign step with a permission error from Vault.** `supplychain keys` shows whether a
+service's signing was suspended; `supplychain keys resume <fulcio|rekor>` allows it again.
+
 **Fulcio or Rekor answers with an error, with `--key-residency vault`.** They sign through Vault, so look
 there first: `kubectl get pods -n vault` (a sealed Vault shows `2/3`), then the service's agent,
 `kubectl logs -n rekor-system deploy/rekor-server -c vault-agent`. "permission denied" means its policy does

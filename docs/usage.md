@@ -141,6 +141,8 @@ supplychain install --only-step "Secret Store"   # set up, or repair, the store'
 supplychain secrets set <key>=<value|@file>      # store or rotate a credential in Vault
 supplychain secrets list                         # which keys are set; never prints a value
 supplychain secrets get <key>                    # the value Vault holds for one key
+supplychain keys                                 # the signing keys in Vault: what they are, who may use them, how often
+supplychain keys suspend <fulcio|rekor>          # stop a service signing at once; resume allows it again
 supplychain init-sonarqube --new-password <pw>   # bootstrap SonarQube; safe to run again
 supplychain status                               # every dependency, certificate and the store; fails if one is not ready
 supplychain uninstall                            # remove them

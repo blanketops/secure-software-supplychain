@@ -63,6 +63,7 @@ go build -o bin/supplychain ./cmd/cli
 | `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
 | `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
 | `--key-residency` | Where Fulcio's and Rekor's signing keys are kept: `cluster` (default) or `vault`. See [Where the signing keys are kept](#where-the-signing-keys-are-kept). |
+| `--allow-trust-change` | Let `--signing-identity`, `--trust-domain` or `--key-residency` differ from what the cluster was installed with. See [The installer remembers](#the-installer-remembers). |
 | `--no-image-pull` | Do not pull every image at the start; each step then pulls its own when it is reached. |
 | `--vault-addr` | Use a Vault that already exists, at this address, instead of running one. See [Using a Vault you already have](#using-a-vault-you-already-have). |
 | `--external-secret-store` | No Vault at all; you provide the secret store. See [Using a secret store of your own](#using-a-secret-store-of-your-own). |
@@ -107,6 +108,26 @@ and whatever needs it pulls it again. Each step's own wait still allows up to an
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
 `blanketops-sigstore-roots` ConfigMap, which the pipeline and the policies verify against.
 
+### The installer remembers
+
+Three settings decide what a cluster trusts: `--signing-identity`, `--trust-domain` and `--key-residency`.
+Changing one replaces a trust anchor, and nothing signed before the change verifies after it. So they are
+recorded when a cluster is installed (in the ConfigMap `kube-system/secure-software-supply-chain-install`), and
+every later run starts from there:
+
+- **A flag you leave out keeps the cluster's value**, not the default. Running the installer again with a flag
+  forgotten changes nothing.
+
+  ```
+     Kept from this cluster's install: --key-residency vault, --signing-identity spiffe, --trust-domain <your-domain>
+  ```
+- **A flag that contradicts the cluster is refused**, before anything is applied, and the refusal says what
+  would be replaced.
+- **`--allow-trust-change` makes the change on purpose.** Expect to rebuild every image afterwards.
+
+`--webhook-host` is remembered too, and may be changed freely. A cluster installed before settings were
+recorded is read from what runs on it.
+
 ### Where the signing keys are kept
 
 Two keys are roots of trust. Whoever holds the key Fulcio signs certificates with can issue a signing
@@ -137,6 +158,52 @@ kubectl exec -n vault vault-0 -c vault -- vault list transit/keys          # ful
 kubectl exec -n vault vault-0 -c vault -- vault read transit/keys/rekor    # public half, exportable: false
 ```
 
+#### Looking at the keys while they are in use
+
+```bash
+supplychain keys
+```
+
+```
+Vault 2.0.3, shamir seal, unsealed
+
+fulcio-ca
+  kind         ecdsa-p256, version 1, made 2026-10-11 22:18
+  public key   sha256:f04fd5…
+  leaves Vault no: it cannot be exported, backed up in the clear, or deleted
+  signs for    fulcio-system/fulcio-server, and nobody else
+  signing      allowed
+  used         24 times in the audit log, last 2026-10-12 02:41:07
+```
+
+The count comes from Vault's audit log, which the `Signing Keys` step turns on. Vault writes one line to its
+own output for every request it serves, with secrets hashed: which key signed, when, and for which service.
+`kubectl logs -n vault vault-0 -c vault | grep transit/sign` is the full record.
+
+#### Switching a key off, and on again
+
+Where the keys are kept is decided once, at install time, and is not something to switch back and forth; see
+[The installer remembers](#the-installer-remembers). What can be switched at any moment is whether a service may
+*use* its key:
+
+```bash
+supplychain keys suspend fulcio     # no new signing certificates
+supplychain keys suspend rekor      # no new log entries or signed tree heads
+supplychain keys resume fulcio
+```
+
+It takes effect on the service's next request, with no restart, because Vault checks a token's policy every
+time. It leaves the key, the service's login and everything already signed as they are: images that verified
+before still verify and are still admitted, since admission checks signatures against the trust anchors and
+asks nobody to sign. What stops is new signing, so builds fail at their sign step until it is resumed. Running
+the installer again does not resume a suspended service.
+
+A sealed Vault has the same effect on both services at once. The pod's own sidecar unseals it again within a
+few seconds; restarting Vault's pod interrupts signing for about half a minute, and the services recover
+without being restarted.
+
+#### What protects the keys
+
 This keeps a key the way a hardware security module does, in software. Be clear about what protects it:
 
 - **It is as strong as Vault's seal.** The installer leaves Vault's unseal key in a Secret next to it, so that
@@ -145,7 +212,12 @@ This keeps a key the way a hardware security module does, in software. Be clear 
   ([auto-unseal](https://developer.hashicorp.com/vault/docs/concepts/seal#auto-unseal)) is what completes it, and
   the same configuration is then backed by hardware.
 - **Choose it before the first build, and do not change it afterwards.** The keys are trust anchors: switching
-  residency makes new ones, and nothing signed before verifies against them.
+  residency makes new ones, and nothing signed before verifies against them. The installer refuses to switch
+  unless you pass `--allow-trust-change`.
+- **Fulcio's root certificate is kept twice.** It is issued once, when the key is made, and a certificate
+  issued later for the same key would not be valid at the time earlier signatures were made. Besides the Secret
+  Fulcio reads it from, a copy is kept in Vault, and the `Signing Keys` step puts the Secret back from it if the
+  Secret is ever overwritten.
 - **It needs the Vault the installer runs.** It cannot yet be combined with `--vault-addr` or
   `--external-secret-store`, and other key services (a cloud KMS, a PKCS#11 device), which Fulcio and Rekor
   both support, are not wired into the installer.
