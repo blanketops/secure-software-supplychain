@@ -28,6 +28,9 @@ import (
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/evidence"
 )
 
+// phaseSucceeded is the ImageBuild phase for a run that finished successfully.
+const phaseSucceeded = "Succeeded"
+
 // Recorder extracts PipelineRun results and writes them to an ImageBuildResult CR.
 type Recorder struct {
 	Client client.Client
@@ -169,7 +172,7 @@ func (r *Recorder) collectEvidence(
 	if have != nil && have.Complete {
 		return have
 	}
-	if phase != "Succeeded" || buildResults.ImageURL == "" || buildResults.ImageDigest == "" {
+	if phase != phaseSucceeded || buildResults.ImageURL == "" || buildResults.ImageDigest == "" {
 		return have
 	}
 	var sc supplyv1alpha1.SupplyChain
@@ -301,7 +304,7 @@ func extractPhase(run *tektonv1.PipelineRun) (phase, reason string) {
 		}
 		switch cond.Status {
 		case "True":
-			return "Succeeded", cond.Reason
+			return phaseSucceeded, cond.Reason
 		case "False":
 			return "Failed", cond.Reason
 		default:

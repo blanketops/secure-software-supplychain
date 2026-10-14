@@ -144,7 +144,7 @@ func findEmbeddedJob(dir, namespace, name string) (*unstructured.Unstructured, e
 			if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 				continue
 			}
-			if obj.GetKind() == "Job" && obj.GetName() == name && obj.GetNamespace() == namespace {
+			if obj.GetKind() == kindJob && obj.GetName() == name && obj.GetNamespace() == namespace {
 				return obj, nil
 			}
 		}

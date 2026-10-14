@@ -189,7 +189,7 @@ func TestFulcioRootIsIssuedByTheKeyInVault(t *testing.T) {
 // each pod gets an agent that logs it in and holds its token.
 func TestKeysInVaultMutation(t *testing.T) {
 	deployment := func(file, name string) (*unstructured.Unstructured, map[string]any, []string) {
-		obj := find(t, manifestObjects(t, file), "Deployment", name)
+		obj := find(t, manifestObjects(t, file), kindDeployment, name)
 		if !keysInVaultMutation(obj) {
 			t.Fatalf("%s is left out", name)
 		}
@@ -274,12 +274,12 @@ func TestKeysInVaultMutation(t *testing.T) {
 		}
 	}
 
-	job := find(t, manifestObjects(t, "dependencies/sigstore/fulcio/release.yaml"), "Job", "fulcio-createcerts")
+	job := find(t, manifestObjects(t, "dependencies/sigstore/fulcio/release.yaml"), kindJob, "fulcio-createcerts")
 	if keysInVaultMutation(job) {
 		t.Error("the Job that makes a CA key file is still applied")
 	}
 	// With the keys in the cluster nothing is changed.
-	untouched := find(t, manifestObjects(t, "dependencies/sigstore/rekor/release.yaml"), "Deployment", "rekor-server")
+	untouched := find(t, manifestObjects(t, "dependencies/sigstore/rekor/release.yaml"), kindDeployment, "rekor-server")
 	before := untouched.DeepCopy()
 	if i := (&Installer{opts: Options{KeyResidency: ResidencyCluster}}); !mutateForKeyResidency(i, untouched) ||
 		!reflect.DeepEqual(before.Object, untouched.Object) {

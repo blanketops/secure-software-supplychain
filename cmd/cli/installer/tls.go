@@ -39,6 +39,10 @@ const (
 	certManagerNamespace = "cert-manager"
 	certManagerVersion   = "v1.19.4"
 
+	// conditionStatusTrue is the value a Kubernetes status condition carries
+	// when it is satisfied.
+	conditionStatusTrue = "True"
+
 	// caSecret holds the CA's certificate and key; caIssuer signs with it.
 	caSecret = "supply-chain-ca"
 	caIssuer = "supply-chain-ca"
@@ -112,7 +116,7 @@ func conditionTrue(obj *unstructured.Unstructured, kind string) bool {
 	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	for _, c := range conditions {
 		if condition, ok := c.(map[string]any); ok && condition["type"] == kind {
-			return condition["status"] == "True"
+			return condition["status"] == conditionStatusTrue
 		}
 	}
 	return false

@@ -41,7 +41,7 @@ func TestStatusCoversWhatTheInstallerRuns(t *testing.T) {
 			}
 			namespace := obj.GetNamespace()
 			if namespace == "" {
-				namespace = "default"
+				namespace = sonarNamespace
 			}
 			installed[obj.GetKind()+" "+namespace+"/"+obj.GetName()] = true
 		}

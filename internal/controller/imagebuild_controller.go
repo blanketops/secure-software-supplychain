@@ -46,6 +46,12 @@ const (
 	// Chains has not signed its run yet; evidenceWait is for how long.
 	evidenceRetry = 20 * time.Second
 	evidenceWait  = 10 * time.Minute
+
+	// Phases of an ImageBuild, written to and compared against Status.Phase.
+	phasePending   = "Pending"
+	phaseRunning   = "Running"
+	phaseSucceeded = "Succeeded"
+	phaseFailed    = "Failed"
 )
 
 type ImageBuildReconciler struct {
@@ -88,10 +94,10 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Terminal state guard. A build that succeeded is only revisited for the
 	// evidence Tekton Chains adds after the run has finished.
-	if ib.Status.Phase == "Succeeded" {
+	if ib.Status.Phase == phaseSucceeded {
 		return r.completeEvidence(ctx, &ib)
 	}
-	if ib.Status.Phase == "Failed" {
+	if ib.Status.Phase == phaseFailed {
 		logger.Info("ImageBuild terminal, skipping", "phase", ib.Status.Phase)
 		return ctrl.Result{}, nil
 	}
@@ -146,7 +152,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// 4b. Reconcile ImageSignature from what was just recorded.
-		if ib.Status.Phase == "Succeeded" {
+		if ib.Status.Phase == phaseSucceeded {
 			if err := r.recordSignature(ctx, &ib); err != nil {
 				logger.Error(err, "Failed to record ImageSignature")
 			}
@@ -163,7 +169,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Tekton Chains signs the run after it has finished, and adds that
 		// provenance to the image. Come back for it, so the recorded
 		// evidence is whole; give up on a run Chains never signs.
-		if ib.Status.Phase == "Succeeded" && !evidence.ChainsDone(pr) && pr.Status.CompletionTime != nil &&
+		if ib.Status.Phase == phaseSucceeded && !evidence.ChainsDone(pr) && pr.Status.CompletionTime != nil &&
 			time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
 			return ctrl.Result{RequeueAfter: evidenceRetry}, nil
 		}
@@ -175,7 +181,7 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	if ib.Status.Phase == "Running" || ib.Status.Phase == "Pending" {
+	if ib.Status.Phase == phaseRunning || ib.Status.Phase == phasePending {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -316,7 +322,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	// ── Store signing identity on Status for terminal block ───────────────
 	// sigCtx is scoped to this method. Store what the terminal block needs.
 	now := metav1.Now()
-	ib.Status.Phase = "Pending"
+	ib.Status.Phase = phasePending
 	ib.Status.PipelineRunRef = prName
 	ib.Status.ImageRef = imageRef
 	ib.Status.StartTime = &now
@@ -342,17 +348,17 @@ func (r *ImageBuildReconciler) syncStatus(
 		ib.Status.CompletionTime = &now
 
 		if pr.Status.GetCondition("Succeeded").IsTrue() {
-			ib.Status.Phase = "Succeeded"
+			ib.Status.Phase = phaseSucceeded
 			logger.Info("ImageBuild succeeded", "image", ib.Status.ImageRef)
 		} else {
-			ib.Status.Phase = "Failed"
+			ib.Status.Phase = phaseFailed
 			logger.Info("ImageBuild failed")
 		}
 	} else if pr.HasStarted() {
-		ib.Status.Phase = "Running"
+		ib.Status.Phase = phaseRunning
 	}
 
-	if ib.Status.Phase == "Succeeded" {
+	if ib.Status.Phase == phaseSucceeded {
 		_, ib.Status.ImageDigest = results.ExtractImageResults(pr)
 	}
 
@@ -382,14 +388,14 @@ func (r *ImageBuildReconciler) stepStatuses(
 	}
 	phases := make(map[string]string, len(taskRuns.Items))
 	for i := range taskRuns.Items {
-		phase := "Running"
+		phase := phaseRunning
 		switch condition := taskRuns.Items[i].Status.GetCondition("Succeeded"); {
 		case condition == nil:
-			phase = "Pending"
+			phase = phasePending
 		case condition.IsTrue():
-			phase = "Succeeded"
+			phase = phaseSucceeded
 		case condition.IsFalse():
-			phase = "Failed"
+			phase = phaseFailed
 		}
 		phases[taskRuns.Items[i].Name] = phase
 	}
@@ -398,7 +404,7 @@ func (r *ImageBuildReconciler) stepStatuses(
 	for _, child := range pr.Status.ChildReferences {
 		phase, found := phases[child.Name]
 		if !found {
-			phase = "Pending"
+			phase = phasePending
 		}
 		steps = append(steps, supplychainv1alpha1.StepStatus{Name: child.PipelineTaskName, Phase: phase})
 	}
@@ -410,7 +416,7 @@ func (r *ImageBuildReconciler) setFailed(
 	ib *supplychainv1alpha1.ImageBuild,
 	err error,
 ) (ctrl.Result, error) {
-	ib.Status.Phase = "Failed"
+	ib.Status.Phase = phaseFailed
 	_ = r.Status().Update(ctx, ib)
 	return ctrl.Result{}, err
 }

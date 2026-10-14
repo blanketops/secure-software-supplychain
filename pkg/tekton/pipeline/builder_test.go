@@ -233,7 +233,7 @@ func TestSignsWithSPIFFEIdentity(t *testing.T) {
 		if task.TaskSpec == nil {
 			continue
 		}
-		for _, volume := range task.TaskSpec.TaskSpec.Volumes {
+		for _, volume := range task.TaskSpec.Volumes {
 			if volume.Projected != nil {
 				t.Errorf("task %s mounts projected token volume %q under SPIFFE", task.Name, volume.Name)
 			}

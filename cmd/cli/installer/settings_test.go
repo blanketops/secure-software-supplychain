@@ -103,7 +103,7 @@ func TestSettleSettingsOnANewCluster(t *testing.T) {
 // A cluster installed before the settings were recorded is read from what
 // runs on it: how Fulcio is started says where its key is.
 func TestResidencyOfARunningFulcio(t *testing.T) {
-	fulcio := find(t, manifestObjects(t, "dependencies/sigstore/fulcio/release.yaml"), "Deployment", "fulcio-server")
+	fulcio := find(t, manifestObjects(t, "dependencies/sigstore/fulcio/release.yaml"), kindDeployment, "fulcio-server")
 	if got := residencyOf(fulcio); got != ResidencyCluster {
 		t.Errorf("Fulcio as the manifest has it reads as %q, want %q", got, ResidencyCluster)
 	}

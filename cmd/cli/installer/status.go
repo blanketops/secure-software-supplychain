@@ -50,44 +50,44 @@ type statusGroup struct {
 // workloads here.
 var statusGroups = []statusGroup{
 	{Title: "Certificates", Workloads: []workload{
-		{"Deployment", certManagerNamespace, "cert-manager", "cert-manager"},
-		{"Deployment", certManagerNamespace, "cert-manager-webhook", "cert-manager webhook"},
-		{"Deployment", certManagerNamespace, "cert-manager-cainjector", "cert-manager CA injector"},
+		{kindDeployment, certManagerNamespace, "cert-manager", "cert-manager"},
+		{kindDeployment, certManagerNamespace, "cert-manager-webhook", "cert-manager webhook"},
+		{kindDeployment, certManagerNamespace, "cert-manager-cainjector", "cert-manager CA injector"},
 	}},
 	{Title: "Tekton", Workloads: []workload{
-		{"Deployment", "tekton-pipelines", "tekton-pipelines-controller", "Pipelines"},
-		{"Deployment", "tekton-pipelines", "tekton-pipelines-webhook", "Pipelines webhook"},
-		{"Deployment", "tekton-pipelines", "tekton-events-controller", "Pipelines events"},
-		{"Deployment", "tekton-pipelines-resolvers", "tekton-pipelines-remote-resolvers", "Pipelines resolvers"},
-		{"Deployment", "tekton-pipelines", "tekton-triggers-controller", "Triggers"},
-		{"Deployment", "tekton-pipelines", "tekton-triggers-webhook", "Triggers webhook"},
-		{"Deployment", "tekton-pipelines", "tekton-triggers-core-interceptors", "Interceptors"},
-		{"Deployment", "tekton-chains", "tekton-chains-controller", "Chains"},
-		{"Deployment", "tekton-pipelines", "tekton-dashboard", "Dashboard"},
-		{"Deployment", "tekton-pipelines", "tekton-results-api", "Results API"},
-		{"Deployment", "tekton-pipelines", "tekton-results-watcher", "Results watcher"},
-		{"Deployment", "tekton-pipelines", "tekton-results-retention-policy-agent", "Results retention"},
+		{kindDeployment, "tekton-pipelines", "tekton-pipelines-controller", "Pipelines"},
+		{kindDeployment, "tekton-pipelines", "tekton-pipelines-webhook", "Pipelines webhook"},
+		{kindDeployment, "tekton-pipelines", "tekton-events-controller", "Pipelines events"},
+		{kindDeployment, "tekton-pipelines-resolvers", "tekton-pipelines-remote-resolvers", "Pipelines resolvers"},
+		{kindDeployment, "tekton-pipelines", "tekton-triggers-controller", "Triggers"},
+		{kindDeployment, "tekton-pipelines", "tekton-triggers-webhook", "Triggers webhook"},
+		{kindDeployment, "tekton-pipelines", "tekton-triggers-core-interceptors", "Interceptors"},
+		{kindDeployment, "tekton-chains", "tekton-chains-controller", "Chains"},
+		{kindDeployment, "tekton-pipelines", "tekton-dashboard", "Dashboard"},
+		{kindDeployment, "tekton-pipelines", "tekton-results-api", "Results API"},
+		{kindDeployment, "tekton-pipelines", "tekton-results-watcher", "Results watcher"},
+		{kindDeployment, "tekton-pipelines", "tekton-results-retention-policy-agent", "Results retention"},
 		{"StatefulSet", "tekton-pipelines", "tekton-results-postgres", "Results database"},
 	}},
 	{Title: "SPIRE", Optional: "only with --signing-identity spiffe", Workloads: []workload{
 		{"StatefulSet", spireNamespace, "spire-server", "Server"},
 		{"DaemonSet", spireNamespace, "spire-agent", "Agent"},
 		{"DaemonSet", spireNamespace, "spire-spiffe-csi-driver", "CSI driver"},
-		{"Deployment", spireNamespace, "spire-spiffe-oidc-discovery-provider", "OIDC discovery"},
+		{kindDeployment, spireNamespace, "spire-spiffe-oidc-discovery-provider", "OIDC discovery"},
 	}},
 	{Title: "Sigstore", Workloads: []workload{
-		{"Deployment", "fulcio-system", "fulcio-server", "Fulcio"},
-		{"Deployment", "ctlog-system", "ctlog", "CT log"},
-		{"Deployment", "rekor-system", "rekor-server", "Rekor"},
-		{"Deployment", "rekor-system", "rekor-redis", "Rekor search index"},
-		{"Deployment", "trillian-system", "trillian-logserver", "Trillian log server"},
-		{"Deployment", "trillian-system", "trillian-logsigner", "Trillian log signer"},
-		{"Deployment", "trillian-system", "trillian-mysql", "Trillian database"},
-		{"Deployment", "cosign-system", "policy-controller-webhook", "Policy controller"},
+		{kindDeployment, "fulcio-system", "fulcio-server", "Fulcio"},
+		{kindDeployment, "ctlog-system", "ctlog", "CT log"},
+		{kindDeployment, "rekor-system", "rekor-server", "Rekor"},
+		{kindDeployment, "rekor-system", "rekor-redis", "Rekor search index"},
+		{kindDeployment, "trillian-system", "trillian-logserver", "Trillian log server"},
+		{kindDeployment, "trillian-system", "trillian-logsigner", "Trillian log signer"},
+		{kindDeployment, "trillian-system", "trillian-mysql", "Trillian database"},
+		{kindDeployment, "cosign-system", "policy-controller-webhook", "Policy controller"},
 	}},
 	{Title: "Ingress", Workloads: []workload{
-		{"Deployment", "metallb-system", "controller", "MetalLB"},
-		{"Deployment", "ingress-nginx", "ingress-nginx-controller", "NGINX ingress"},
+		{kindDeployment, "metallb-system", "controller", "MetalLB"},
+		{kindDeployment, "ingress-nginx", "ingress-nginx-controller", "NGINX ingress"},
 	}},
 	{Title: "Credentials", Optional: "not with --vault-addr or --external-secret-store", Workloads: []workload{
 		{"StatefulSet", vaultNamespace, vaultSTS, "Vault"},
@@ -98,10 +98,16 @@ var statusGroups = []statusGroup{
 	}},
 }
 
+// Kubernetes kinds the installer applies and asserts on.
+const (
+	kindDeployment = "Deployment"
+	kindJob        = "Job"
+)
+
 var workloadGVRs = map[string]schema.GroupVersionResource{
-	"Deployment":  {Group: "apps", Version: "v1", Resource: "deployments"},
-	"StatefulSet": {Group: "apps", Version: "v1", Resource: "statefulsets"},
-	"DaemonSet":   {Group: "apps", Version: "v1", Resource: "daemonsets"},
+	kindDeployment: {Group: "apps", Version: "v1", Resource: "deployments"},
+	"StatefulSet":  {Group: "apps", Version: "v1", Resource: "statefulsets"},
+	"DaemonSet":    {Group: "apps", Version: "v1", Resource: "daemonsets"},
 }
 
 var (

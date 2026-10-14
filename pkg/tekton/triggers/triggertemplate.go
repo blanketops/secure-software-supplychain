@@ -47,31 +47,31 @@ func EnsureTriggerTemplate(
 	namespace, supplyChainName := sc.Namespace, sc.Name
 	name := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 
-	imageBuildTemplate := map[string]interface{}{
+	imageBuildTemplate := map[string]any{
 		"apiVersion": "supplychain.blanketops.dev/v1alpha1",
 		"kind":       "ImageBuild",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      fmt.Sprintf("%s-$(tt.params.git-revision)-$(tt.params.git-commit-sha)", supplyChainName),
 			"namespace": namespace,
-			"labels": map[string]interface{}{
+			"labels": map[string]any{
 				// Label values: alphanumeric + '-' + '_' + '.' only.
 				// repo-full-name contains '/' → annotation instead.
 				"blanketops.dev/supply-chain": supplyChainName,
 				"blanketops.dev/triggered-by": "github-push",
 				"blanketops.dev/git-revision": "$(tt.params.git-revision)",
 			},
-			"annotations": map[string]interface{}{
+			"annotations": map[string]any{
 				// Annotations have no character restrictions.
 				"blanketops.dev/git-commit-sha": "$(tt.params.git-commit-sha)",
 				"blanketops.dev/git-repo-url":   "$(tt.params.git-repo-url)",
 				"blanketops.dev/repo-full-name": "$(tt.params.repo-full-name)",
 			},
 		},
-		"spec": map[string]interface{}{
-			"supplyChainRef": map[string]interface{}{
+		"spec": map[string]any{
+			"supplyChainRef": map[string]any{
 				"name": supplyChainName,
 			},
-			"gitRef": map[string]interface{}{
+			"gitRef": map[string]any{
 				"url":      "$(tt.params.git-repo-url)",
 				"revision": "$(tt.params.git-revision)",
 			},

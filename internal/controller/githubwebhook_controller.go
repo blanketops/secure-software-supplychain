@@ -106,16 +106,16 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			logger.Info("SupplyChain not found yet, waiting",
 				"supplyChain", ghw.Spec.SupplyChainRef.Name,
 			)
-			return r.setPhase(ctx, &ghw, "Pending", "SupplyChainNotFound",
+			return r.setPhase(ctx, &ghw, phasePending, "SupplyChainNotFound",
 				fmt.Sprintf("SupplyChain %q not found", ghw.Spec.SupplyChainRef.Name),
 				&ctrl.Result{RequeueAfter: 5 * time.Second})
 		}
 		return ctrl.Result{}, err
 	}
 
-	if sc.Status.Phase != "Ready" {
+	if sc.Status.Phase != conditionReady {
 		logger.Info("SupplyChain not ready yet, waiting", "phase", sc.Status.Phase)
-		return r.setPhase(ctx, &ghw, "Pending", "SupplyChainNotReady",
+		return r.setPhase(ctx, &ghw, phasePending, "SupplyChainNotReady",
 			fmt.Sprintf("SupplyChain %q is not Ready (phase: %s)", sc.Name, sc.Status.Phase),
 			&ctrl.Result{RequeueAfter: 5 * time.Second})
 	}
@@ -128,7 +128,7 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if !ready {
 		logger.Info("waiting for secrets to be materialised by ESO")
-		return r.setPhase(ctx, &ghw, "Pending", "WaitingForSecrets",
+		return r.setPhase(ctx, &ghw, phasePending, "WaitingForSecrets",
 			"waiting for GitHub token secret to be materialised by ESO",
 			&ctrl.Result{RequeueAfter: 5 * time.Second})
 	}
@@ -267,7 +267,7 @@ func (r *GitHubWebhookReconciler) markReady(
 	webhookID int64,
 ) (ctrl.Result, error) {
 	now := metav1.Now()
-	ghw.Status.Phase = "Ready"
+	ghw.Status.Phase = conditionReady
 	ghw.Status.WebhookID = webhookID
 	ghw.Status.HookURL = ghw.Spec.HookURL
 	ghw.Status.Repository = ghw.Spec.Repository
@@ -314,9 +314,10 @@ func (r *GitHubWebhookReconciler) setPhaseOnly(
 	ghw.Status.Phase = phase
 
 	condStatus := metav1.ConditionFalse
-	if phase == "Ready" {
+	switch phase {
+	case conditionReady:
 		condStatus = metav1.ConditionTrue
-	} else if phase == "Pending" || phase == "Registering" {
+	case phasePending, "Registering":
 		condStatus = metav1.ConditionUnknown
 	}
 

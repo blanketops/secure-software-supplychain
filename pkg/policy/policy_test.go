@@ -36,6 +36,9 @@ import (
 	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
 )
 
+// commonNameFulcio is the CN carried by Fulcio's test certificate.
+const commonNameFulcio = "fulcio"
+
 func rootCert(t *testing.T, subject pkix.Name) string {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -74,7 +77,7 @@ func fixtures(t *testing.T) (*supplyv1alpha1.SupplyChainPolicy, *supplyv1alpha1.
 		},
 	}
 	roots := map[string]string{
-		signing.RootsFulcioKey: rootCert(t, pkix.Name{Organization: []string{"blanketops.dev"}, CommonName: "fulcio"}),
+		signing.RootsFulcioKey: rootCert(t, pkix.Name{Organization: []string{"blanketops.dev"}, CommonName: commonNameFulcio}),
 		signing.RootsRekorKey:  "rekor-key",
 		signing.RootsCTLogKey:  "ctlog-key",
 	}
@@ -115,7 +118,7 @@ func TestRender(t *testing.T) {
 		t.Errorf("certificate authority uri = %v", ca["uri"])
 	}
 	subject := ca["subject"].(map[string]any)
-	if subject["organization"] != "blanketops.dev" || subject["commonName"] != "fulcio" {
+	if subject["organization"] != "blanketops.dev" || subject["commonName"] != commonNameFulcio {
 		t.Errorf("certificate authority subject = %v", subject)
 	}
 	chain, err := base64.StdEncoding.DecodeString(ca["certChain"].(string))
@@ -298,7 +301,7 @@ func TestTrustRoot(t *testing.T) {
 }
 
 func TestFingerprintIgnoresWhitespace(t *testing.T) {
-	cert := rootCert(t, pkix.Name{CommonName: "fulcio"})
+	cert := rootCert(t, pkix.Name{CommonName: commonNameFulcio})
 	if signing.Fingerprint(cert) != signing.Fingerprint("\n"+cert+"\n\n") {
 		t.Error("fingerprint changed with surrounding whitespace")
 	}
@@ -392,11 +395,11 @@ func TestRenderRejectsBadTrustAnchors(t *testing.T) {
 }
 
 func TestCertSubjectFallback(t *testing.T) {
-	subject, err := certSubject(rootCert(t, pkix.Name{CommonName: "fulcio"}))
+	subject, err := certSubject(rootCert(t, pkix.Name{CommonName: commonNameFulcio}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subject["organization"] != "fulcio" || subject["commonName"] != "fulcio" {
+	if subject["organization"] != commonNameFulcio || subject["commonName"] != commonNameFulcio {
 		t.Errorf("subject = %v, want the common name used for both", subject)
 	}
 }

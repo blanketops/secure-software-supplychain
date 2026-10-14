@@ -162,7 +162,6 @@ func (p *Pruner) PruneNamespace(ctx context.Context, namespace string) error {
 
 	deleted := 0
 	for _, run := range runs.Items {
-		run := run
 		if isRunning(run) {
 			continue
 		}
@@ -197,7 +196,6 @@ func (p *Pruner) eligible(run tektonv1.PipelineRun) bool {
 // Results are sorted newest-first within each bucket.
 func classify(runs []tektonv1.PipelineRun) (succeeded, failed, running []tektonv1.PipelineRun) {
 	for _, run := range runs {
-		run := run
 		switch {
 		case isRunning(run):
 			running = append(running, run)
@@ -236,7 +234,7 @@ func completedAt(run tektonv1.PipelineRun) time.Time {
 }
 
 func sortNewestFirst(runs []tektonv1.PipelineRun) {
-	for i := 0; i < len(runs); i++ {
+	for i := range runs {
 		for j := i + 1; j < len(runs); j++ {
 			if completedAt(runs[j]).After(completedAt(runs[i])) {
 				runs[i], runs[j] = runs[j], runs[i]

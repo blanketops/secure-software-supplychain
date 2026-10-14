@@ -493,10 +493,10 @@ func mutateForKeyResidency(i *Installer, obj *unstructured.Unstructured) bool {
 // in Vault. It reports false for an object that is not applied at all.
 func keysInVaultMutation(obj *unstructured.Unstructured) bool {
 	switch {
-	case obj.GetKind() == "Job" && obj.GetName() == "fulcio-createcerts":
+	case obj.GetKind() == kindJob && obj.GetName() == "fulcio-createcerts":
 		// Makes a CA key and puts it in a Secret, which is what is avoided.
 		return false
-	case obj.GetKind() == "Deployment" && obj.GetName() == "fulcio-server":
+	case obj.GetKind() == kindDeployment && obj.GetName() == "fulcio-server":
 		signWithVault(obj, "fulcio-server", func(c map[string]any) {
 			c["args"] = fulcioKMSArgs(stringsOf(c["args"]))
 			c["env"] = without(c["env"], "PASSWORD")
@@ -505,7 +505,7 @@ func keysInVaultMutation(obj *unstructured.Unstructured) bool {
 		})
 		setVolume(obj, "fulcio-cert", nil)
 		setVolume(obj, "fulcio-root", map[string]any{"secret": map[string]any{"secretName": fulcioRootSecret}})
-	case obj.GetKind() == "Deployment" && obj.GetName() == "rekor-server":
+	case obj.GetKind() == kindDeployment && obj.GetName() == "rekor-server":
 		signWithVault(obj, "rekor-server", func(c map[string]any) {
 			args := stringsOf(c["args"])
 			for n, arg := range args {

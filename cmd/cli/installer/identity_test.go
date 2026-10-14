@@ -121,7 +121,7 @@ func TestFulcioConfig(t *testing.T) {
 		t.Error("the SPIFFE config still accepts Kubernetes ServiceAccount tokens")
 	}
 	got := spiffe.OIDCIssuers[spireOIDCIssuer]
-	if got.Type != "spiffe" || got.SPIFFETrustDomain != "blanketops.dev" || got.IssuerURL != spireOIDCIssuer || got.ClientID != "sigstore" {
+	if got.Type != IdentitySPIFFE || got.SPIFFETrustDomain != "blanketops.dev" || got.IssuerURL != spireOIDCIssuer || got.ClientID != "sigstore" {
 		t.Errorf("SPIFFE issuer = %+v", got)
 	}
 }
@@ -146,7 +146,7 @@ func decodeAll(t *testing.T, path string) []*unstructured.Unstructured {
 func TestAddSPIFFESocketToChains(t *testing.T) {
 	var deployment *unstructured.Unstructured
 	for _, obj := range decodeAll(t, "dependencies/tekton/chains/release.yaml") {
-		if obj.GetKind() == "Deployment" && obj.GetName() == "tekton-chains-controller" {
+		if obj.GetKind() == kindDeployment && obj.GetName() == "tekton-chains-controller" {
 			deployment = obj
 		}
 	}
@@ -264,7 +264,7 @@ func TestFindEmbeddedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.GetKind() != "Job" || job.GetName() != "rekor-trillian-createdb" {
+	if job.GetKind() != kindJob || job.GetName() != "rekor-trillian-createdb" {
 		t.Errorf("found %s/%s", job.GetKind(), job.GetName())
 	}
 	if _, err := findEmbeddedJob("dependencies/sigstore/rekor", "trillian-system", "no-such-job"); err == nil {

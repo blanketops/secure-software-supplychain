@@ -94,7 +94,7 @@ func TestSigstoreServicesAreOnlyReachableOverTLS(t *testing.T) {
 			}
 
 			containers, _, _ := unstructured.NestedSlice(
-				find(t, objects, "Deployment", tc.name).Object, "spec", "template", "spec", "containers")
+				find(t, objects, kindDeployment, tc.name).Object, "spec", "template", "spec", "containers")
 			var server, proxy map[string]any
 			for _, c := range containers {
 				container := c.(map[string]any)
@@ -158,13 +158,13 @@ func TestFulcioAndTheCTLogReachEachOtherOverTLS(t *testing.T) {
 		}
 		return string(data)
 	}
-	fulcio := text("Deployment", "fulcio-server")
+	fulcio := text(kindDeployment, "fulcio-server")
 	for _, want := range []string{"--ct-log-url=" + ctLogURL, "--ct-log.tls-ca-cert=" + caMountDir + "/" + caKey} {
 		if !strings.Contains(fulcio, want) {
 			t.Errorf("fulcio-server is not started with %s", want)
 		}
 	}
-	job := text("Job", "fulcio-ctlog-createctconfig")
+	job := text(kindJob, "fulcio-ctlog-createctconfig")
 	for _, want := range []string{"--fulcio-url=https://fulcio-server.fulcio-system.svc", "SSL_CERT_DIR", caMountDir} {
 		if !strings.Contains(job, want) {
 			t.Errorf("the CT log's configuration Job does not have %s", want)

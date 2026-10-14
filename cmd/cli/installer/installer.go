@@ -767,7 +767,7 @@ var setupResults = map[string]string{
 // setupJobAlreadyRan reports whether obj is a one-time setup Job whose result
 // already exists.
 func (i *Installer) setupJobAlreadyRan(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
-	if obj.GetKind() != "Job" {
+	if obj.GetKind() != kindJob {
 		return false, nil
 	}
 	result, isSetupJob := setupJobs[obj.GetNamespace()+"/"+obj.GetName()]

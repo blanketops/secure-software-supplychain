@@ -64,7 +64,7 @@ func TestChainsDeploymentMatchesConfig(t *testing.T) {
 		if err := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc)).Decode(obj); err != nil {
 			continue
 		}
-		if obj.GetKind() == "Deployment" && obj.GetName() == "tekton-chains-controller" {
+		if obj.GetKind() == kindDeployment && obj.GetName() == "tekton-chains-controller" {
 			deployment = obj
 		}
 	}
