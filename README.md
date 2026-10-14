@@ -62,13 +62,14 @@ durable [record of all of it](docs/concepts.md#what-a-build-leaves-behind).
 
 ## How it works, in brief
 
-Three places hold the configuration, each with one job:
+Three places hold the configuration, each with one job, and one more delivers the trigger:
 
 | | Role | What it decides |
 |---|---|---|
 | Tekton Chains config | **Centre** | How the cluster signs: Fulcio, Rekor, the [identity provider](docs/concepts.md#signing-identity-kubernetes-or-spiffe), the provenance format |
 | `SupplyChain` | **Authority** | Who may build and sign for a repository |
 | `SupplyChainPolicy` | **Trust** | What is trusted at admission |
+| [`GitHubWebhook`](docs/usage.md#githubwebhook) | **Ingress** | Which repository's pushes reach the cluster, and keeps the webhook registered on GitHub to start a build |
 
 Every image carries proof from two independent identities, and admission requires all of it: the build's
 ServiceAccount adds a signature and an attestation that the build was authorized; Tekton Chains adds a signature
