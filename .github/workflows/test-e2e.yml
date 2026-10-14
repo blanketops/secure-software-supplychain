@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+env:
+  GOFLAGS: -mod=readonly
+  KIND_CLUSTER: secure-software-supply-chain-test-e2e
+
 jobs:
   test-e2e:
-    name: Run on Ubuntu
+    name: E2E tests
     runs-on: self-hosted
     timeout-minutes: 40
     steps:
@@ -18,6 +22,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # kind needs a running Docker daemon. The e2e suite is worthless without
+      # it, so check up front and fail with a message that says exactly what is
+      # missing, rather than letting kind print a raw docker-info dump.
+      - name: Check Docker is available
+        run: |
+          if ! docker info >/dev/null 2>&1; then
+            echo "::error::Docker daemon is not reachable on this runner (unix:///var/run/docker.sock). The e2e suite needs Docker to create its kind cluster."
+            {
+              echo "## E2E tests"
+              echo
+              echo "❌ **Docker is not available on this runner.** kind cannot create a cluster, so the suite cannot run. Fix the runner's Docker setup."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Docker $(docker version --format '{{.Server.Version}}') is up"
+
       - name: Install the latest version of kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
@@ -27,19 +47,18 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
+      - name: Download modules
+        run: go mod download
+
       - name: Create the kind cluster with parallel image pulls
         run: |
           # The suite reuses a cluster of this name if it already exists, so
           # create it here from the config that pulls images in parallel. A
           # serialized pull of the suite's images is what times the job out.
-          kind create cluster \
-            --name secure-software-supply-chain-test-e2e \
-            --config hack/kind-cluster.yaml
+          kind create cluster --name "$KIND_CLUSTER" --config hack/kind-cluster.yaml
 
       - name: Running Test e2e
-        run: |
-          go mod tidy
-          go run mage.go testE2E
+        run: go run mage.go testE2E
 
       - name: Upload JUnit results for Allure
         if: always()
@@ -48,3 +67,31 @@ jobs:
           name: allure-results-e2e
           path: test-results/
           if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          xml=test-results/junit-e2e.xml
+          {
+            echo "## E2E tests"
+            echo
+            echo "- Go: \`$(go version | awk '{print $3}')\`"
+            echo "- kind: \`$(kind version 2>/dev/null | head -1)\`"
+            echo "- Result: ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}"
+            if [ -f "$xml" ]; then
+              tests=$(grep -o 'tests="[0-9]*"' "$xml" | head -1 | grep -o '[0-9]*')
+              fails=$(grep -c '<failure' "$xml" || true)
+              echo "- Specs: ${tests:-?}  |  Failures: ${fails:-0}"
+              if [ "${fails:-0}" -gt 0 ]; then
+                echo
+                echo "<details><summary>Failed specs</summary>"
+                echo
+                echo '```'
+                grep -B1 '<failure' "$xml" | grep 'testcase' | sed -E 's/.*name="([^"]*)".*/  - \1/' | head -50
+                echo '```'
+                echo "</details>"
+              fi
+            else
+              echo "- No JUnit report was produced (the suite did not run to completion)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

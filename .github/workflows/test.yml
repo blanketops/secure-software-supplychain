@@ -4,9 +4,15 @@ on:
   push:
   pull_request:
 
+# The committed go.mod/go.sum are authoritative. Never let CI re-resolve the
+# module graph (go mod tidy pulls knative.dev/pkg@latest for a test-only
+# transitive import and breaks the build); read the modules as pinned.
+env:
+  GOFLAGS: -mod=readonly
+
 jobs:
   test:
-    name: Run on Ubuntu
+    name: Unit tests
     runs-on: self-hosted
     timeout-minutes: 20
     steps:
@@ -18,10 +24,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Download modules
+        run: go mod download
+
       - name: Running Tests
-        run: |
-          go mod tidy
-          go run mage.go test
+        run: go run mage.go test
 
       - name: Upload JUnit results for Allure
         if: always()
@@ -30,3 +37,30 @@ jobs:
           name: allure-results-unit
           path: test-results/
           if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          xml=test-results/junit-unit.xml
+          {
+            echo "## Unit & controller tests"
+            echo
+            echo "- Go: \`$(go version | awk '{print $3}')\`"
+            echo "- Result: ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}"
+            if [ -f "$xml" ]; then
+              tests=$(grep -o 'tests="[0-9]*"' "$xml" | head -1 | grep -o '[0-9]*')
+              fails=$(grep -c '<failure' "$xml" || true)
+              echo "- Test cases: ${tests:-?}  |  Failures: ${fails:-0}"
+              echo
+              if [ "${fails:-0}" -gt 0 ]; then
+                echo "<details><summary>Failed cases</summary>"
+                echo
+                echo '```'
+                grep -B1 '<failure' "$xml" | grep 'testcase' | sed -E 's/.*name="([^"]*)".*/  - \1/' | head -50
+                echo '```'
+                echo "</details>"
+              fi
+            else
+              echo "- No JUnit report was produced (the suite did not run to completion)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
