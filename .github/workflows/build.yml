@@ -1,0 +1,100 @@
+name: Build image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# ghcr.io needs a token that may write packages; the checkout only reads.
+permissions:
+  contents: read
+  packages: write
+
+# Read the committed module graph as pinned — never re-resolve it in CI.
+env:
+  GOFLAGS: -mod=readonly
+  IMAGE: ghcr.io/blanketops/secure-software-supply-chain
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Download modules
+        run: go mod download
+
+      # The short SHA is the immutable tag every build gets; main also moves
+      # the `latest` tag. Pull requests build but do not push — a fork cannot
+      # be trusted with a package-write token.
+      - name: Work out the tags
+        id: tags
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to ghcr.io
+        if: steps.tags.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # mage ko:build makes a local tarball (no push, no auth); mage ko:push
+      # builds for every platform in PLATFORMS and pushes with an SPDX SBOM.
+      # On a pull request we only build, to prove the image still compiles.
+      - name: Build image (pull request)
+        if: steps.tags.outputs.push != 'true'
+        run: IMG="${IMAGE}:${{ steps.tags.outputs.sha }}" go run mage.go ko:build
+
+      - name: Build and push image (main)
+        if: steps.tags.outputs.push == 'true'
+        run: |
+          # Build and push the immutable SHA tag once, then point latest at the
+          # same manifest without rebuilding (preserves the multi-arch index
+          # and the attached SBOM).
+          IMG="${IMAGE}:${{ steps.tags.outputs.sha }}" go run mage.go ko:push
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${{ steps.tags.outputs.sha }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Build image"
+            echo
+            echo "- Image: \`${IMAGE}\`"
+            echo "- Go: \`$(go version | awk '{print $3}')\`"
+            echo "- Platforms: \`${PLATFORMS:-linux/amd64,linux/arm64}\`"
+            if [ "${{ steps.tags.outputs.push }}" = "true" ]; then
+              echo "- Pushed: ${{ job.status == 'success' && '✅' || '❌' }}"
+              echo
+              echo "Tags:"
+              echo "- \`${IMAGE}:${{ steps.tags.outputs.sha }}\`"
+              echo "- \`${IMAGE}:latest\`"
+              echo
+              echo "Pull with:"
+              echo '```'
+              echo "docker pull ${IMAGE}:${{ steps.tags.outputs.sha }}"
+              echo '```'
+            else
+              echo "- Built locally only (pull request): ${{ job.status == 'success' && '✅' || '❌' }}"
+              echo "- Nothing was pushed; a fork cannot be trusted with a package-write token."
+            fi
+            echo
+            echo "An SPDX SBOM is attached to every pushed image (ko \`--sbom spdx\`), and the base is distroless nonroot."
+          } >> "$GITHUB_STEP_SUMMARY"
