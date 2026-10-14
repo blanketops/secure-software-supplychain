@@ -35,3 +35,11 @@ config/samples/supplychain_v1alpha1_secretsstore.yaml
 # Frames of a demo 5 recording in progress
 demo/5-tekton-dashboard/frames/
 __pycache__/
+
+# JUnit XML the tests write for Allure to ingest, and any Allure report
+test-results/
+allure-report/
+
+# Scratch logs and editor backups — never commit
+*.log
+*.bak

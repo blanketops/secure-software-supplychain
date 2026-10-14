@@ -9,35 +9,21 @@ verified, and only then allowed to run. Built with Kubebuilder, driven by Tekton
 
 ## Demos
 
-Short recordings of the real thing. The scripts that made them, and how to run them on your own cluster, are in
+Short recordings of the real thing. The scripts behind them, and how to run them on your own cluster, are in
 [`demo/`](demo/README.md).
 
-**[A build, live in the Tekton Dashboard.](demo/README.md#demo-5-a-build-live-in-the-tekton-dashboard)** Nine
-steps from clone to verified image, each turning green as it finishes, ending on what the last step verified.
+- **[A build, live in the Tekton Dashboard.](demo/README.md#demo-5-a-build-live-in-the-tekton-dashboard)**
+  Nine steps from clone to verified image, each turning green as it finishes.
+- **[From a push to a running, verified image.](demo/README.md#demo-4-from-a-push-to-a-running-verified-image)**
+  One `git push`; the cluster builds, signs, logs and admits the image on its own.
+- **[Only what the pipeline built may run.](demo/README.md#demo-1-only-what-the-secure-software-supply-chain-built-may-run)**
+  The pipeline's image is admitted; one signed by Tekton Chains alone and one signed by nobody are refused.
+- **[No authorization, no identity, no certificate.](demo/README.md#demo-2-no-authorization-no-identity-no-certificate)**
+  A build gets a signing identity only while it passes three access reviews; revoke one and it is gone within a second.
+- **[What a build leaves behind.](demo/README.md#demo-3-what-a-build-leaves-behind)**
+  The evidence for one build, read back from the registry and the transparency log.
 
 ![a build, live in the Tekton Dashboard](demo/5-tekton-dashboard/demo.gif)
-
-**[From a push to a running, verified image.](demo/README.md#demo-4-from-a-push-to-a-running-verified-image)**
-One `git push`. GitHub delivers it to the cluster, a build starts on its own, and the image it produces is signed,
-logged and admitted.
-
-![from a push to a running, verified image](demo/4-push-to-build/demo.gif)
-
-**[Only what the secure software supply chain built may run.](demo/README.md#demo-1-only-what-the-secure-software-supply-chain-built-may-run)** The image the pipeline built is admitted; one signed by Tekton
-Chains alone and one signed by nobody are refused, each refusal naming the policy behind it.
-
-![only what the secure software supply chain built may run](demo/1-admission/demo.gif)
-
-**[No authorization, no identity, no certificate.](demo/README.md#demo-2-no-authorization-no-identity-no-certificate)** A build's ServiceAccount gets a signing identity only while it
-passes three access reviews. Revoke one permission and the identity, and Fulcio's certificate with it, are gone
-within a second.
-
-![no authorization, no identity, no certificate](demo/2-revoke-identity/demo.gif)
-
-**[What a build leaves behind.](demo/README.md#demo-3-what-a-build-leaves-behind)** One build from source to signed image, then the evidence for it, read back from
-the registry and the transparency log.
-
-![what a build leaves behind](demo/3-evidence/demo.gif)
 
 ---
 
@@ -65,24 +51,18 @@ kubectl apply (a workload)
   └── policy-controller ──► admits the image only if the SupplyChainPolicy is satisfied
 ```
 
-What a successful build guarantees:
-
-| Guarantee | How |
-|---|---|
-| No critical vulnerabilities | Trivy scans before the push; an image that fails is never published or signed |
-| Signed by a known identity, with no long-lived keys | Cosign keyless: a Fulcio certificate issued to the build's identity, which [exists only while its ServiceAccount is authorized](docs/concepts.md#an-identity-is-granted-not-default) |
-| Signed twice, by two identities | The build signs and attests its authorization; Tekton Chains signs and attests SLSA provenance. Admission requires all four. See [Two tiers of proof](docs/concepts.md#two-tiers-of-proof). |
-| The signature is publicly witnessed | CT log proof in the certificate, Rekor entry for the signature |
-| The build was authorized | [Three SubjectAccessReviews](docs/concepts.md#how-a-build-is-authorized), attested to the image |
-| The signature is on the image you can pull | The digest signed is the one the registry serves |
-| The image would be admitted | The last step verifies it against the same rules as [admission](docs/concepts.md#enforcing-at-admission-supplychainpolicy) |
-| There is a record of all of it | [Evidence](docs/concepts.md#what-a-build-leaves-behind) read back from the registry and the transparency log |
+What a successful build guarantees: no critical vulnerabilities (Trivy stops the build before the push); a
+keyless signature from a [known identity that exists only while authorized](docs/concepts.md#an-identity-is-granted-not-default);
+[two independent signatures](docs/concepts.md#two-tiers-of-proof) — the build's own and Tekton Chains' SLSA
+provenance — both required at admission; a public witness (CT log proof and a Rekor entry); proof the build was
+[authorized](docs/concepts.md#how-a-build-is-authorized); the signed digest is the one the registry serves; and a
+durable [record of all of it](docs/concepts.md#what-a-build-leaves-behind).
 
 ---
 
 ## How it works, in brief
 
-Three places hold the configuration, and each has one job:
+Three places hold the configuration, each with one job:
 
 | | Role | What it decides |
 |---|---|---|
@@ -90,15 +70,10 @@ Three places hold the configuration, and each has one job:
 | `SupplyChain` | **Authority** | Who may build and sign for a repository |
 | `SupplyChainPolicy` | **Trust** | What is trusted at admission |
 
-Every image carries proof from two independent identities, and admission requires all of it:
-
-| Identity | What it adds to the image |
-|---|---|
-| The `SupplyChain`'s build ServiceAccount | A signature, and an attestation that the build was authorized |
-| Tekton Chains | A signature, and SLSA v1.0 provenance of the run |
-
-Signing is keyless: no long-lived keys exist anywhere in a build. With SPIFFE identities, a build ServiceAccount
-has an identity, and so can get a certificate, only while it passes three SubjectAccessReviews.
+Every image carries proof from two independent identities, and admission requires all of it: the build's
+ServiceAccount adds a signature and an attestation that the build was authorized; Tekton Chains adds a signature
+and SLSA v1.0 provenance of the run. Signing is keyless — no long-lived keys exist in a build. With SPIFFE
+identities, a build ServiceAccount can get a certificate only while it passes three SubjectAccessReviews.
 
 [How it works](docs/concepts.md) explains each of these: [who decides what](docs/concepts.md#who-decides-what),
 [how a build is authorized](docs/concepts.md#how-a-build-is-authorized),
@@ -113,12 +88,12 @@ API group: `supplychain.blanketops.dev/v1alpha1`
 
 | Kind | What it is |
 |---|---|
-| [`SupplyChain`](docs/usage.md#supplychain) | The pipeline definition for one repository. One per repository; the controller enforces it. Owns the Tekton tasks, the trigger stack, the EventListener ingress and the `supply-chain-runner` ServiceAccount. |
-| [`SupplyChainPolicy`](docs/concepts.md#enforcing-at-admission-supplychainpolicy) | The admission side of a SupplyChain. Renders the policy-controller `TrustRoot` and `ClusterImagePolicies` that decide which of its images may run. |
+| [`SupplyChain`](docs/usage.md#supplychain) | The pipeline definition for one repository. Owns the Tekton tasks, trigger stack, EventListener ingress and `supply-chain-runner` ServiceAccount. |
+| [`SupplyChainPolicy`](docs/concepts.md#enforcing-at-admission-supplychainpolicy) | The admission side of a SupplyChain. Renders the policy-controller `TrustRoot` and `ClusterImagePolicies`. |
 | [`GitHubWebhook`](docs/usage.md#githubwebhook) | Registers the push webhook on the GitHub repository and keeps it registered. |
-| [`ImageBuild`](docs/usage.md#trigger-a-build-by-hand) | One execution of the pipeline. Created by a push, or by hand. Owns the `PipelineRun` and tracks each step. |
-| [`ImageSignature`](docs/concepts.md#how-a-build-is-authorized) | The record of the build's own signature, read back from the registry and Rekor: the signer, the certificate, the log index and when it was logged. |
-| [`ImageBuildResult`](docs/concepts.md#what-a-build-leaves-behind) | The durable record of a build. Survives PipelineRun pruning. Git provenance, digest, scan counts, policy verification. |
+| [`ImageBuild`](docs/usage.md#trigger-a-build-by-hand) | One execution of the pipeline. Owns the `PipelineRun` and tracks each step. |
+| [`ImageSignature`](docs/concepts.md#how-a-build-is-authorized) | The record of the build's signature, read back from the registry and Rekor. |
+| [`ImageBuildResult`](docs/concepts.md#what-a-build-leaves-behind) | The durable record of a build. Survives PipelineRun pruning. |
 
 ---
 
@@ -137,10 +112,10 @@ Installation takes seven phases, from an empty cluster to a first verified build
 7  First build        an ImageBuild, then admission
 ```
 
-[Installation](docs/installation.md) walks through each one. Two that people ask about first:
+[Installation](docs/installation.md) walks through each one — see especially
 [storing the credentials](docs/installation.md#3-store-the-credentials) and
-[making the webhook reachable with Tailscale Funnel](docs/installation.md#6-make-the-webhook-reachable-tailscale-funnel).
-Once it is running, [Usage](docs/usage.md) covers [following a build](docs/usage.md#follow-a-build) and
+[making the webhook reachable](docs/installation.md#6-make-the-webhook-reachable-tailscale-funnel). Then
+[Usage](docs/usage.md) covers [following a build](docs/usage.md#follow-a-build) and
 [reading its results](docs/usage.md#read-the-results), and [Troubleshooting](docs/troubleshooting.md) covers what
 goes wrong.
 
@@ -148,35 +123,31 @@ goes wrong.
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | The seven phases above, including Vault and the credentials, and Tailscale Funnel |
+| [Installation](docs/installation.md) | The seven phases, including Vault, the credentials, and Tailscale Funnel |
 | [How it works](docs/concepts.md) | Identity, authorization, the two tiers of proof, admission, and evidence |
-| [Usage](docs/usage.md) | The resources you write, following a build, reading its results, the CLI |
+| [Usage](docs/usage.md) | The resources you write, following a build, reading results, the CLI |
 | [Troubleshooting](docs/troubleshooting.md) | What goes wrong and why |
 | [Demos](demo/README.md) | The recordings above and how to make them again |
 
 ## Status
 
-This is a working proof of concept, exercised end to end on a single-node kind cluster. Things to know before
-relying on it:
+A working proof of concept, exercised end to end on a single-node kind cluster. Before relying on it:
 
-- Credentials are kept in a Vault the installer runs, and reach builds through External Secrets. With SPIFFE
-  identities the store logs in to Vault with a short-lived JWT-SVID and no stored credential. Vault's unseal
-  key and root token are stored in the same cluster so that it can restart unattended, which is fine for a
-  demonstration and not for production. Any other External Secrets provider can be
-  [used instead](docs/installation.md#using-a-secret-store-of-your-own).
-- Fulcio's and Rekor's signing keys are files in Kubernetes Secrets by default. `--key-residency vault` keeps
-  them in Vault instead, where they cannot be exported, which is only as strong as Vault's seal; see
-  [Where the signing keys are kept](docs/installation.md#where-the-signing-keys-are-kept).
-- Rekor, Fulcio, the CT log, Vault and SPIRE's OIDC discovery are reached over HTTPS only, with certificates
-  cert-manager issues from a private CA the installer creates. Tekton's own services and SonarQube are not part
-  of this.
-- The SPIFFE signing identity is the one exercised end to end. Under the Kubernetes identity, Tekton Chains'
-  half of the proof has not been run.
+- Credentials live in a Vault the installer runs, reaching builds through External Secrets; with SPIFFE the store
+  logs in with a short-lived JWT-SVID. Vault's unseal key and root token are stored in the same cluster so it can
+  restart unattended — fine for a demo, not for production. Any other
+  [External Secrets provider](docs/installation.md#using-a-secret-store-of-your-own) can be used instead.
+- Fulcio's and Rekor's signing keys are Kubernetes Secrets by default; `--key-residency vault` keeps them in Vault
+  instead. See [Where the signing keys are kept](docs/installation.md#where-the-signing-keys-are-kept).
+- Rekor, Fulcio, the CT log, Vault and SPIRE's OIDC discovery are reached over HTTPS with certificates from a
+  private CA the installer creates. Tekton's own services and SonarQube are not.
+- The SPIFFE signing identity is the one exercised end to end; under the Kubernetes identity, Tekton Chains' half
+  of the proof has not been run.
 - Branch names containing `/` cannot trigger a build yet.
-- Admission reads an image's signatures from the registry for each of the four policies, and the webhook fails
-  closed after ten seconds. On a slow link to the registry it can time out; running the workload again succeeds.
-- The Trivy step uses a pre-built scanner image with the vulnerability database baked in, about 1 GB; its first
-  pull on a new node can outlast the step's time limit. See [Troubleshooting](docs/troubleshooting.md).
+- Admission reads signatures from the registry per policy and fails closed after ten seconds; on a slow registry
+  link it can time out, and running the workload again succeeds.
+- The Trivy step uses a ~1 GB pre-built scanner image; its first pull on a new node can outlast the step's time
+  limit. See [Troubleshooting](docs/troubleshooting.md).
 
 ---
 
@@ -184,20 +155,22 @@ relying on it:
 
 ```bash
 mage manifests generate   # after changing *_types.go or kubebuilder markers
-mage test                 # unit and controller tests (envtest)
+mage test                 # unit and controller tests (envtest); writes JUnit XML to test-results/
 mage lint                 # golangci-lint
-mage testE2E              # creates its own kind cluster; allow 15-30 minutes
+mage testE2E              # creates its own kind cluster; allow 15-30 minutes; writes JUnit XML to test-results/
 mage help                 # every target, and the settings they read (a bare `mage` does the same)
 ```
 
-The build is a [magefile](https://magefile.org) in [`magefiles/`](magefiles/), and the controller's image is built
-with [ko](https://ko.build) from [`.ko.yaml`](.ko.yaml): there is no Makefile and no Dockerfile. Without mage
-installed, `go run mage.go <target>` does the same.
+The build is a [magefile](https://magefile.org) in [`magefiles/`](magefiles/); the controller image is built with
+[ko](https://ko.build) from [`.ko.yaml`](.ko.yaml). No Makefile, no Dockerfile. Without mage installed,
+`go run mage.go <target>` does the same.
+
+Both test targets write JUnit XML into `test-results/`, which [Allure](https://allurereport.org) ingests
+(`allure generate test-results`) to build its report; CI uploads the same directory as an artifact.
 
 The e2e suite deploys the operator and the real policy-controller, and checks that a `SupplyChainPolicy` is
-rendered, that an unsigned image is rejected, that warn mode admits it, and that deleting the policy cleans up.
-It has no Fulcio or Rekor, so it does not cover a signed image being admitted; that path is exercised by a real
-build.
+rendered, that an unsigned image is rejected, that warn mode admits it, and that deleting the policy cleans up. It
+has no Fulcio or Rekor, so the signed-image-admitted path is exercised by a real build, not the suite.
 
 ---
 
