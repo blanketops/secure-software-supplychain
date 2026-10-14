@@ -21,6 +21,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Cache bin/, where mage builds the custom golangci-lint (with plugins)
+      # and installs its tools. Building that binary is the slowest step; a
+      # cold runner rebuilds it every run.
+      - name: Cache build tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-tools-${{ hashFiles('magefiles/tools.go', '.custom-gcl.yml', 'go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
+
       - name: Download modules
         run: go mod download
 

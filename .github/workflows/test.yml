@@ -14,7 +14,7 @@ jobs:
   test:
     name: Unit tests
     runs-on: self-hosted
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -23,6 +23,18 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      # Cache the mage-installed tools and envtest binaries, all of which land
+      # in bin/ (controller-gen, setup-envtest and the Kubernetes apiserver/etcd
+      # it downloads), keyed on the versions that pin them. A cold runner
+      # otherwise re-downloads all of these every run.
+      - name: Cache build tools and envtest binaries
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-tools-${{ hashFiles('magefiles/tools.go', '.custom-gcl.yml', 'go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
 
       - name: Download modules
         run: go mod download
