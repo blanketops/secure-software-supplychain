@@ -36,6 +36,7 @@ var (
 	controllerGenVersion  = env("CONTROLLER_TOOLS_VERSION", "v0.20.1")
 	golangciLintVersion   = env("GOLANGCI_LINT_VERSION", "v2.8.0")
 	koVersion             = env("KO_VERSION", "v0.18.1")
+	goJunitReportVersion  = env("GO_JUNIT_REPORT_VERSION", "v2.1.0")
 	kubectl               = env("KUBECTL", "kubectl")
 	kind                  = env("KIND", "kind")
 	customLinterConfig    = ".custom-gcl.yml"
@@ -70,6 +71,13 @@ func (Tools) Envtest() error {
 // Ko downloads ko if necessary.
 func (Tools) Ko() error {
 	_, err := tool("ko", "github.com/google/ko", koVersion)
+	return err
+}
+
+// GoJunitReport downloads go-junit-report if necessary. It turns `go test`
+// output into JUnit XML, which Allure ingests to build its report.
+func (Tools) GoJunitReport() error {
+	_, err := tool("go-junit-report", "github.com/jstemmer/go-junit-report/v2", goJunitReportVersion)
 	return err
 }
 
