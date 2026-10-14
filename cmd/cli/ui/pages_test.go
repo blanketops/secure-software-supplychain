@@ -45,8 +45,11 @@ func TestThePageIsSelfContained(t *testing.T) {
 		t.Error("the page has no escaping of what it shows")
 	}
 	// Everything is on the one page: each part of it is a section to jump to.
-	for _, section := range []string{"chains", "webhooks", "builds", "trust", "log", "permissions", "admission", "secrets", "activity"} {
-		if !strings.Contains(string(page), `<section id="`+section+`">`) || !strings.Contains(string(page), `href="#`+section+`"`) {
+	for _, section := range []string{
+		"chains", "webhooks", "builds", "trust", "log", "permissions", "admission", "secrets", "activity",
+	} {
+		if !strings.Contains(string(page), `<section id="`+section+`">`) ||
+			!strings.Contains(string(page), `href="#`+section+`"`) {
 			t.Errorf("the page has no section %q, or no link to it", section)
 		}
 	}

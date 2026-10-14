@@ -172,38 +172,34 @@ func BuildPipelineRun(
 
 func buildResults(sc *supplyv1alpha1.SupplyChain, verified bool) []tektonv1.PipelineResult {
 	results := []tektonv1.PipelineResult{
-		{Name: "commit", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.commit)"}},
-		{Name: "committer-date", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.committer-date)"}},
-		{Name: "url", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepGitClone + ".results.url)"}},
+		taskResult("commit", stepGitClone, "commit"),
+		taskResult("committer-date", stepGitClone, "committer-date"),
+		taskResult("url", stepGitClone, "url"),
 		// The digest the registry serves, from the push — not the digest of the
 		// local build archive, which changes when the image is pushed.
-		{Name: "IMAGE_DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)"}},
-		{Name: "IMAGE_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_URL)"}},
+		taskResult("IMAGE_DIGEST", stepPushImage, "IMAGE_DIGEST"),
+		taskResult("IMAGE_URL", stepPushImage, "IMAGE_URL"),
 	}
 
 	if sc.Spec.Steps.Trivy {
 		results = append(results,
-			tektonv1.PipelineResult{Name: "TRIVY_SCAN_SUMMARY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SCAN_SUMMARY)"}},
-			tektonv1.PipelineResult{Name: "TRIVY_CRITICAL_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_CRITICAL_COUNT)"}},
-			tektonv1.PipelineResult{Name: "TRIVY_HIGH_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_HIGH_COUNT)"}},
-			tektonv1.PipelineResult{Name: "TRIVY_TOTAL_COUNT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_TOTAL_COUNT)"}},
-			tektonv1.PipelineResult{Name: "TRIVY_SARIF_PATH", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepTrivy + ".results.TRIVY_SARIF_PATH)"}},
+			taskResult("TRIVY_SCAN_SUMMARY", stepTrivy, "TRIVY_SCAN_SUMMARY"),
+			taskResult("TRIVY_CRITICAL_COUNT", stepTrivy, "TRIVY_CRITICAL_COUNT"),
+			taskResult("TRIVY_HIGH_COUNT", stepTrivy, "TRIVY_HIGH_COUNT"),
+			taskResult("TRIVY_TOTAL_COUNT", stepTrivy, "TRIVY_TOTAL_COUNT"),
+			taskResult("TRIVY_SARIF_PATH", stepTrivy, "TRIVY_SARIF_PATH"),
 		)
 	}
 
 	// Reported by the verify task, which only runs for a signed build.
 	if sc.Spec.Steps.Sign && verified {
 		results = append(results,
-			tektonv1.PipelineResult{Name: "POLICY_VERIFICATION", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepVerify + ".results.POLICY_VERIFICATION)"}},
-			tektonv1.PipelineResult{Name: "VERIFIED_SIGNER", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepVerify + ".results.VERIFIED_SIGNER)"}},
+			taskResult("POLICY_VERIFICATION", stepVerify, "POLICY_VERIFICATION"),
+			taskResult("VERIFIED_SIGNER", stepVerify, "VERIFIED_SIGNER"),
 		)
 	}
 
-	// if sc.Spec.Steps.SonarQube != nil {
-	// 	results = append(results,
-	// 		tektonv1.PipelineResult{Name: "SONAR_GATE_STATUS", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepSonarQube + ".results.GATE_STATUS)"}},
-	// 	)
-	// }
+	// A SONAR_GATE_STATUS result from the SonarQube step is not surfaced yet.
 
 	return results
 }
@@ -408,9 +404,9 @@ func sonarQubeTask(sc *supplyv1alpha1.SupplyChain, runAfter string) tektonv1.Pip
 		RunAfter: after(runAfter),
 		TaskRef:  &tektonv1.TaskRef{Name: "sonarqube-scanner"},
 		Params: tektonv1.Params{
-			{Name: "SONAR_HOST_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ServerURL}},
-			{Name: "SONAR_PROJECT_KEY", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.ProjectKey}},
-			{Name: "SONAR_TOKEN_SECRET", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: sc.Spec.Steps.SonarQube.TokenSecretRef}},
+			{Name: "SONAR_HOST_URL", Value: strParam(sc.Spec.Steps.SonarQube.ServerURL)},
+			{Name: "SONAR_PROJECT_KEY", Value: strParam(sc.Spec.Steps.SonarQube.ProjectKey)},
+			{Name: "SONAR_TOKEN_SECRET", Value: strParam(sc.Spec.Steps.SonarQube.TokenSecretRef)},
 		},
 	}
 }
@@ -710,10 +706,10 @@ func signImageTask(
 			},
 		},
 		Params: tektonv1.Params{
-			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-			{Name: "DIGEST", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)"}},
-			{Name: "FULCIO_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.FulcioURL}},
-			{Name: "REKOR_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: endpoints.RekorURL}},
+			{Name: "IMAGE", Value: strParam(imageRef)},
+			{Name: "DIGEST", Value: strParam("$(tasks." + stepPushImage + ".results.IMAGE_DIGEST)")},
+			{Name: "FULCIO_URL", Value: strParam(endpoints.FulcioURL)},
+			{Name: "REKOR_URL", Value: strParam(endpoints.RekorURL)},
 		},
 	}
 }
@@ -968,4 +964,15 @@ func after(task string) []string {
 
 func int64Ptr(i int64) *int64 {
 	return &i
+}
+
+// strParam wraps a string as a Tekton string ParamValue.
+func strParam(s string) tektonv1.ParamValue {
+	return tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: s}
+}
+
+// taskResult is a PipelineResult named name that takes its value from task's
+// result output key.
+func taskResult(name, task, output string) tektonv1.PipelineResult {
+	return tektonv1.PipelineResult{Name: name, Value: strParam("$(tasks." + task + ".results." + output + ")")}
 }

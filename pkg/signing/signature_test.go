@@ -36,7 +36,9 @@ import (
 // is kept separate because Record() writes to it via Status().Update, and the
 // main object's status field is only updated when that subresource commit
 // lands.
-func signatureFixture(t *testing.T) (*SignatureReconciler, *supplyv1alpha1.ImageBuild, func() *supplyv1alpha1.ImageSignature) {
+func signatureFixture(
+	t *testing.T,
+) (*SignatureReconciler, *supplyv1alpha1.ImageBuild, func() *supplyv1alpha1.ImageSignature) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := supplyv1alpha1.AddToScheme(scheme); err != nil {
@@ -64,7 +66,9 @@ func signatureFixture(t *testing.T) (*SignatureReconciler, *supplyv1alpha1.Image
 // statusOnlyFixture is like signatureFixture, but returns a reader that reads
 // back the status subresource (what Record() writes), so tests can assert on
 // EvidenceGathered, EvidenceMessage and the Signed condition.
-func statusOnlyFixture(t *testing.T) (*SignatureReconciler, *supplyv1alpha1.ImageBuild, func() supplyv1alpha1.ImageSignatureStatus) {
+func statusOnlyFixture(
+	t *testing.T,
+) (*SignatureReconciler, *supplyv1alpha1.ImageBuild, func() supplyv1alpha1.ImageSignatureStatus) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := supplyv1alpha1.AddToScheme(scheme); err != nil {
@@ -119,7 +123,8 @@ func TestRecordTakesTheSignatureFromTheEvidence(t *testing.T) {
 		t.Fatalf("phase %q, index %v; want Signed at 51", status.Phase, status.RekorLogIndex)
 	}
 	if status.Subject != signature.Subject || status.Issuer != signature.Issuer || status.RekorLogID != "log-id" ||
-		status.Certificate != signature.Certificate || status.CertificateFingerprint != "sha256:cert" || status.KeyFingerprint != "sha256:key" {
+		status.Certificate != signature.Certificate || status.CertificateFingerprint != "sha256:cert" ||
+		status.KeyFingerprint != "sha256:key" {
 		t.Errorf("status does not carry the signature: %+v", status)
 	}
 	if status.SignedAt == nil || !status.SignedAt.Time.Equal(logged.Time) {

@@ -213,7 +213,9 @@ func (i *Installer) ensureSigningKeys(ctx context.Context) error {
 	}
 	// A cluster that kept its keys in Secrets before has them still. They
 	// sign nothing any more, and a key that is not used should not lie about.
-	for namespace, name := range map[string]string{fulcioNamespace: "fulcio-server-secret", rekorNamespace: "rekor-signing-key"} {
+	for namespace, name := range map[string]string{
+		fulcioNamespace: "fulcio-server-secret", rekorNamespace: "rekor-signing-key",
+	} {
 		err := i.dynamic.Resource(secretGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("removing the key file %s/%s: %w", namespace, name, err)

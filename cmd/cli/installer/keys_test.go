@@ -106,7 +106,8 @@ func TestSigningKeysInVault(t *testing.T) {
 			t.Errorf("the policy does not allow %s", want)
 		}
 	}
-	if strings.Count(policy, "*") != 2 || strings.Contains(policy, `keys/rekor/*`) || strings.Contains(policy, `"transit/*`) {
+	if strings.Count(policy, "*") != 2 || strings.Contains(policy, `keys/rekor/*`) ||
+		strings.Contains(policy, `"transit/*`) {
 		t.Errorf("the policy is wider than one key's sign and verify:\n%s", policy)
 	}
 	for _, never := range []string{"export", "rotate", "delete", "create", fulcioKey, "secret/"} {
@@ -358,7 +359,9 @@ func TestSuspendingAKey(t *testing.T) {
 		t.Error("an out-of-date policy was left as it was")
 	}
 
-	for name, want := range map[string]string{"fulcio": fulcioKey, "fulcio-ca": fulcioKey, "rekor": rekorKey, "rekor-server": rekorKey} {
+	for name, want := range map[string]string{
+		"fulcio": fulcioKey, "fulcio-ca": fulcioKey, "rekor": rekorKey, "rekor-server": rekorKey,
+	} {
 		if svc, err := signingServiceNamed(name); err != nil || svc.Key != want {
 			t.Errorf("signingServiceNamed(%q) = %v, %v", name, svc.Key, err)
 		}
@@ -377,7 +380,8 @@ func TestSignaturesFromAudit(t *testing.T) {
 		`{"type":"response","time":"2026-10-12T08:00:00Z","request":{"path":"transit/sign/rekor/sha2-256"}}`,
 		`{"type":"response","time":"2026-10-12T08:05:00Z","request":{"path":"transit/sign/rekor/sha2-256"}}`,
 		`{"type":"response","time":"2026-10-12T08:06:00Z","request":{"path":"transit/sign/fulcio-ca/sha2-256"}}`,
-		`{"type":"response","time":"2026-10-12T08:07:00Z","error":"permission denied","request":{"path":"transit/sign/fulcio-ca/sha2-256"}}`,
+		`{"type":"response","time":"2026-10-12T08:07:00Z","error":"permission denied",` +
+			`"request":{"path":"transit/sign/fulcio-ca/sha2-256"}}`,
 		`{"type":"response","time":"2026-10-12T08:08:00Z","request":{"path":"transit/keys/rekor"}}`,
 		`{"type":"response","time":"2026-10-12T08:09:00Z","request":{"path":"secret/data/supplychain/github/token"}}`,
 		`not json at all`,

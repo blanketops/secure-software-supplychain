@@ -207,10 +207,11 @@ func (s *SignatureReconciler) Record(
 	sig.Status.EvidenceGathered = boolPtr(true)
 	sig.Status.EvidenceMessage = ""
 	meta.SetStatusCondition(&sig.Status.Conditions, metav1.Condition{
-		Type:               ConditionSigned,
-		Status:             metav1.ConditionTrue,
-		Reason:             "SignatureLogged",
-		Message:            fmt.Sprintf("Signed by %s; transparency log entry %d", signature.Subject, *signature.RekorLogIndex),
+		Type:   ConditionSigned,
+		Status: metav1.ConditionTrue,
+		Reason: "SignatureLogged",
+		Message: fmt.Sprintf("Signed by %s; transparency log entry %d",
+			signature.Subject, *signature.RekorLogIndex),
 		ObservedGeneration: sig.Generation,
 	})
 	if err := s.Client.Status().Update(ctx, &sig); err != nil {

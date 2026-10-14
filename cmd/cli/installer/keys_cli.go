@@ -280,14 +280,16 @@ func (i *Installer) ShowKeys(ctx context.Context) error {
 			signing = "SUSPENDED (supplychain keys resume " + strings.TrimSuffix(r.Name, "-ca") + ")"
 		}
 		fmt.Printf("\n%s\n", r.Name)
-		fmt.Printf("  kind         %s, version %d, made %s\n", r.Type, r.Version, r.Created.Local().Format("2006-01-02 15:04"))
+		fmt.Printf("  kind         %s, version %d, made %s\n",
+			r.Type, r.Version, r.Created.Local().Format("2006-01-02 15:04"))
 		fmt.Printf("  public key   %s\n", r.Fingerprint)
 		fmt.Printf("  leaves Vault no: it %s\n", leaves)
 		fmt.Printf("  signs for    %s, and nobody else\n", r.ServiceAccount)
 		fmt.Printf("  signing      %s\n", signing)
 		switch {
 		case r.Signatures > 0:
-			fmt.Printf("  used         %d times in the audit log, last %s\n", r.Signatures, r.LastSigned.Local().Format("2006-01-02 15:04:05"))
+			fmt.Printf("  used         %d times in the audit log, last %s\n",
+				r.Signatures, r.LastSigned.Local().Format("2006-01-02 15:04:05"))
 		case r.Signatures == 0:
 			fmt.Printf("  used         not in the part of the audit log that was read\n")
 		}

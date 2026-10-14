@@ -265,7 +265,8 @@ func hasNested(obj map[string]any, fields ...string) bool {
 // absentOr says "not installed" for something that is not there, including a
 // kind the cluster does not know, and the error otherwise.
 func absentOr(err error) string {
-	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || strings.Contains(err.Error(), "could not find the requested resource") {
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) ||
+		strings.Contains(err.Error(), "could not find the requested resource") {
 		return "not installed"
 	}
 	return err.Error()

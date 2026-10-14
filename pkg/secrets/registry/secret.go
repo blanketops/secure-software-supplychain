@@ -93,7 +93,9 @@ type kanikoSecretSpec struct {
 	registryAnnotation string
 }
 
-func (s kanikoSecretSpec) toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured {
+func (s kanikoSecretSpec) toUnstructured(
+	sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild,
+) *unstructured.Unstructured {
 	return newExternalSecret(externalSecretParams{
 		name:               s.name,
 		namespace:          s.namespace,
@@ -111,7 +113,9 @@ type chainsSecretSpec struct {
 	registryAnnotation string
 }
 
-func (s chainsSecretSpec) toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured {
+func (s chainsSecretSpec) toUnstructured(
+	sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild,
+) *unstructured.Unstructured {
 	return newExternalSecret(externalSecretParams{
 		name:               s.name,
 		namespace:          s.namespace,

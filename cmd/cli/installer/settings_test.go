@@ -62,7 +62,8 @@ func TestSettleSettingsRefusesAnUnaskedTrustChange(t *testing.T) {
 		settingTrustDomain: {TrustDomain: "another.example"},
 	} {
 		_, _, err := settleSettings(change.givenSettings(), installed, false)
-		if err == nil || !strings.Contains(err.Error(), "--"+name) || !strings.Contains(err.Error(), "--allow-trust-change") ||
+		if err == nil || !strings.Contains(err.Error(), "--"+name) ||
+			!strings.Contains(err.Error(), "--allow-trust-change") ||
 			!strings.Contains(err.Error(), whatChanging[name]) {
 			t.Errorf("changing %s: %v", name, err)
 		}

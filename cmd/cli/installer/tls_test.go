@@ -265,8 +265,11 @@ func TestVaultIsOnlyReachableOverTLS(t *testing.T) {
 	}
 
 	want := map[string]any{"type": "ConfigMap", "name": caConfigMap, "key": caKey, "namespace": vaultNamespace}
-	for name, obj := range map[string]*unstructured.Unstructured{"kubernetes": secretStore(), "spiffe": spiffeSecretStore()} {
-		if ca, _, _ := unstructured.NestedMap(obj.Object, "spec", "provider", "vault", "caProvider"); !reflect.DeepEqual(ca, want) {
+	for name, obj := range map[string]*unstructured.Unstructured{
+		"kubernetes": secretStore(), "spiffe": spiffeSecretStore(),
+	} {
+		if ca, _, _ := unstructured.NestedMap(obj.Object, "spec", "provider", "vault", "caProvider"); !reflect.DeepEqual(
+			ca, want) {
 			t.Errorf("the %s store verifies Vault against %v, want %v", name, ca, want)
 		}
 	}

@@ -37,7 +37,8 @@ func TestOptionsDefaultsAndValidation(t *testing.T) {
 	if err := opts.defaultAndValidate(); err != nil {
 		t.Fatal(err)
 	}
-	if opts.SigningIdentity != IdentityKubernetes || opts.TrustDomain != DefaultTrustDomain || opts.UIHost != DefaultUIHost {
+	if opts.SigningIdentity != IdentityKubernetes || opts.TrustDomain != DefaultTrustDomain ||
+		opts.UIHost != DefaultUIHost {
 		t.Errorf("defaults = %+v", opts)
 	}
 	for name, bad := range map[string]Options{
@@ -63,7 +64,8 @@ func TestChainsConfigIsReadBackAsTheSameIdentity(t *testing.T) {
 		return out
 	}
 
-	kubernetes, err := signing.IdentityFromConfig(toStrings(chainsConfig(Options{SigningIdentity: IdentityKubernetes})), nil)
+	kubernetes, err := signing.IdentityFromConfig(
+		toStrings(chainsConfig(Options{SigningIdentity: IdentityKubernetes})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +78,8 @@ func TestChainsConfigIsReadBackAsTheSameIdentity(t *testing.T) {
 	if _, set := cfg["signers.x509.identity.token.file"]; set {
 		t.Error("the SPIFFE config still points Chains at a ServiceAccount token file")
 	}
-	spiffe, err := signing.IdentityFromConfig(toStrings(cfg), map[string]string{signing.SpireConfigTrustDomain: opts.TrustDomain})
+	spiffe, err := signing.IdentityFromConfig(
+		toStrings(cfg), map[string]string{signing.SpireConfigTrustDomain: opts.TrustDomain})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +124,8 @@ func TestFulcioConfig(t *testing.T) {
 		t.Error("the SPIFFE config still accepts Kubernetes ServiceAccount tokens")
 	}
 	got := spiffe.OIDCIssuers[spireOIDCIssuer]
-	if got.Type != IdentitySPIFFE || got.SPIFFETrustDomain != "blanketops.dev" || got.IssuerURL != spireOIDCIssuer || got.ClientID != "sigstore" {
+	if got.Type != IdentitySPIFFE || got.SPIFFETrustDomain != "blanketops.dev" ||
+		got.IssuerURL != spireOIDCIssuer || got.ClientID != "sigstore" {
 		t.Errorf("SPIFFE issuer = %+v", got)
 	}
 }
@@ -248,7 +252,8 @@ func TestSpireStepsOnlyForSPIFFE(t *testing.T) {
 		}
 		return names
 	}
-	if joined := strings.Join(steps(Options{SigningIdentity: IdentityKubernetes}), ","); strings.Contains(joined, "SPIRE") {
+	if joined := strings.Join(steps(Options{SigningIdentity: IdentityKubernetes}), ","); strings.Contains(
+		joined, "SPIRE") {
 		t.Errorf("a Kubernetes-identity install includes SPIRE steps: %s", joined)
 	}
 	joined := strings.Join(steps(spiffeOptions()), ",")

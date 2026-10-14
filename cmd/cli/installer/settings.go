@@ -99,7 +99,8 @@ func settleSettings(given, installed map[string]string, allowTrustChange bool) (
 			fmt.Fprintf(&b, "  --%s is %q here, not %q. Changing it replaces %s.\n",
 				name, installed[name], given[name], whatChanging[name])
 		}
-		b.WriteString("Nothing signed before the change verifies after it. Leave the flag out to keep what the cluster has,\n" +
+		b.WriteString("Nothing signed before the change verifies after it. " +
+			"Leave the flag out to keep what the cluster has,\n" +
 			"or add --allow-trust-change to make the change on purpose.")
 		return nil, nil, fmt.Errorf("%s", b.String())
 	}
@@ -130,7 +131,8 @@ func (i *Installer) installedSettings(ctx context.Context) map[string]string {
 // runningKeyResidency tells where the signing keys are from how Fulcio is
 // started. It is empty when Fulcio is not installed.
 func (i *Installer) runningKeyResidency(ctx context.Context) string {
-	fulcio, err := i.dynamic.Resource(deploymentGVR).Namespace(fulcioNamespace).Get(ctx, "fulcio-server", metav1.GetOptions{})
+	fulcio, err := i.dynamic.Resource(deploymentGVR).Namespace(fulcioNamespace).Get(
+		ctx, "fulcio-server", metav1.GetOptions{})
 	if err != nil {
 		return ""
 	}

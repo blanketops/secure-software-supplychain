@@ -238,7 +238,8 @@ func TestCollect(t *testing.T) {
 	provenance, provenanceHash := envelope(t, "https://slsa.dev/provenance/v1")
 	authorization, _ := envelope(t, "https://blanketops.dev/attestations/authorization/v1")
 	log.add("sha256:"+provenanceHash, 31, map[string]any{
-		"kind": "intoto", "spec": map[string]any{"content": map[string]any{"payloadHash": map[string]any{"value": provenanceHash}}},
+		"kind": "intoto",
+		"spec": map[string]any{"content": map[string]any{"payloadHash": map[string]any{"value": provenanceHash}}},
 	})
 	push(t, tagFor("att"),
 		layerSpec{provenance, "application/vnd.dsse.envelope.v1+json", map[string]string{annotationCertificate: chainsCert}},

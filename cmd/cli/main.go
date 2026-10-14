@@ -115,11 +115,14 @@ Example:
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")
-	cmd.Flags().StringVar(&webhookHost, "webhook-host", "", "Public hostname for ingress routing (e.g. your-machine.your-tailnet.ts.net)")
+	cmd.Flags().StringVar(&webhookHost, "webhook-host", "",
+		"Public hostname for ingress routing (e.g. your-machine.your-tailnet.ts.net)")
 	cmd.Flags().StringVar(&uiHost, "ui-host", installer.DefaultUIHost,
-		"Hostname the Tekton Dashboard and SonarQube are served on; keep it different from --webhook-host so they are not published with the webhook")
+		"Hostname the Tekton Dashboard and SonarQube are served on; keep it different from "+
+			"--webhook-host so they are not published with the webhook")
 	cmd.Flags().StringVar(&signingIdentity, "signing-identity", installer.IdentityKubernetes,
-		"How workloads identify themselves to Fulcio: \"kubernetes\" (ServiceAccount tokens) or \"spiffe\" (installs SPIRE; signatures carry SPIFFE IDs)")
+		"How workloads identify themselves to Fulcio: \"kubernetes\" (ServiceAccount tokens) or "+
+			"\"spiffe\" (installs SPIRE; signatures carry SPIFFE IDs)")
 	cmd.Flags().StringVar(&trustDomain, "trust-domain", installer.DefaultTrustDomain,
 		"SPIFFE trust domain, used with --signing-identity spiffe")
 	cmd.Flags().StringVar(&keyResidency, "key-residency", installer.ResidencyCluster,
@@ -131,7 +134,8 @@ Example:
 	cmd.Flags().BoolVar(&noImagePull, "no-image-pull", false,
 		"Do not pull every image at the start; each step then pulls its own when it is reached")
 	cmd.Flags().BoolVar(&externalSecretStore, "external-secret-store", false,
-		"Do not install Vault; you provide the ClusterSecretStore \"secure-software-supply-chain-store\" yourself, backed by any External Secrets provider")
+		"Do not install Vault; you provide the ClusterSecretStore "+
+			"\"secure-software-supply-chain-store\" yourself, backed by any External Secrets provider")
 	cmd.Flags().StringVar(&vaultAddr, "vault-addr", "",
 		"Use a Vault that already exists, at this address as the cluster reaches it, instead of running one; "+
 			"it is configured with the token in VAULT_TOKEN or ~/.vault-token, through VAULT_ADDR if that is set")
@@ -243,7 +247,8 @@ Example:
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().StringVar(&newPassword, "new-password", "", "New admin password for SonarQube (required)")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "",
-		"Write the token to this file instead of to Vault, for a secret store of your own; put it in your store as supplychain/sonarqube/token, field \"value\"")
+		"Write the token to this file instead of to Vault, for a secret store of your own; "+
+			"put it in your store as supplychain/sonarqube/token, field \"value\"")
 	_ = cmd.MarkFlagRequired("new-password")
 	return cmd
 }
@@ -266,7 +271,8 @@ and picks up a change within a minute.
   github/token         token that can manage the repository's webhooks
   sonarqube/token      written by 'supplychain init-sonarqube'`,
 	}
-	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
+	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "",
+		"Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 
 	open := func() (*installer.Installer, error) {
 		i, err := installer.New(kubeconfig, false)
@@ -350,7 +356,8 @@ and the service's login, as they are.`,
 			return i.ShowKeys(context.Background())
 		},
 	}
-	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
+	cmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "",
+		"Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 
 	change := func(use, short string, suspended bool) *cobra.Command {
 		return &cobra.Command{

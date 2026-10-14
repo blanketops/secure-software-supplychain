@@ -246,7 +246,8 @@ func TestSignsWithSPIFFEIdentity(t *testing.T) {
 	}
 
 	verify := findTask(t, pr, stepVerify)
-	if got, want := param(t, verify.Params, "IDENTITY"), "spiffe://blanketops.dev/ns/default/sa/supply-chain-runner"; got != want {
+	if got, want := param(t, verify.Params, "IDENTITY"),
+		"spiffe://blanketops.dev/ns/default/sa/supply-chain-runner"; got != want {
 		t.Errorf("verify IDENTITY = %q, want %q", got, want)
 	}
 	if args := strings.Join(verify.TaskSpec.TaskSpec.Steps[1].Args, " "); !strings.Contains(args,
@@ -357,7 +358,8 @@ func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 	for _, step := range steps {
 		names = append(names, step.Name)
 	}
-	if got := strings.Join(names, ","); got != "await-chains-signature,sign,write-authorization-predicate,attest-authorization" {
+	if got := strings.Join(names, ","); got !=
+		"await-chains-signature,sign,write-authorization-predicate,attest-authorization" {
 		t.Fatalf("sign task steps = %s", got)
 	}
 

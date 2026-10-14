@@ -77,9 +77,11 @@ func fixtures(t *testing.T) (*supplyv1alpha1.SupplyChainPolicy, *supplyv1alpha1.
 		},
 	}
 	roots := map[string]string{
-		signing.RootsFulcioKey: rootCert(t, pkix.Name{Organization: []string{"blanketops.dev"}, CommonName: commonNameFulcio}),
-		signing.RootsRekorKey:  "rekor-key",
-		signing.RootsCTLogKey:  "ctlog-key",
+		signing.RootsFulcioKey: rootCert(t, pkix.Name{
+			Organization: []string{"blanketops.dev"}, CommonName: commonNameFulcio,
+		}),
+		signing.RootsRekorKey: "rekor-key",
+		signing.RootsCTLogKey: "ctlog-key",
 	}
 	return scp, sc, roots
 }
@@ -289,7 +291,9 @@ func TestTrustRoot(t *testing.T) {
 		t.Errorf("TrustRoot CA uri = %v", uri)
 	}
 	for name, fp := range map[string]string{
-		"fulcioRoot": got.TrustAnchors.FulcioRoot, "rekorKey": got.TrustAnchors.RekorKey, "ctLogKey": got.TrustAnchors.CTLogKey,
+		"fulcioRoot": got.TrustAnchors.FulcioRoot,
+		"rekorKey":   got.TrustAnchors.RekorKey,
+		"ctLogKey":   got.TrustAnchors.CTLogKey,
 	} {
 		if !strings.HasPrefix(fp, "sha256:") || len(fp) != len("sha256:")+64 {
 			t.Errorf("%s fingerprint = %q", name, fp)
@@ -311,7 +315,9 @@ func TestFingerprintIgnoresWhitespace(t *testing.T) {
 // SPIFFE IDs issued under the configured issuer.
 func TestRenderWithSPIFFEIdentity(t *testing.T) {
 	scp, sc, roots := fixtures(t)
-	identity := signing.Identity{Provider: signing.ProviderSPIFFE, Issuer: "http://oidc.spire.svc", TrustDomain: "blanketops.dev"}
+	identity := signing.Identity{
+		Provider: signing.ProviderSPIFFE, Issuer: "http://oidc.spire.svc", TrustDomain: "blanketops.dev",
+	}
 
 	got, err := Render(scp, sc, roots, identity)
 	if err != nil {

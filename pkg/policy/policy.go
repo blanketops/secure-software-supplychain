@@ -50,7 +50,9 @@ const (
 
 var (
 	TrustRootGVK          = schema.GroupVersionKind{Group: "policy.sigstore.dev", Version: "v1alpha1", Kind: "TrustRoot"}
-	ClusterImagePolicyGVK = schema.GroupVersionKind{Group: "policy.sigstore.dev", Version: "v1beta1", Kind: "ClusterImagePolicy"}
+	ClusterImagePolicyGVK = schema.GroupVersionKind{
+		Group: "policy.sigstore.dev", Version: "v1beta1", Kind: "ClusterImagePolicy",
+	}
 )
 
 // Rendered is the desired policy-controller state for one SupplyChainPolicy.

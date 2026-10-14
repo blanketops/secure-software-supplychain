@@ -62,7 +62,9 @@ func TestStepImages(t *testing.T) {
 	}
 	// What Tekton adds to every step is named in its controller's arguments,
 	// and what a Task runs by default in its parameters.
-	for _, want := range []string{"/entrypoint-", "cgr.dev/chainguard/busybox", "git-clone:v1.1.0", "buildah/stable", "trivy-db"} {
+	for _, want := range []string{
+		"/entrypoint-", "cgr.dev/chainguard/busybox", "git-clone:v1.1.0", "buildah/stable", "trivy-db",
+	} {
 		if !hasImage(images, want) {
 			t.Errorf("no image matching %q is pulled ahead", want)
 		}

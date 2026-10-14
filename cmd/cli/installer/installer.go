@@ -348,7 +348,8 @@ var installOrder = []step{
 					idSp.fail("Failed to record the trust domain")
 					return err
 				}
-				idSp.succeed("Tekton Chains signs as spiffe://" + i.opts.TrustDomain + "/ns/tekton-chains/sa/tekton-chains-controller")
+				idSp.succeed("Tekton Chains signs as spiffe://" + i.opts.TrustDomain +
+					"/ns/tekton-chains/sa/tekton-chains-controller")
 			}
 
 			// 3. Collect the three in-cluster sigstore trust anchors and
