@@ -43,6 +43,8 @@
     <div id="notice" class="notice" hidden></div>
 
     <section id="glance">
+      <p class="lede" style="margin-top:0">A single view of what this cluster has built and what it will let run — read
+        live from the supply-chain resources, the certificate authority, and the transparency log.</p>
       <div class="grid tiles" id="tiles"></div>
     </section>
 
@@ -124,6 +126,12 @@
     const GROUP = '/apis/supplychain.blanketops.dev/v1alpha1';
     const RBAC = '/apis/rbac.authorization.k8s.io/v1';
     const $ = id => document.getElementById(id);
+
+    // The in-cluster addresses of the logs and the CA, filled in from the
+    // summary. The CLI commands the page shows use these; reach them with a
+    // port-forward when you run them from your own machine.
+    let REKOR_URL = 'https://rekor-server.rekor-system.svc.cluster.local';
+    let FULCIO_URL = 'https://fulcio-server.fulcio-system.svc.cluster.local';
 
     // Everything read from the cluster or the log is text, never markup.
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
@@ -302,6 +310,10 @@
             ${steps ? `<h4>Steps</h4><div class="steps">${steps}</div>` : ''}
             ${facts ? `<h4>Result</h4><dl style="margin-top:0">${facts}</dl>` : ''}
             <h4>Signatures and attestations</h4>${evidenceTable(res.evidence)}
+            ${(res.imageURL || st.imageRef) ? `<h4>Verify it yourself</h4>${cli(
+              'Check the image against Fulcio and Rekor the way admission does',
+              'cosign verify --certificate-identity-regexp .+ --certificate-oidc-issuer-regexp .+ ' +
+              '--rekor-url ' + REKOR_URL + ' ' + (res.imageURL || st.imageRef))}` : ''}
           </div>
         </details>`;
       }).join('');
@@ -331,7 +343,8 @@
         `<li><span>Issues certificates for identities from <code>${esc(i.url)}</code>${i.trustDomain ? ` (trust domain <code>${esc(i.trustDomain)}</code>)` : ''}</span></li>`).join('');
       const fulcio = s.fulcio.error && !roots ? down('Certificate authority', s.fulcio) : `<div class="card">
         <h3>Certificate authority ${pill('Fulcio', 'info')}</h3><div class="sub"><code>${esc(s.fulcio.url)}</code></div>
-        ${roots}<ul class="checks">${issuers || '<li><span class="why">No identity provider configured</span></li>'}</ul></div>`;
+        ${roots}<ul class="checks">${issuers || '<li><span class="why">No identity provider configured</span></li>'}</ul>
+        ${cli('Fetch the root certificate this authority issues from', 'curl -sk ' + FULCIO_URL + '/api/v1/rootCert')}</div>`;
       const ct = s.ctLog.error ? down('Certificate log', s.ctLog) : `<div class="card">
         <h3>Certificate log ${pill('CT log', 'info')}</h3><div class="sub"><code>${esc(s.ctLog.url)}</code></div>
         <dl><dt>Certificates</dt><dd>${esc(s.ctLog.treeSize)} issued</dd>
@@ -358,7 +371,9 @@
           <dt>Certificate valid</dt><dd>${e.certNotBefore ? `${esc(clock(e.certNotBefore))} to ${esc(clock(e.certNotAfter))}` : '—'}</dd>
           <dt>Certificate serial</dt><dd><code>${esc(e.certSerial || '—')}</code></dd>
           <dt>Proof</dt><dd>${e.inclusionProof ? `included in a log of ${esc(e.proofTreeSize)} entries` : 'none returned'}${e.signedTimestamp ? ' · signed by the log' : ''}</dd>
-        </dl></td></tr>`;
+        </dl>
+        ${cli('Read this entry back from the log yourself', 'rekor-cli get --log-index ' + Number(e.logIndex) + ' --rekor_server ' + REKOR_URL)}
+        </td></tr>`;
     }
     function toggleEntry(i) { const el = $('entry-' + i); if (el) el.hidden = !el.hidden; }
     function renderLog(message) {
@@ -471,6 +486,21 @@ subjects:
       navigator.clipboard.writeText(manifests[i]).then(() => {
         btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
       });
+    }
+
+    // A command the reader can copy and run against the same cluster. Nothing
+    // is executed here; the page only shows the exact CLI line and copies it.
+    let commands = [];
+    function copyCommand(i, btn) {
+      navigator.clipboard.writeText(commands[i]).then(() => {
+        btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+      });
+    }
+    function cli(hint, command) {
+      const i = commands.push(command) - 1;
+      return `<div class="cli"><div class="hint">${esc(hint)}</div>` +
+        `<button type="button" onclick="copyCommand(${i}, this)">Copy</button>` +
+        `<pre><span class="prompt">$ </span>${esc(command)}</pre></div>`;
     }
 
     function subjectCard(kind, obj, sa, rbac, saExists) {
@@ -648,6 +678,9 @@ subjects:
         const byName = items => Object.fromEntries(items.map(i => [i.metadata.name, i]));
         const rbac = { clusterRoleBindings: crbs, roleBindings: rbs, clusterRoles: byName(crs), roles: byName(rs) };
         $('dot').className = 'dot ok'; $('conn').textContent = 'Connected to the cluster';
+        commands = [];
+        if (summary?.rekor?.url) REKOR_URL = summary.rekor.url;
+        if (summary?.fulcio?.url) FULCIO_URL = summary.fulcio.url;
         renderTiles(chains, builds, summary);
         renderChains(chains);
         renderWebhooks(hooks);
