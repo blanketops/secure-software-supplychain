@@ -22,6 +22,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -103,14 +104,14 @@ func Test() error {
 	if err != nil {
 		return err
 	}
-	args := []string{"test"}
+	args := []string{"test", "-v"}
 	for pkg := range strings.FieldsSeq(packages) {
 		if !strings.Contains(pkg, "/e2e") {
 			args = append(args, pkg)
 		}
 	}
 	args = append(args, "-coverprofile", "cover.out")
-	return sh.RunWithV(map[string]string{"KUBEBUILDER_ASSETS": assets}, "go", args...)
+	return testWithReport("unit", map[string]string{"KUBEBUILDER_ASSETS": assets}, args...)
 }
 
 // SetupEnvtest downloads the API server and etcd the tests run against.
@@ -145,9 +146,71 @@ func SetupTestE2E() error {
 // TestE2E runs the e2e tests in a kind cluster of their own, and removes it afterwards.
 func TestE2E() error {
 	mg.SerialDeps(SetupTestE2E, Manifests, Generate, Fmt, Vet)
-	err := sh.RunWithV(map[string]string{"KIND": kind, "KIND_CLUSTER": kindCluster},
-		"go", "test", "-tags=e2e", "./test/e2e/", "-v", "-ginkgo.v", "-timeout", "30m")
+	err := testWithReport("e2e", map[string]string{"KIND": kind, "KIND_CLUSTER": kindCluster},
+		"test", "-tags=e2e", "./test/e2e/", "-v", "-ginkgo.v", "-timeout", "30m")
 	return errors.Join(err, CleanupTestE2E())
+}
+
+// testResultsDir is where the JUnit XML reports are written for Allure to
+// ingest. Allure's junit reader turns the XML files in this directory into a
+// report with `allure generate test-results`.
+func testResultsDir() string { return env("TEST_RESULTS", "test-results") }
+
+// testWithReport runs `go <args...>` (a go test invocation), streams its
+// output to the terminal as before, and also writes a JUnit XML report named
+// after suite into TEST_RESULTS for Allure to ingest. The test's own exit
+// status is preserved: a failing suite still fails the target, with the report
+// written either way.
+func testWithReport(suite string, environment map[string]string, args ...string) error {
+	report, err := tool("go-junit-report", "github.com/jstemmer/go-junit-report/v2", goJunitReportVersion)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(testResultsDir(), 0o755); err != nil {
+		return err
+	}
+	xmlPath := filepath.Join(testResultsDir(), "junit-"+suite+".xml")
+
+	test := exec.Command("go", args...)
+	test.Env = os.Environ()
+	for key, value := range environment {
+		test.Env = append(test.Env, key+"="+value)
+	}
+	pipe, err := test.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	test.Stderr = os.Stderr
+
+	xmlFile, err := os.Create(xmlPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = xmlFile.Close() }()
+
+	// go-junit-report reads the test output on its stdin, writes the XML to
+	// its stdout, and the output is echoed to the terminal through a tee.
+	converter := exec.Command(report, "-set-exit-code")
+	converter.Stdin = io.TeeReader(pipe, os.Stdout)
+	converter.Stdout = xmlFile
+	converter.Stderr = os.Stderr
+
+	if err := test.Start(); err != nil {
+		return err
+	}
+	if err := converter.Start(); err != nil {
+		return err
+	}
+	// Wait for the test to finish producing output, then for the converter to
+	// drain it. The test's exit status is what the target returns; the
+	// converter failing on a reported test failure is folded into it.
+	testErr := test.Wait()
+	convErr := converter.Wait()
+	fmt.Printf("Wrote %s\n", xmlPath)
+	if testErr != nil {
+		return testErr
+	}
+	return convErr
 }
 
 // CleanupTestE2E deletes the kind cluster the e2e tests ran in.
@@ -229,7 +292,13 @@ func (Ko) Build() error {
 
 // Load loads the image ko:build made into the kind cluster KIND_CLUSTER.
 func (Ko) Load() error {
-	return sh.RunV(kind, "load", "image-archive", imageArchive, "--name", kindCluster)
+	// Newer kind (v0.29+) uses `-n`; older used `--name`. Pick whichever the
+	// installed kind accepts so the suite is CI-version-independent.
+	if err := sh.RunV(kind, "load", "image-archive", imageArchive, "-n", kindCluster); err != nil {
+		// Fall back to the older --name flag on very old versions.
+		return sh.RunV(kind, "load", "image-archive", imageArchive, "--name", kindCluster)
+	}
+	return nil
 }
 
 // Push builds the image for PLATFORMS and pushes it to IMG, with an SPDX SBOM attached.

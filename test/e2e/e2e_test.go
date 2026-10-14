@@ -47,21 +47,28 @@ const metricsRoleBindingName = "secure-software-supply-chain-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
+	var err error
 
 	// Before running the tests, set up the environment by creating the namespace,
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
 	BeforeAll(func() {
 		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
-
-		By("labeling the namespace to enforce the restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
+		cmd := exec.Command("kubectl", "get", "namespace", namespace)
 		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+		if err != nil {
+			// Namespace does not exist; create it.
+			cmd = exec.Command("kubectl", "create", "ns", namespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		} else {
+			// Namespace already exists; ensure the restricted security policy label.
+			By("labeling the namespace to enforce the restricted security policy")
+			cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
+				"pod-security.kubernetes.io/enforce=restricted")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+		}
 
 		By("installing CRDs")
 		cmd = exec.Command("go", "run", "mage.go", "install")
