@@ -105,6 +105,19 @@ type ImageSignatureStatus struct {
 	// +optional
 	SignedAt *metav1.Time `json:"signedAt,omitempty"`
 
+	// EvidenceGathered says whether the transparency log entries for the
+	// signatures were queried successfully. A build can be Signed without all
+	// log entries being present, but this condition tells you whether the
+	// lookups themselves completed or whether they are still in flight or
+	// throttled.
+	// +optional
+	EvidenceGathered *bool `json:"evidenceGathered,omitempty"`
+
+	// EvidenceMessage carries a machine-readable reason when the transparency
+	// log entries could not be read. Empty when the entries were found.
+	// +optional
+	EvidenceMessage string `json:"evidenceMessage,omitempty"`
+
 	// Conditions represent the current state of the ImageSignature resource.
 	// +listType=map
 	// +listMapKey=type

@@ -129,6 +129,12 @@ func (s *SignatureReconciler) EnsureSignature(
 // was found on the image and in the transparency log.
 const ConditionSigned = "Signed"
 
+// ConditionEvidenceGathered says whether the transparency log entries were
+// queried successfully. A build can be Signed without all log entries being
+// present, but this condition tells you whether the lookups themselves
+// completed or whether they are still in flight / were throttled.
+const ConditionEvidenceGathered = "EvidenceGathered"
+
 // Phases of an ImageSignature.
 const (
 	PhasePending = "Pending"
@@ -173,6 +179,8 @@ func (s *SignatureReconciler) Record(
 			missing = "the build's signature was not found on the image"
 		}
 		sig.Status.Phase = PhasePending
+		sig.Status.EvidenceGathered = boolPtr(false)
+		sig.Status.EvidenceMessage = missing
 		meta.SetStatusCondition(&sig.Status.Conditions, metav1.Condition{
 			Type:               ConditionSigned,
 			Status:             metav1.ConditionFalse,
@@ -196,6 +204,8 @@ func (s *SignatureReconciler) Record(
 	sig.Status.CertificateFingerprint = signature.CertificateFingerprint
 	sig.Status.KeyFingerprint = signature.KeyFingerprint
 	sig.Status.SignedAt = signature.IntegratedAt
+	sig.Status.EvidenceGathered = boolPtr(true)
+	sig.Status.EvidenceMessage = ""
 	meta.SetStatusCondition(&sig.Status.Conditions, metav1.Condition{
 		Type:               ConditionSigned,
 		Status:             metav1.ConditionTrue,

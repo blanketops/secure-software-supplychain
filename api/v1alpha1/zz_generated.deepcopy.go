@@ -525,6 +525,11 @@ func (in *ImageSignatureStatus) DeepCopyInto(out *ImageSignatureStatus) {
 		in, out := &in.SignedAt, &out.SignedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.EvidenceGathered != nil {
+		in, out := &in.EvidenceGathered, &out.EvidenceGathered
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
