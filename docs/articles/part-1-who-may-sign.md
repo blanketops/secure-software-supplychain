@@ -128,7 +128,8 @@ The fix is ordering. The signing step now waits until Chains' signature is in th
 It would be wrong to oversell this.
 
 - It runs on one kind cluster. Credentials are kept in a Vault the installer runs, whose unseal key lives in the same cluster so it can restart unattended. That is fine for a demonstration and not for production.
-- Fulcio, Rekor and SPIRE's OIDC discovery are reached over plain HTTP inside the cluster.
+- The in-cluster services — Fulcio, Rekor and SPIRE's OIDC discovery among them — are reached over HTTPS, with certificates cert-manager issues from a private CA the installer creates. Every client trusts that one CA. (Tekton's own services and SonarQube are the exception, and are not part of it.)
+- Fulcio's and Rekor's signing keys are files in Kubernetes Secrets by default. An optional mode keeps them in Vault's Transit engine instead, where they are made and used but never exported; the services ask Vault to sign. That is only as strong as Vault's seal, and the default is still the simpler one.
 - Anyone who can create a pod running as the build ServiceAccount gets its identity. The three checks decide whether that ServiceAccount has an identity at all; they do not decide who may run as it. That is ordinary Kubernetes RBAC, and it has to be right.
 - A registered identity can be used for as long as it stays registered, not only during a build.
 

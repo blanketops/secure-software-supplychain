@@ -6,7 +6,7 @@ the caption for each is the italic line under it.
 
 # A record that said "Signed" had never looked at the signature
 
-*Part 2 of 2 on building a secure software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. [Part 1](LINK-TO-PART-1) covered who is allowed to sign.*
+*Part 2 of 2 on building a secure software supply chain on Kubernetes with Tekton, Sigstore and SPIFFE. [Part 1](part-1-who-may-sign.md) covered who is allowed to sign.*
 
 Part 1 ended with every image carrying proof from two identities: the build, which signs and attests that it was authorized, and Tekton Chains, which signs and attests how the image was built.
 
@@ -44,7 +44,7 @@ The second case is not contrived. It is what the race from part 1 produced: for 
 
 ## Pin what you trust
 
-Each policy verifies against a trust root: the Fulcio root certificate, Rekor's public key, and the certificate transparency log's key. These are stated explicitly, with their fingerprints shown on the policy's status, so that "which Fulcio signed this?" has an answer you can read.
+Each policy verifies against a trust root: the Fulcio root certificate, Rekor's public key, and the certificate transparency log's key. These are stated explicitly, with their fingerprints shown on the policy's status, so that "which Fulcio signed this?" has an answer you can read. They are the signing roots, and separate from the TLS that protects the wire: the services themselves are reached over HTTPS, with certificates cert-manager issues from a private CA the installer creates, so a client both reaches the real Fulcio and trusts only the root it pinned.
 
 I tested the pinning the direct way, by swapping each of the three for a wrong key in turn. Each swap alone was enough to get a correctly signed image refused. That is the behaviour you want, and it is worth seeing once rather than assuming.
 
@@ -72,9 +72,11 @@ status:
   rekorLogIndex: 106
   signedAt: "2026-10-06T07:01:13Z"
   certificateFingerprint: sha256:49402e79…
+  evidenceGathered: true
+  evidenceMessage: ""
 ```
 
-It becomes `Signed` only when the build's signature and its log entry are both found. If the pipeline succeeded but the signature cannot be read, it stays `Pending` and says why.
+It becomes `Signed` only when the build's signature and its log entry are both found. If the pipeline succeeded but the signature cannot be read, it stays `Pending`. And because "found a valid signature" and "read every transparency-log entry back" are themselves two different facts, the record keeps them apart: `evidenceGathered` says whether the log lookups completed, and `evidenceMessage` carries the reason when they did not — a log still catching up, or a throttled query — without pretending the signature was never made.
 
 I checked one against two independent sources. The signing step's own log printed `tlog entry created with index: 106`. Rekor's entry 106 is a signature entry whose timestamp equals the recorded signing time to the second.
 
@@ -128,7 +130,7 @@ Put together: a push reaches the cluster through a Tailscale Funnel, a build sta
 
 ## Limits
 
-- This is a proof of concept on one kind cluster, with a Vault whose unseal key is kept in the same cluster, and plain HTTP between the in-cluster services.
+- This is a proof of concept on one kind cluster, with a Vault whose unseal key is kept in the same cluster. The in-cluster services are reached over HTTPS, with certificates from a private CA the installer creates and every client trusts; Tekton's own services and SonarQube are outside that.
 - Admission reads the image's signatures from the registry for each of the four policies, and the webhook fails closed after ten seconds. On a slow link to the registry it can time out, and the answer is to ask again. Failing closed is the right default; the latency is a cost of requiring four proofs.
 - The provenance Chains produces is SLSA v1.0, and admission requires it. I am not claiming a SLSA build level: that depends on properties of the build platform this setup does not establish, such as isolation between builds.
 - The evidence is read back from a registry and a log the cluster itself runs. It shows what was signed and logged. It does not make the cluster's own operators untrusted parties.
