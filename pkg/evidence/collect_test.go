@@ -121,7 +121,7 @@ func (f *fakeRekor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&request)
 	switch r.URL.Path {
 	case "/api/v1/index/retrieve":
-		uuids := []string{}
+		uuids := make([]string, 0, len(f.entries[request.Hash]))
 		for _, entry := range f.entries[request.Hash] {
 			for uuid := range entry {
 				uuids = append(uuids, uuid)
@@ -129,7 +129,7 @@ func (f *fakeRekor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(uuids)
 	case "/api/v1/log/entries/retrieve":
-		found := []map[string]any{}
+		found := make([]map[string]any, 0, len(request.EntryUUIDs))
 		for _, uuid := range request.EntryUUIDs {
 			found = append(found, map[string]any{uuid: f.byUUID[uuid]})
 		}

@@ -199,7 +199,7 @@ func (i *Installer) startVault(ctx context.Context) error {
 			return errors.New("vault is still sealed after its key was given")
 		}
 	}
-	return i.waitForStatefulSet(ctx, vaultNamespace, vaultSTS, readyTimeout)
+	return i.waitForStatefulSet(ctx, vaultNamespace, vaultSTS)
 }
 
 // ensureSecretStore gives External Secrets a way into Vault and nothing more

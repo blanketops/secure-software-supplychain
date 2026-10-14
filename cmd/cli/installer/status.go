@@ -198,7 +198,7 @@ func (i *Installer) certificateStatus(ctx context.Context) int {
 		return 1
 	}
 	problems := 0
-	if conditionTrue(issuer, "Ready") {
+	if conditionTrue(issuer) {
 		fmt.Printf("  ✓ %-38s ready (ClusterIssuer %s)\n", "Certificate authority", caIssuer)
 	} else {
 		problems++
@@ -214,7 +214,7 @@ func (i *Installer) certificateStatus(ctx context.Context) int {
 			continue
 		}
 		label := "TLS " + cert.GetNamespace() + "/" + cert.GetName()
-		if !conditionTrue(&cert, "Ready") {
+		if !conditionTrue(&cert) {
 			problems++
 			fmt.Printf("  … %-38s not issued\n", label)
 			continue
@@ -249,7 +249,7 @@ func (i *Installer) secretStoreStatus(ctx context.Context) int {
 			login = "Vault, with a ServiceAccount token"
 		}
 	}
-	if !conditionTrue(obj, "Ready") {
+	if !conditionTrue(obj) {
 		fmt.Printf("  … %-38s cannot log in (%s)\n", label, login)
 		return 1
 	}

@@ -158,7 +158,7 @@ func waitForPort(addr string, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -166,16 +166,16 @@ func waitForPort(addr string, timeout time.Duration) error {
 	return fmt.Errorf("timed out waiting for %s", addr)
 }
 
-func openBrowser(url string) error {
+func openBrowser(rawURL string) error {
 	var cmd string
 	var args []string
 	switch runtime.GOOS {
 	case "linux":
-		cmd, args = "xdg-open", []string{url}
+		cmd, args = "xdg-open", []string{rawURL}
 	case "darwin":
-		cmd, args = "open", []string{url}
+		cmd, args = "open", []string{rawURL}
 	case "windows":
-		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
+		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler", rawURL}
 	default:
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}

@@ -489,29 +489,29 @@ func (r *ImageBuildReconciler) publishResult(
 }
 
 func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	log := ctrl.Log.WithName("controllers").WithName("ImageBuild")
+	logger := ctrl.Log.WithName("controllers").WithName("ImageBuild")
 	recorder := mgr.GetEventRecorderFor("imagebuild-controller")
 
 	r.Mediator = supplychain.New(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		log.WithName("mediator"),
+		logger.WithName("mediator"),
 		recorder,
 	)
 
 	r.Recorder = results.New(
 		mgr.GetClient(),
-		log.WithName("recorder"),
+		logger.WithName("recorder"),
 	)
 
 	r.Pruner = pruner.New(
 		mgr.GetClient(),
-		log.WithName("pruner"),
+		logger.WithName("pruner"),
 	)
 
 	r.Signature = signing.NewSignatureReconciler(
 		mgr.GetClient(),
-		log.WithName("signature"),
+		logger.WithName("signature"),
 	)
 
 	return ctrl.NewControllerManagedBy(mgr).

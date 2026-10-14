@@ -199,7 +199,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for the SPIRE server to be ready...")
 			waitSp.start()
-			if err := i.waitForStatefulSet(ctx, spireNamespace, "spire-server", readyTimeout); err != nil {
+			if err := i.waitForStatefulSet(ctx, spireNamespace, "spire-server"); err != nil {
 				waitSp.fail("SPIRE server not ready")
 				return err
 			}
@@ -216,7 +216,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for SPIRE OIDC discovery to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, spireNamespace, "spire-spiffe-oidc-discovery-provider", readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, spireNamespace, "spire-spiffe-oidc-discovery-provider"); err != nil {
 				waitSp.fail("SPIRE OIDC discovery not ready")
 				return err
 			}
@@ -294,7 +294,7 @@ var installOrder = []step{
 			// times; on a slow connection MySQL is not up before it gives up.
 			dbSp := newSpinner("Waiting for the Trillian database...")
 			dbSp.start()
-			if err := i.waitForDeployment(ctx, "trillian-system", "trillian-mysql", readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, "trillian-system", "trillian-mysql"); err != nil {
 				dbSp.fail("Trillian MySQL not ready")
 				return err
 			}
@@ -314,7 +314,7 @@ var installOrder = []step{
 			// 1. Wait for Chains controller before touching its config.
 			waitSp := newSpinner("Waiting for Tekton Chains to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "tekton-chains", "tekton-chains-controller", readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, "tekton-chains", "tekton-chains-controller"); err != nil {
 				waitSp.fail("Tekton Chains not ready")
 				return err
 			}
@@ -374,7 +374,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for Policy Controller to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook"); err != nil {
 				waitSp.fail("Policy Controller not ready")
 				return err
 			}
@@ -384,7 +384,7 @@ var installOrder = []step{
 			if err := i.trustCAIn(ctx, "cosign-system", "policy-controller-webhook"); err != nil {
 				return fmt.Errorf("giving the Policy Controller the certificate authority: %w", err)
 			}
-			return i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook", readyTimeout)
+			return i.waitForDeployment(ctx, "cosign-system", "policy-controller-webhook")
 		},
 	},
 	{
@@ -415,7 +415,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for NGINX Ingress Controller to be ready...")
 			waitSp.start()
-			if err := i.waitForDeployment(ctx, "ingress-nginx", "ingress-nginx-controller", readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, "ingress-nginx", "ingress-nginx-controller"); err != nil {
 				waitSp.fail("NGINX Ingress Controller not ready")
 				return err
 			}
@@ -440,7 +440,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			svidSp := newSpinner("Waiting for SPIRE to issue the secret store its identity...")
 			svidSp.start()
-			if err := i.waitForDeployment(ctx, vaultNamespace, vaultSPIFFEBridge, readyTimeout); err != nil {
+			if err := i.waitForDeployment(ctx, vaultNamespace, vaultSPIFFEBridge); err != nil {
 				svidSp.fail("The secret store has no SPIFFE identity")
 				return err
 			}
@@ -475,7 +475,7 @@ var installOrder = []step{
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for the SonarQube database to be ready...")
 			waitSp.start()
-			if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarDatabaseSTS, readyTimeout); err != nil {
+			if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarDatabaseSTS); err != nil {
 				waitSp.fail("SonarQube database not ready")
 				return err
 			}
@@ -827,8 +827,8 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 
 // waitForDeployment polls until the named deployment has all replicas available
 // or the timeout is exceeded.
-func (i *Installer) waitForDeployment(ctx context.Context, namespace, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+func (i *Installer) waitForDeployment(ctx context.Context, namespace, name string) error {
+	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
 		deploy, err := i.dynamic.Resource(
 			schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
@@ -838,7 +838,7 @@ func (i *Installer) waitForDeployment(ctx context.Context, namespace, name strin
 		}
 		time.Sleep(5 * time.Second)
 	}
-	return fmt.Errorf("deployment %s/%s not ready after %s", namespace, name, timeout)
+	return fmt.Errorf("deployment %s/%s not ready after %s", namespace, name, readyTimeout)
 }
 
 // rolledOut reports whether a Deployment runs what its spec now says, and
@@ -875,7 +875,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// still be starting when this PostHook fires.
 	rekorSp := newSpinner("Waiting for Rekor to be ready...")
 	rekorSp.start()
-	if err := i.waitForDeployment(ctx, "rekor-system", "rekor-server", readyTimeout); err != nil {
+	if err := i.waitForDeployment(ctx, "rekor-system", "rekor-server"); err != nil {
 		rekorSp.fail("Rekor not ready")
 		return err
 	}
@@ -884,7 +884,7 @@ func (i *Installer) ensureSigstoreRoots(ctx context.Context) error {
 	// Wait for Fulcio to be ready too.
 	fulcioSp := newSpinner("Waiting for Fulcio to be ready...")
 	fulcioSp.start()
-	if err := i.waitForDeployment(ctx, "fulcio-system", "fulcio-server", readyTimeout); err != nil {
+	if err := i.waitForDeployment(ctx, "fulcio-system", "fulcio-server"); err != nil {
 		fulcioSp.fail("Fulcio not ready")
 		return err
 	}
@@ -1271,7 +1271,7 @@ func (i *Installer) applyDirectory(ctx context.Context, dir string) error {
 			return fmt.Errorf("failed to read %q: %w", path, err)
 		}
 		data = i.substituteManifest(data)
-		if err := i.applyManifest(ctx, data, path); err != nil {
+		if err := i.applyManifest(ctx, data); err != nil {
 			return fmt.Errorf("failed to apply %q: %w", path, err)
 		}
 	}
@@ -1302,7 +1302,7 @@ func (i *Installer) deleteDirectory(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (i *Installer) applyManifest(ctx context.Context, data []byte, source string) error {
+func (i *Installer) applyManifest(ctx context.Context, data []byte) error {
 	reader := yaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 	docIndex := 0
 	for {

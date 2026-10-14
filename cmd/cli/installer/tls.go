@@ -43,6 +43,9 @@ const (
 	// when it is satisfied.
 	conditionStatusTrue = "True"
 
+	// conditionTypeReady is the condition type the installer waits on.
+	conditionTypeReady = "Ready"
+
 	// caSecret holds the CA's certificate and key; caIssuer signs with it.
 	caSecret = "supply-chain-ca"
 	caIssuer = "supply-chain-ca"
@@ -85,7 +88,7 @@ func (i *Installer) certManagerIsSomeoneElses(ctx context.Context) bool {
 // that answers, no Issuer or Certificate can be created.
 func (i *Installer) waitForCertManager(ctx context.Context) error {
 	for _, name := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook"} {
-		if err := i.waitForDeployment(ctx, certManagerNamespace, name, readyTimeout); err != nil {
+		if err := i.waitForDeployment(ctx, certManagerNamespace, name); err != nil {
 			return fmt.Errorf("cert-manager is not ready: %w", err)
 		}
 	}
@@ -97,7 +100,7 @@ func (i *Installer) waitForCA(ctx context.Context, timeout time.Duration) error 
 	deadline := time.Now().Add(timeout)
 	for {
 		issuer, err := i.dynamic.Resource(clusterIssuerGVR).Get(ctx, caIssuer, metav1.GetOptions{})
-		if err == nil && conditionTrue(issuer, "Ready") {
+		if err == nil && conditionTrue(issuer) {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -111,11 +114,11 @@ func (i *Installer) waitForCA(ctx context.Context, timeout time.Duration) error 
 	}
 }
 
-// conditionTrue reports whether an object's status has the condition, set.
-func conditionTrue(obj *unstructured.Unstructured, kind string) bool {
+// conditionTrue reports whether an object's status has the Ready condition set.
+func conditionTrue(obj *unstructured.Unstructured) bool {
 	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	for _, c := range conditions {
-		if condition, ok := c.(map[string]any); ok && condition["type"] == kind {
+		if condition, ok := c.(map[string]any); ok && condition["type"] == conditionTypeReady {
 			return condition["status"] == conditionStatusTrue
 		}
 	}

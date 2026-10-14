@@ -137,7 +137,7 @@ func BuildPipelineRun(
 					{Name: "git-url", Type: tektonv1.ParamTypeString},
 					{Name: "git-revision", Type: tektonv1.ParamTypeString},
 				},
-				Tasks:   buildTaskList(sc, ib, imageRef, sigCtx),
+				Tasks:   buildTaskList(sc, imageRef, sigCtx),
 				Results: buildResults(sc, sigCtx != nil),
 			},
 			Params: tektonv1.Params{
@@ -210,7 +210,6 @@ func buildResults(sc *supplyv1alpha1.SupplyChain, verified bool) []tektonv1.Pipe
 
 func buildTaskList(
 	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
 	imageRef string,
 	sigCtx *signing.RunSigningContext,
 ) []tektonv1.PipelineTask {

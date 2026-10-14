@@ -132,7 +132,7 @@ func (c *Client) CreateWebhook(
 	if err != nil {
 		return 0, fmt.Errorf("failed to call GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		existing, found, err := c.FindWebhook(ctx, repository, hookURL)
@@ -208,7 +208,7 @@ func (c *Client) UpdateWebhook(
 	if err != nil {
 		return fmt.Errorf("failed to call GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GitHub API returned %d for UpdateWebhook %d on %s",
@@ -236,7 +236,7 @@ func (c *Client) DeleteWebhook(
 	if err != nil {
 		return fmt.Errorf("failed to call GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 204 = deleted, 404 = already gone — both are fine
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
@@ -260,7 +260,7 @@ func (c *Client) FindWebhook(ctx context.Context, repository, hookURL string) (i
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to call GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, false, fmt.Errorf("GitHub API returned %d for FindWebhook on %s", resp.StatusCode, repository)
@@ -299,7 +299,7 @@ func (c *Client) WebhookExists(
 	if err != nil {
 		return false, fmt.Errorf("failed to call GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

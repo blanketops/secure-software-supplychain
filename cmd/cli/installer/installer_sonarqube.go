@@ -118,7 +118,7 @@ func (i *Installer) ensureSonarQubeDatabasePassword(ctx context.Context) error {
 // Called via: supplychain init-sonarqube --new-password <password>
 func (i *Installer) InitSonarQube(ctx context.Context, newPassword, tokenFile string) error {
 	fmt.Println("  ⏳ Waiting for SonarQube to be ready...")
-	if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarSTS, readyTimeout); err != nil {
+	if err := i.waitForStatefulSet(ctx, sonarNamespace, sonarSTS); err != nil {
 		return fmt.Errorf("SonarQube is not running: %w", err)
 	}
 	base, stop, err := i.forwardToSonarQube(ctx)

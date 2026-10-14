@@ -51,7 +51,7 @@ func TestKeyResidency(t *testing.T) {
 	names := func(o Options) string {
 		i := &Installer{opts: o}
 		steps, _ := i.stepsToRun()
-		var out []string
+		out := make([]string, 0, len(steps))
 		for _, s := range steps {
 			out = append(out, s.Name)
 		}
@@ -195,7 +195,7 @@ func TestKeysInVaultMutation(t *testing.T) {
 		}
 		spec, _, _ := unstructured.NestedMap(obj.Object, "spec", "template", "spec")
 		var server map[string]any
-		var containers []string
+		containers := make([]string, 0, len(spec["containers"].([]any)))
 		for _, c := range spec["containers"].([]any) {
 			container := c.(map[string]any)
 			containers = append(containers, container["name"].(string))
@@ -206,7 +206,7 @@ func TestKeysInVaultMutation(t *testing.T) {
 		return obj, server, containers
 	}
 	named := func(list any) []string {
-		var out []string
+		out := make([]string, 0, len(list.([]any)))
 		for _, item := range list.([]any) {
 			out = append(out, item.(map[string]any)["name"].(string))
 		}
@@ -428,11 +428,11 @@ func TestChooseFulcioRoot(t *testing.T) {
 	other, _ := newTransitSigner(ctx, vault, rekorKey)
 	issue := func(s crypto.Signer, at time.Time) string {
 		t.Helper()
-		pem, err := fulcioRootCertificate(s, at)
+		certPEM, err := fulcioRootCertificate(s, at)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(pem)
+		return string(certPEM)
 	}
 	original := issue(signer, time.Now().Add(-24*time.Hour))
 	reissued := issue(signer, time.Now()) // same key, not valid yesterday

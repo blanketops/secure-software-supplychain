@@ -289,8 +289,8 @@ func (i *Installer) applyTektonSpireConfig(ctx context.Context) error {
 }
 
 // waitForStatefulSet polls until every replica of a StatefulSet is ready.
-func (i *Installer) waitForStatefulSet(ctx context.Context, namespace, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+func (i *Installer) waitForStatefulSet(ctx context.Context, namespace, name string) error {
+	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
 		sts, err := i.dynamic.Resource(statefulSetGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
@@ -302,7 +302,7 @@ func (i *Installer) waitForStatefulSet(ctx context.Context, namespace, name stri
 		}
 		time.Sleep(5 * time.Second)
 	}
-	return fmt.Errorf("statefulset %s/%s not ready after %s", namespace, name, timeout)
+	return fmt.Errorf("statefulset %s/%s not ready after %s", namespace, name, readyTimeout)
 }
 
 // defaultClusterSPIFFEID is the SPIRE chart's rule that gives every pod in
