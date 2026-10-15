@@ -5,11 +5,11 @@
 Start with `supplychain status`. It shows which part of the stack is missing or not ready, including the
 certificates and the secret store's login, and most of what follows starts from one of its lines.
 
-**The install is slow.** Image pulls are nearly all of it. The first step, `Images`, starts every pull, and
-the line under each later step says how many are on the node; if it says the node pulls one image at a time, run
-`hack/kind-parallel-pulls.sh <cluster>` on kind (it changes the kubelet's `serializeImagePulls` and restarts
-the kubelet, not any pod), or create the cluster with `hack/kind-cluster.yaml`. An image shown as `(retrying)`
-failed to download and is being tried again, which on an unreliable connection is normal.
+**The install is slow.** Image pulls are nearly all of it. Each package pulls its own images when it is
+applied. On kind, where the node pulls one image at a time by default, run `hack/kind-parallel-pulls.sh
+<cluster>` (it changes the kubelet's `serializeImagePulls` and restarts the kubelet, not any pod), or create
+the cluster with `hack/kind-cluster.yaml`. An image shown as `(retrying)` failed to download and is being
+tried again, which on an unreliable connection is normal.
 
 **After running the installer again, a push no longer starts a build** and
 `tekton-triggers-core-interceptors` is not ready, logging "server key missing". Its certificate Secret was

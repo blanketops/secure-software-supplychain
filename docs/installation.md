@@ -64,30 +64,26 @@ go build -o bin/supplychain ./cmd/cli
 | `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
 | `--key-residency` | Where Fulcio's and Rekor's signing keys are kept: `cluster` (default) or `vault`. See [Where the signing keys are kept](#where-the-signing-keys-are-kept). |
 | `--allow-trust-change` | Let `--signing-identity`, `--trust-domain` or `--key-residency` differ from what the cluster was installed with. See [The installer remembers](#the-installer-remembers). |
-| `--no-image-pull` | Do not pull every image at the start; each step then pulls its own when it is reached. |
 | `--vault-addr` | Use a Vault that already exists, at this address, instead of running one. See [Using a Vault you already have](#using-a-vault-you-already-have). |
 | `--external-secret-store` | No Vault at all; you provide the secret store. See [Using a secret store of your own](#using-a-secret-store-of-your-own). |
 
-The installer applies the steps below in order and waits for each to be ready. Almost all of the time is image
-pulls, so the first step asks the node for every image the install and the first build will use, and does not
-wait: the steps go ahead while the images download, each waiting only for its own.
+The installer applies the steps below in order and waits for each to be ready. You name the packages to
+install — there is no "install everything" in one command. Each package pulls its own images when it is
+applied; almost all of the install's time is those pulls.
 
 ```
-[1/25] Images
-  ✓ Asked the node for 68 images; the steps go ahead while they download
-[2/25] MetalLB Install
-  ↓ 52 of 68 images are on the node
-  ✓ MetalLB Install applied
+[1/2] Fulcio
+  ✓ Fulcio applied
+[2/2] Rekor
+  ✓ Rekor applied
 ```
 
-What is still downloading when the last step is done, the images only a build uses, is waited for at the end,
-so the first build does not start by pulling a gigabyte. The step tells you when the node pulls one image at a
-time, and how to change that on kind. An image that cannot be pulled does not stop the install: it is named,
-and whatever needs it pulls it again. Each step's own wait still allows up to an hour.
+An image's wait allows up to an hour, so a slow pull does not force a re-run. On kind, where the node pulls
+one image at a time by default, `hack/kind-parallel-pulls.sh <cluster>` turns on parallel pulls (or create the
+cluster with `hack/kind-cluster.yaml`), which speeds up installing several packages at once.
 
 | Step | What it sets up |
 |---|---|
-| Images | Nothing of its own: it asks the node for every image the steps below and the first build will use, all at once, and lets the steps go ahead while they download. Left out with `--no-image-pull`. |
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
 | cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the secure software supply chain's services trusts. |

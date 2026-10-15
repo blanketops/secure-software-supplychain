@@ -76,9 +76,9 @@ func TestResolveStepUnknown(t *testing.T) {
 }
 
 // SelectSteps narrows an install to exactly the named packages, and stepsToRun
-// then returns those plus the image pull-ahead, in install order regardless of
-// the order they were asked for.
-func TestSelectStepsNarrowsAndKeepsImagePull(t *testing.T) {
+// then returns those in install order regardless of the order they were asked
+// for. Each package pulls its own images when applied; there is no pull-ahead.
+func TestSelectStepsNarrowsToNamedPackages(t *testing.T) {
 	i := spiffeInstaller()
 	if err := i.SelectSteps([]string{"rekor", "fulcio"}); err != nil {
 		t.Fatal(err)
@@ -87,19 +87,17 @@ func TestSelectStepsNarrowsAndKeepsImagePull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 3 {
-		t.Fatalf("got %d steps, want Images + Fulcio + Rekor", len(steps))
-	}
-	if !steps[0].PullsImages {
-		t.Errorf("the first step is %q; images are still pulled ahead", steps[0].Name)
+	if len(steps) != 2 {
+		t.Fatalf("got %d steps, want Fulcio + Rekor", len(steps))
 	}
 	// Install order is Fulcio before Rekor, not the order given.
-	if steps[1].Name != "Fulcio" || steps[2].Name != "Rekor" {
-		t.Errorf("steps = %q, %q; want Fulcio then Rekor in install order", steps[1].Name, steps[2].Name)
+	if steps[0].Name != "Fulcio" || steps[1].Name != "Rekor" {
+		t.Errorf("steps = %q, %q; want Fulcio then Rekor in install order", steps[0].Name, steps[1].Name)
 	}
 }
 
-// With no selection, the full install runs.
+// With no selection, stepsToRun returns the whole install. (The CLI refuses a
+// bare `install` with no package; stepsToRun itself still yields them all.)
 func TestSelectStepsEmptyIsFullInstall(t *testing.T) {
 	i := spiffeInstaller()
 	if err := i.SelectSteps(nil); err != nil {
@@ -111,12 +109,11 @@ func TestSelectStepsEmptyIsFullInstall(t *testing.T) {
 	}
 }
 
-// --list shows the packages a reader can name, and leaves out the Images step,
-// which applies nothing of its own.
-func TestStepNamesOmitsImages(t *testing.T) {
-	for _, name := range spiffeInstaller().StepNames() {
-		if name == "Images" {
-			t.Error("StepNames lists the Images pull-ahead step; it is not installable on its own")
-		}
+// --list shows the packages a reader can name: every installable step, and
+// MetalLB Install (the first) among them.
+func TestStepNamesListsInstallablePackages(t *testing.T) {
+	names := spiffeInstaller().StepNames()
+	if len(names) == 0 || names[0] != "MetalLB Install" {
+		t.Errorf("StepNames = %v; want it to start with MetalLB Install", names)
 	}
 }

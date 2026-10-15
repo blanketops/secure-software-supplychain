@@ -56,43 +56,36 @@ func installCmd() *cobra.Command {
 	var fromStep string
 	var onlyStep string
 	var externalSecretStore bool
-	var noImagePull bool
 	var keyResidency string
 	var allowTrustChange bool
 	var vaultAddr string
 	var listSteps bool
 
 	cmd := &cobra.Command{
-		Use:   "install [package...]",
+		Use:   "install <package>...",
 		Short: "Install secure software supply chain dependencies onto the cluster",
-		Long: `Installs all secure software supply chain platform dependencies in the correct order:
-  1. MetalLB
-  2. Tekton Pipelines, Triggers, Chains, Dashboard, Tasks, Results
-  3. Sigstore (Fulcio, Rekor, Policy Controller)
-  4. NGINX Ingress Controller
-  5. SonarQube
-
-All manifests are embedded in the binary — no network access required
-beyond connectivity to the Kubernetes API server.
-
-With no arguments it installs everything. Name one or more packages to install
-or repair just those, in order, without the whole run — for example:
+		Long: `Installs secure software supply chain platform dependencies, one package at a
+time. Name one or more packages to install or repair just those, in install
+order — for example:
 
   supplychain install metallb-install
   supplychain install fulcio rekor
   supplychain install --list        # the package names you can give
 
-Images are still pulled ahead in parallel for whatever is being installed.
-A package that needs another to be up already (Fulcio needs cert-manager, say)
-is not pulled in for you; install its prerequisites first, or run the full
-install.
+There is no "install everything" in one command: name the packages you want.
+Each package pulls its own images when it is applied. A package that needs
+another to be up already (Fulcio needs cert-manager, say) is not pulled in for
+you; install its prerequisites first.
+
+All manifests are embedded in the binary — no network access required
+beyond connectivity to the Kubernetes API server.
 
 Use --webhook-host to set the public hostname for ingress routing
 (e.g. your Tailscale Funnel URL). This substitutes WEBHOOK_HOST in
 ingress manifests for the Tekton Dashboard and SonarQube.
 
 Example:
-  supplychain install --webhook-host your-machine.your-tailnet.ts.net`,
+  supplychain install fulcio rekor --webhook-host your-machine.your-tailnet.ts.net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			// A setting that is not given is left empty, so that an install
@@ -115,7 +108,6 @@ Example:
 				OnlyStep:         onlyStep,
 
 				ExternalSecretStore: externalSecretStore,
-				NoImagePull:         noImagePull,
 				KeyResidency:        keyResidency,
 				VaultAddr:           vaultAddr,
 			})
@@ -128,6 +120,10 @@ Example:
 					fmt.Printf("  %s\n", name)
 				}
 				return nil
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("name at least one package to install; " +
+					"run 'supplychain install --list' to see the package names")
 			}
 			if err := i.SelectSteps(args); err != nil {
 				return err
@@ -155,8 +151,6 @@ Example:
 	cmd.Flags().BoolVar(&allowTrustChange, "allow-trust-change", false,
 		"Let --signing-identity, --trust-domain or --key-residency differ from what the cluster was installed with. "+
 			"It replaces what the cluster trusts: nothing signed before verifies afterwards")
-	cmd.Flags().BoolVar(&noImagePull, "no-image-pull", false,
-		"Do not pull every image at the start; each step then pulls its own when it is reached")
 	cmd.Flags().BoolVar(&externalSecretStore, "external-secret-store", false,
 		"Do not install Vault; you provide the ClusterSecretStore "+
 			"\"secure-software-supply-chain-store\" yourself, backed by any External Secrets provider")

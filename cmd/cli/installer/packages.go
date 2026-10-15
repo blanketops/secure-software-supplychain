@@ -35,14 +35,10 @@ func slug(name string) string {
 }
 
 // StepNames lists the installable steps for this install, in order and after
-// the identity's Skip rules, as the names `install <name>` accepts. The Images
-// pull-ahead step is left out: it applies nothing of its own.
+// the identity's Skip rules, as the names `install <name>` accepts.
 func (i *Installer) StepNames() []string {
 	var names []string
 	for _, s := range installOrder {
-		if s.PullsImages {
-			continue
-		}
 		if s.Skip == nil || !s.Skip(i) {
 			names = append(names, s.Name)
 		}

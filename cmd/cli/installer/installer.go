@@ -110,9 +110,6 @@ type step struct {
 	// RegistersCRDs makes the installer re-read the API after the step, so the
 	// kinds it defined can be applied by the steps that follow.
 	RegistersCRDs bool
-	// PullsImages makes the step pull the images of every step after it,
-	// instead of applying anything of its own.
-	PullsImages bool
 	// Mutate changes an object of the step's manifests before it is applied,
 	// or reports false to leave it out.
 	Mutate func(i *Installer, obj *unstructured.Unstructured) bool
@@ -123,13 +120,6 @@ func onlyForSPIFFE(i *Installer) bool { return !i.spiffe() }
 
 // installOrder defines the sequence in which dependencies are applied.
 var installOrder = []step{
-	{
-		// Asks the node for every image the install will use, at once, so
-		// that it downloads from the start instead of one step at a time.
-		Name:        "Images",
-		Skip:        func(i *Installer) bool { return i.opts.NoImagePull },
-		PullsImages: true,
-	},
 	{
 		Name:  "MetalLB Install",
 		Paths: []string{"dependencies/metallb/release"},
@@ -593,21 +583,8 @@ func (i *Installer) Install(ctx context.Context) error {
 		fmt.Printf("   Resuming from: %s\n\n", i.opts.FromStep)
 	}
 
-	pullingImages := false
 	for idx, s := range steps {
 		fmt.Printf("[%d/%d] %s\n", idx+1, len(steps), s.Name)
-
-		if s.PullsImages {
-			if !i.dryRun {
-				pullingImages = i.startImagePulls(ctx, steps[idx+1:])
-			}
-			continue
-		}
-		if pullingImages {
-			if note := i.imagePullNote(ctx); note != "" {
-				fmt.Printf("  ↓ %s\n", note)
-			}
-		}
 
 		if s.PreHook != nil && !i.dryRun {
 			if err := s.PreHook(ctx, i); err != nil {
@@ -682,10 +659,6 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 	}
 
-	if pullingImages {
-		i.finishImagePulls(ctx)
-	}
-
 	fmt.Println()
 	fmt.Println("✅ All secure software supply chain dependencies installed.")
 	fmt.Println()
@@ -708,8 +681,7 @@ func (i *Installer) stepsToRun() ([]step, error) {
 		}
 	}
 
-	// Per-package install: keep exactly the named steps, in installOrder,
-	// with the image pull-ahead in front so they still download in parallel.
+	// Per-package install: keep exactly the named steps, in installOrder.
 	if len(i.opts.OnlySteps) > 0 {
 		want := make(map[string]bool, len(i.opts.OnlySteps))
 		for _, name := range i.opts.OnlySteps {
@@ -717,7 +689,7 @@ func (i *Installer) stepsToRun() ([]step, error) {
 		}
 		var chosen []step
 		for _, s := range steps {
-			if s.PullsImages || want[s.Name] {
+			if want[s.Name] {
 				chosen = append(chosen, s)
 			}
 		}
@@ -736,11 +708,6 @@ func (i *Installer) stepsToRun() ([]step, error) {
 		if strings.EqualFold(s.Name, wanted) {
 			if only {
 				return steps[idx : idx+1], nil
-			}
-			// Resuming still pulls ahead, for the steps that are left. What
-			// is already on the node is not downloaded again.
-			if idx > 0 && steps[0].PullsImages {
-				return append([]step{steps[0]}, steps[idx:]...), nil
 			}
 			return steps[idx:], nil
 		}
