@@ -23,7 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 )
 
 // A push names its build <supplychain>-<branch>-<sha>; a build made by hand

@@ -21,7 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
+	"github.com/blanketops/secure-software-supplychain/pkg/authz"
 )
 
 // RunSigningContext is what a build carries from the controller into its

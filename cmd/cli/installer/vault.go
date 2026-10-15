@@ -35,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
+	"github.com/blanketops/secure-software-supplychain/pkg/secrets/store"
 )
 
 const (

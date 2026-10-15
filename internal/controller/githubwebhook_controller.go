@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	webhookmediator "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/githubwebhook"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/github"
+	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	webhookmediator "github.com/blanketops/secure-software-supplychain/internal/controller/mediators/githubwebhook"
+	"github.com/blanketops/secure-software-supplychain/pkg/github"
 )
 
 const (

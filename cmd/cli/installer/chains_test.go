@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	manifests "github.com/blanketops/secure-software-supplychain"
 )
 
 func TestChainsConfig(t *testing.T) {

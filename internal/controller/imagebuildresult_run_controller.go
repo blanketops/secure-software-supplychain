@@ -32,8 +32,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
+	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/results"
 )
 
 // ImageBuildResultRunReconciler publishes build results to Tekton.

@@ -32,13 +32,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	supplychain "github.com/ntlaletsi70/secure-software-supply-chain/internal/controller/mediators/supplychain"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/evidence"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
-	pipeline "github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pipeline"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/pruner"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
+	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	supplychain "github.com/blanketops/secure-software-supplychain/internal/controller/mediators/supplychain"
+	"github.com/blanketops/secure-software-supplychain/pkg/evidence"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
+	pipeline "github.com/blanketops/secure-software-supplychain/pkg/tekton/pipeline"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/pruner"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/results"
 )
 
 const (

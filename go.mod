@@ -1,4 +1,4 @@
-module github.com/ntlaletsi70/secure-software-supply-chain
+module github.com/blanketops/secure-software-supplychain
 
 go 1.25.7
 

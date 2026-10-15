@@ -25,11 +25,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	git "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/git"
-	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
-	sonarqube "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/sonarqube"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	git "github.com/blanketops/secure-software-supplychain/pkg/secrets/git"
+	registry "github.com/blanketops/secure-software-supplychain/pkg/secrets/registry"
+	sonarqube "github.com/blanketops/secure-software-supplychain/pkg/secrets/sonarqube"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 type Mediator struct {

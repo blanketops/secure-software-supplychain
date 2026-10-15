@@ -35,8 +35,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
-	"github.com/ntlaletsi70/secure-software-supply-chain/test/utils"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
+	"github.com/blanketops/secure-software-supplychain/test/utils"
 )
 
 const (

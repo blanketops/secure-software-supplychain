@@ -25,8 +25,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	githubsecret "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/github"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	githubsecret "github.com/blanketops/secure-software-supplychain/pkg/secrets/github"
 )
 
 // Mediator sequences the prerequisites for the GitHubWebhookReconciler.

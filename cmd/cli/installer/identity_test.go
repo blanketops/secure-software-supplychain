@@ -24,8 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
+	manifests "github.com/blanketops/secure-software-supplychain"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 func spiffeOptions() Options {

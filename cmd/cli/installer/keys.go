@@ -39,7 +39,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
+	"github.com/blanketops/secure-software-supplychain/pkg/secrets/store"
 )
 
 // Where the keys everything else is verified against are kept is the

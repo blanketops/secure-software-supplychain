@@ -24,7 +24,7 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 )
 
 const (

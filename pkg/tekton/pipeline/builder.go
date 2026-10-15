@@ -23,9 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/authz"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 const (

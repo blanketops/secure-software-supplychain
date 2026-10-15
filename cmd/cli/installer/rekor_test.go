@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	manifests "github.com/blanketops/secure-software-supplychain"
 )
 
 func TestNewRekorSigningKey(t *testing.T) {

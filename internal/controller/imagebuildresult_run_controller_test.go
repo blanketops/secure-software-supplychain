@@ -22,8 +22,8 @@ import (
 	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	supplychainv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/results"
+	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/results"
 )
 
 func TestRecognisesItsOwnRuns(t *testing.T) {

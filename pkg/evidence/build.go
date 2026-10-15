@@ -34,8 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 // Annotations Tekton Chains sets on a run once it has signed it.

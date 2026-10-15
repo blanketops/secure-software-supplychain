@@ -40,12 +40,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
-	registry "github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/registry"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/signing"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/events"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/tekton/triggers"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/authz"
+	registry "github.com/blanketops/secure-software-supplychain/pkg/secrets/registry"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/events"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/triggers"
 )
 
 const (

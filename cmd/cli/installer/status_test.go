@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	manifests "github.com/blanketops/secure-software-supplychain"
 )
 
 // The status report names workloads by hand. Every one of them has to be

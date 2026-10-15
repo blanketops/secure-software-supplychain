@@ -31,7 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
+	manifests "github.com/blanketops/secure-software-supplychain"
 )
 
 var jobGVR = schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}

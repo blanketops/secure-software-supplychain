@@ -23,7 +23,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/authz"
+	"github.com/blanketops/secure-software-supplychain/pkg/authz"
 )
 
 // AuthorizationPredicateType identifies the in-toto attestation that carries

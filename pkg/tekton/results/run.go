@@ -20,7 +20,7 @@ import (
 	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	supplyv1alpha1 "github.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1"
+	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 )
 
 // A build's result is published to Tekton as a CustomRun that refers to the

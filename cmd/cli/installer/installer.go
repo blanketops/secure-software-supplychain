@@ -47,8 +47,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
+	manifests "github.com/blanketops/secure-software-supplychain"
+	"github.com/blanketops/secure-software-supplychain/pkg/secrets/store"
 )
 
 const (

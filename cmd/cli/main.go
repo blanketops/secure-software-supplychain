@@ -22,8 +22,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	installer "github.com/ntlaletsi70/secure-software-supply-chain/cmd/cli/installer"
-	"github.com/ntlaletsi70/secure-software-supply-chain/cmd/cli/ui"
+	installer "github.com/blanketops/secure-software-supplychain/cmd/cli/installer"
+	"github.com/blanketops/secure-software-supplychain/cmd/cli/ui"
 )
 
 func main() {

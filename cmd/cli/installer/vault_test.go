@@ -40,8 +40,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	manifests "github.com/ntlaletsi70/secure-software-supply-chain"
-	"github.com/ntlaletsi70/secure-software-supply-chain/pkg/secrets/store"
+	manifests "github.com/blanketops/secure-software-supplychain"
+	"github.com/blanketops/secure-software-supplychain/pkg/secrets/store"
 )
 
 // fakeVault keeps what the installer configures and what is written to the
