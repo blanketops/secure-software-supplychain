@@ -396,8 +396,11 @@ func Uninstall() error {
 
 // ForceUninstall removes the finalizers from the project's resources, then the CRDs.
 // It is for a cluster whose controller is gone; nothing the finalizers guard is cleaned up.
+// Only the kinds whose controllers actually set a finalizer are listed: SupplyChain,
+// GitHubWebhook and SupplyChainPolicy. ImageBuild and the result kinds carry none —
+// their children are cleaned up by owner-reference garbage collection, not a finalizer.
 func ForceUninstall() error {
-	for _, kind := range []string{"supplychain", "imagebuild", "githubwebhook"} {
+	for _, kind := range []string{"supplychain", "githubwebhook", "supplychainpolicy"} {
 		fmt.Printf("Removing finalizers from %s resources\n", kind)
 		list, err := sh.Output(kubectl, "get", kind, "--all-namespaces", "-o",
 			`jsonpath={range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}`)
