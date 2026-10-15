@@ -80,13 +80,57 @@ An image's wait allows up to an hour, so a slow pull does not force a re-run. On
 one image at a time by default, create the cluster with `hack/kind-cluster.yaml`, which turns on parallel
 pulls and speeds up installing several packages at once.
 
+### The install order
+
+This is the exact order `supplychain install` applies the packages, as the
+installer defines it. Each is a package name you can give to `install` (its
+slug — lowercase, spaces to hyphens, e.g. `metallb-install`, `tekton-chains`).
+A step whose condition is not met is skipped; the number is its position in a
+full `spiffe`, `--key-residency vault` install.
+
+| # | Package | Condition to run |
+|---|---|---|
+| 1 | MetalLB Install | always |
+| 2 | cert-manager | unless the cluster already runs its own |
+| 3 | Certificate Authority | always |
+| 4 | Tekton Pipelines | always |
+| 5 | Tekton Triggers | always |
+| 6 | Tekton Interceptors | always |
+| 7 | SPIRE CRDs | `--signing-identity spiffe` |
+| 8 | SPIRE | `--signing-identity spiffe` — includes the Tornjak UI sidecars |
+| 9 | SPIRE Identities | `--signing-identity spiffe` |
+| 10 | Vault | unless `--vault-addr` or `--external-secret-store` |
+| 11 | Signing Keys | `--key-residency vault` |
+| 12 | Fulcio | always |
+| 13 | Rekor | always |
+| 14 | Tekton Chains | always |
+| 15 | Policy Controller | always |
+| 16 | Tekton Dashboard | always |
+| 17 | Tekton Tasks | always |
+| 18 | Tekton Results | always |
+| 19 | MetalLB Dependencies | always |
+| 20 | NGINX Ingress Controller | always |
+| 21 | Ingress Routes | always |
+| 22 | Secret Store Identity | `--signing-identity spiffe`, unless `--vault-addr`/`--external-secret-store` |
+| 23 | Secret Store | unless `--external-secret-store` |
+| 24 | SonarQube | always |
+
+The order is not arbitrary — later steps depend on earlier ones. SPIRE comes
+before Fulcio (Fulcio is told to trust SPIRE's issuer); Vault before Fulcio and
+Rekor (which may sign with keys it holds); the NGINX controller before the
+Ingress routes (the admission webhook must be up first). Installing a single
+package with `install <name>` does NOT pull its prerequisites in — install them
+first, or run the full install. `supplychain install --list` prints the names.
+
+The table below is the same steps grouped by what they set up.
+
 | Step | What it sets up |
 |---|---|
 | MetalLB | A load-balancer address for the ingress controller on a local cluster |
 | cert-manager | Issues and renews TLS certificates. Skipped when the cluster already runs a cert-manager of its own, which is then used as it is. |
 | Certificate Authority | A private CA, and the `ClusterIssuer` `supply-chain-ca` that signs with it. Its certificate is what every client of the secure software supply chain's services trusts. |
 | Tekton Pipelines, Triggers, Interceptors | The build engine and the webhook receiver |
-| SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
+| SPIRE CRDs, SPIRE, SPIRE Identities | *`spiffe` only.* The identity provider, its CSI driver and OIDC discovery, the Tornjak UI (sidecars in the SPIRE server pod, cluster-internal), and the identities it may hand out: Tekton Chains, and nothing else until a `SupplyChain` registers its build ServiceAccount |
 | Vault | Where the credentials are kept, and with `--key-residency vault` the signing keys. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Signing Keys | *`--key-residency vault` only.* Fulcio's and Rekor's keys, made inside Vault, and Fulcio's root certificate issued from the one Vault holds. |
 | Fulcio | The certificate authority, with its CT log, trusting exactly one issuer: SPIRE, or the Kubernetes API server |

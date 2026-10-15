@@ -138,6 +138,8 @@ func (i *Installer) Status(ctx context.Context) error {
 		switch group.Title {
 		case "Certificates":
 			problems += i.certificateStatus(ctx)
+		case "SPIRE":
+			i.tornjakStatus(ctx, absent == len(group.Workloads))
 		case "Credentials":
 			problems += i.secretStoreStatus(ctx)
 		}
@@ -257,6 +259,41 @@ func (i *Installer) secretStoreStatus(ctx context.Context) int {
 	return 0
 }
 
+// tornjakStatus reports the Tornjak UI, which runs as sidecars in the
+// spire-server pod. It is informational only — it does not add to the problem
+// count, because the "Server" workload line already gates that pod — and it is
+// silent when SPIRE is not installed (spireAbsent), since Tornjak only exists
+// under --signing-identity spiffe.
+func (i *Installer) tornjakStatus(ctx context.Context, spireAbsent bool) {
+	if spireAbsent {
+		return
+	}
+	pods, err := i.dynamic.Resource(podGVR).Namespace(spireNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=server,app.kubernetes.io/instance=spire",
+	})
+	if err != nil || len(pods.Items) == 0 {
+		return
+	}
+	// Both sidecars must be ready for the UI to serve: the frontend calls the
+	// backend, and the backend reaches the SPIRE server socket.
+	wanted := map[string]bool{"tornjak-backend": false, "tornjak-frontend": false}
+	statuses, _, _ := unstructured.NestedSlice(pods.Items[0].Object, "status", "containerStatuses")
+	for _, s := range statuses {
+		cs, _ := s.(map[string]any)
+		name, _ := cs["name"].(string)
+		if _, ok := wanted[name]; ok {
+			ready, _ := cs["ready"].(bool)
+			wanted[name] = ready
+		}
+	}
+	if wanted["tornjak-backend"] && wanted["tornjak-frontend"] {
+		fmt.Printf("  ✓ %-38s running (port-forward svc/tornjak 3000:3000 10000:10000)\n", "Tornjak UI")
+	} else {
+		fmt.Printf("  … %-38s starting\n", "Tornjak UI")
+	}
+}
+
+// hasNested reports whether a nested field exists.
 func hasNested(obj map[string]any, fields ...string) bool {
 	_, found, _ := unstructured.NestedFieldNoCopy(obj, fields...)
 	return found

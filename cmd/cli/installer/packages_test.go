@@ -17,6 +17,9 @@ limitations under the License.
 package cli
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -115,5 +118,41 @@ func TestStepNamesListsInstallablePackages(t *testing.T) {
 	names := spiffeInstaller().StepNames()
 	if len(names) == 0 || names[0] != "MetalLB Install" {
 		t.Errorf("StepNames = %v; want it to start with MetalLB Install", names)
+	}
+}
+
+// The "install order" table in docs/installation.md is documented as
+// authoritative — the exact order the installer applies the packages. This
+// keeps it honest: the package names in that table, in order, must equal the
+// names in installOrder. If a step is added, removed or reordered in code and
+// the doc is not updated (or vice versa), this fails.
+func TestInstallOrderDocMatchesCode(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "installation.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rows of the "# | Package | Condition to run" table look like
+	// "| 1 | MetalLB Install | always |". Pull the package column, in order.
+	row := regexp.MustCompile(`^\|\s*\d+\s*\|\s*([^|]+?)\s*\|`)
+	var documented []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if m := row.FindStringSubmatch(line); m != nil {
+			documented = append(documented, m[1])
+		}
+	}
+
+	var coded []string
+	for _, s := range installOrder {
+		coded = append(coded, s.Name)
+	}
+
+	if len(documented) != len(coded) {
+		t.Fatalf("docs list %d install steps, installOrder has %d:\n  docs: %v\n  code: %v",
+			len(documented), len(coded), documented, coded)
+	}
+	for i := range coded {
+		if documented[i] != coded[i] {
+			t.Errorf("step %d: docs say %q, installOrder has %q", i+1, documented[i], coded[i])
+		}
 	}
 }
