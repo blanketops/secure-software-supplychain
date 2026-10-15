@@ -81,6 +81,22 @@ func (Tools) GoJunitReport() error {
 	return err
 }
 
+// goAllure builds the in-tree go2allure converter into bin/. It turns
+// `go test -json` into Allure result files, one per test with the test's own
+// output attached, so every test — passing or failing — has a body in the
+// report. It is local source, not a downloaded tool, so it is built, not
+// `go install`ed from a remote module.
+func goAllure() (string, error) {
+	out := binary("go2allure")
+	if err := os.MkdirAll(localBin(), 0o755); err != nil {
+		return "", err
+	}
+	if err := sh.RunV("go", "build", "-o", out, "./magefiles/go2allure"); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 // GolangciLint downloads golangci-lint if necessary, and builds it with the
 // plugins named in .custom-gcl.yml when that file exists.
 func (Tools) GolangciLint() error {
@@ -127,7 +143,15 @@ func tool(name, pkg, version string) (string, error) {
 		}
 		fmt.Printf("Downloading %s@%s\n", pkg, version)
 		_ = os.Remove(binary(name))
-		if err := sh.RunWithV(map[string]string{"GOBIN": localBin()}, "go", "install", pkg+"@"+version); err != nil {
+		// Public tool modules are fetched over the module proxy, not git: a
+		// global git insteadOf that rewrites github.com HTTPS to SSH (common
+		// for private-repo access) otherwise forces `go install` through SSH
+		// and stalls. GOPRIVATE still routes private modules direct.
+		installEnv := map[string]string{
+			"GOBIN":   localBin(),
+			"GOPROXY": env("GOPROXY", "https://proxy.golang.org,direct"),
+		}
+		if err := sh.RunWithV(installEnv, "go", "install", pkg+"@"+version); err != nil {
 			return "", err
 		}
 		if err := os.Rename(binary(name), versioned); err != nil {

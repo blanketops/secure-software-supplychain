@@ -38,6 +38,7 @@ __pycache__/
 
 # JUnit XML the tests write for Allure to ingest, and any Allure report
 test-results/
+allure-results/
 allure-report/
 
 # Scratch logs and editor backups — never commit

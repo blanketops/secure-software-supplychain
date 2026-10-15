@@ -151,27 +151,44 @@ func TestE2E() error {
 	return errors.Join(err, CleanupTestE2E())
 }
 
-// testResultsDir is where the JUnit XML reports are written for Allure to
-// ingest. Allure's junit reader turns the XML files in this directory into a
-// report with `allure generate test-results`.
+// testResultsDir is where the JUnit XML reports are written. JUnit is kept as
+// a secondary artifact (CI systems read it); the Allure report itself is built
+// from allureResultsDir, which carries each test's body.
 func testResultsDir() string { return env("TEST_RESULTS", "test-results") }
 
-// testWithReport runs `go <args...>` (a go test invocation), streams its
-// output to the terminal as before, and also writes a JUnit XML report named
-// after suite into TEST_RESULTS for Allure to ingest. The test's own exit
-// status is preserved: a failing suite still fails the target, with the report
-// written either way.
+// allureResultsDir holds the Allure-native result files go2allure writes, one
+// per test with the test's own output attached. `allure generate` reads this
+// directory. JUnit alone leaves passing tests with an empty body ("no
+// execution" in the report); these result files are what give them one.
+func allureResultsDir() string { return env("ALLURE_RESULTS", "allure-results") }
+
+// testWithReport runs a `go test` invocation as `go test -json`, streams the
+// human-readable form to the terminal, and from the one JSON stream writes
+// both a JUnit XML report (test-results/junit-<suite>.xml, for CI) and Allure
+// result files with per-test bodies (allure-results/, for the Allure report).
+// The test's own exit status is preserved: a failing suite still fails the
+// target, with both reports written either way.
 func testWithReport(suite string, environment map[string]string, args ...string) error {
 	report, err := tool("go-junit-report", "github.com/jstemmer/go-junit-report/v2", goJunitReportVersion)
+	if err != nil {
+		return err
+	}
+	allure, err := goAllure()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(testResultsDir(), 0o755); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(allureResultsDir(), 0o755); err != nil {
+		return err
+	}
 	xmlPath := filepath.Join(testResultsDir(), "junit-"+suite+".xml")
 
-	test := exec.Command("go", args...)
+	// Run as JSON so both the test's per-test output (for Allure bodies) and
+	// the structure (for JUnit) come from one stream. The first arg is "test".
+	jsonArgs := append([]string{"test", "-json"}, args[1:]...)
+	test := exec.Command("go", jsonArgs...)
 	test.Env = os.Environ()
 	for key, value := range environment {
 		test.Env = append(test.Env, key+"="+value)
@@ -182,35 +199,53 @@ func testWithReport(suite string, environment map[string]string, args ...string)
 	}
 	test.Stderr = os.Stderr
 
-	xmlFile, err := os.Create(xmlPath)
+	// The JSON stream is captured to a temp file, so the two converters and
+	// the terminal echo each read the whole of it without racing on a pipe.
+	jsonFile, err := os.CreateTemp("", "gotest-"+suite+"-*.json")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = xmlFile.Close() }()
-
-	// go-junit-report reads the test output on its stdin, writes the XML to
-	// its stdout, and the output is echoed to the terminal through a tee.
-	converter := exec.Command(report, "-set-exit-code")
-	converter.Stdin = io.TeeReader(pipe, os.Stdout)
-	converter.Stdout = xmlFile
-	converter.Stderr = os.Stderr
+	defer func() { _ = os.Remove(jsonFile.Name()) }()
+	defer func() { _ = jsonFile.Close() }()
 
 	if err := test.Start(); err != nil {
 		return err
 	}
-	if err := converter.Start(); err != nil {
+	if _, err := io.Copy(jsonFile, pipe); err != nil {
 		return err
 	}
-	// Wait for the test to finish producing output, then for the converter to
-	// drain it. The test's exit status is what the target returns; the
-	// converter failing on a reported test failure is folded into it.
 	testErr := test.Wait()
-	convErr := converter.Wait()
-	fmt.Printf("Wrote %s\n", xmlPath)
+	if _, err := jsonFile.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	// JUnit XML from the JSON stream (go-junit-report reads -parser gojson).
+	xmlFile, err := os.Create(xmlPath)
+	if err != nil {
+		return err
+	}
+	junit := exec.Command(report, "-parser", "gojson")
+	junit.Stdin = jsonFile
+	junit.Stdout = xmlFile
+	junit.Stderr = os.Stderr
+	junitErr := junit.Run()
+	_ = xmlFile.Close()
+
+	// Allure result files (with bodies) from the same JSON stream.
+	if _, err := jsonFile.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	allureCmd := exec.Command(allure, "-o", allureResultsDir())
+	allureCmd.Stdin = jsonFile
+	allureCmd.Stdout = os.Stdout
+	allureCmd.Stderr = os.Stderr
+	allureErr := allureCmd.Run()
+
+	fmt.Printf("Wrote %s and Allure results to %s\n", xmlPath, allureResultsDir())
 	if testErr != nil {
 		return testErr
 	}
-	return convErr
+	return errors.Join(junitErr, allureErr)
 }
 
 // CleanupTestE2E deletes the kind cluster the e2e tests ran in.
