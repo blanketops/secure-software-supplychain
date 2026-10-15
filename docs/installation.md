@@ -31,7 +31,6 @@ Every name in angle brackets is yours to fill in. The examples use `your-org/you
 
   ```bash
   kind create cluster --name <cluster> --config hack/kind-cluster.yaml
-  hack/kind-parallel-pulls.sh <cluster>          # for a cluster you already have
   ```
 - `kubectl`, Go 1.25, `helm`, and `git`. [mage](https://magefile.org) is optional: every `mage <target>` below
   can be run as `go run mage.go <target>`. No Docker is needed to build the operator.
@@ -61,7 +60,6 @@ go build -o bin/supplychain ./cmd/cli
 | `--signing-identity` | How builds prove who they are to Fulcio: `spiffe` (recommended) or `kubernetes` (default). See [Signing identity](concepts.md#signing-identity-kubernetes-or-spiffe). |
 | `--trust-domain` | The SPIFFE trust domain, for example your organisation's domain. Identities look like `spiffe://<your-domain>/ns/<namespace>/sa/<serviceaccount>`. |
 | `--from-step` | Resume at a named step, for example `--from-step "Rekor"`. |
-| `--only-step` | Run one step and nothing else, for example `--only-step "Vault"`. |
 | `--key-residency` | Where Fulcio's and Rekor's signing keys are kept: `cluster` (default) or `vault`. See [Where the signing keys are kept](#where-the-signing-keys-are-kept). |
 | `--allow-trust-change` | Let `--signing-identity`, `--trust-domain` or `--key-residency` differ from what the cluster was installed with. See [The installer remembers](#the-installer-remembers). |
 | `--vault-addr` | Use a Vault that already exists, at this address, instead of running one. See [Using a Vault you already have](#using-a-vault-you-already-have). |
@@ -79,8 +77,8 @@ applied; almost all of the install's time is those pulls.
 ```
 
 An image's wait allows up to an hour, so a slow pull does not force a re-run. On kind, where the node pulls
-one image at a time by default, `hack/kind-parallel-pulls.sh <cluster>` turns on parallel pulls (or create the
-cluster with `hack/kind-cluster.yaml`), which speeds up installing several packages at once.
+one image at a time by default, create the cluster with `hack/kind-cluster.yaml`, which turns on parallel
+pulls and speeds up installing several packages at once.
 
 | Step | What it sets up |
 |---|---|

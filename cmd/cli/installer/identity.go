@@ -71,11 +71,8 @@ type Options struct {
 	// FromStep resumes an interrupted install at the named step instead of
 	// starting again from the first one.
 	FromStep string
-	// OnlyStep runs the named step and nothing else.
-	OnlyStep string
 	// OnlySteps runs exactly the named steps (per-package install), in
-	// installOrder, and nothing else. Takes precedence over OnlyStep and
-	// FromStep when set.
+	// installOrder, and nothing else. Takes precedence over FromStep when set.
 	OnlySteps []string
 	// ExternalSecretStore leaves Vault out: the credentials are served by a
 	// ClusterSecretStore the user provides, under the same name and with the

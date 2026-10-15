@@ -357,21 +357,6 @@ func TestParseAssignments(t *testing.T) {
 	}
 }
 
-func TestStepsToRunOnlyStep(t *testing.T) {
-	i := &Installer{opts: Options{OnlyStep: "vault"}}
-	steps, err := i.stepsToRun()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(steps) != 1 || steps[0].Name != "Vault" {
-		t.Errorf("steps = %v, want only Vault", steps)
-	}
-	i.opts.OnlyStep = "no such step"
-	if _, err := i.stepsToRun(); err == nil {
-		t.Error("an unknown step was accepted")
-	}
-}
-
 // With a store of one's own, the installer runs no Vault.
 func TestExternalSecretStoreSkipsVault(t *testing.T) {
 	i := &Installer{opts: Options{ExternalSecretStore: true}}
@@ -556,8 +541,9 @@ func TestSampleStoreMatchesWhatTheInstallerCreates(t *testing.T) {
 }
 
 // The Vault step and the Secret Store step are each run on their own: the
-// first is skipped for a Vault somewhere else, and either can be re-run with
-// --only-step. Each therefore has to bring the namespace its objects are in.
+// first is skipped for a Vault somewhere else, and either can be re-run by
+// naming it as a package. Each therefore has to bring the namespace its
+// objects are in.
 func TestEachVaultStepDeclaresItsNamespace(t *testing.T) {
 	for _, file := range []string{"dependencies/vault/server/vault.yaml", "dependencies/vault/identity/identity.yaml"} {
 		data, err := manifests.Dependencies.ReadFile(file)

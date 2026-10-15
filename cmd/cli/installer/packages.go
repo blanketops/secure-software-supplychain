@@ -26,7 +26,7 @@ import (
 // these let the CLI name one (or a few) of them to apply on their own, so a
 // single dependency can be installed or repaired without the whole run. No
 // prerequisites are pulled in: a step that needs another to be up already
-// will fail fast in its own pre-hook, exactly as --only-step does.
+// will fail fast in its own pre-hook, exactly as a single named package does.
 
 // slug is the typeable form of a step name: lowercased, spaces to hyphens.
 // "MetalLB Install" -> "metallb-install", "Fulcio" -> "fulcio".

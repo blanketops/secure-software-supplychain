@@ -696,19 +696,13 @@ func (i *Installer) stepsToRun() ([]step, error) {
 		return chosen, nil
 	}
 
-	wanted, only := i.opts.FromStep, false
-	if i.opts.OnlyStep != "" {
-		wanted, only = i.opts.OnlyStep, true
-	}
+	wanted := i.opts.FromStep
 	if wanted == "" {
 		return steps, nil
 	}
 	names := make([]string, 0, len(steps))
 	for idx, s := range steps {
 		if strings.EqualFold(s.Name, wanted) {
-			if only {
-				return steps[idx : idx+1], nil
-			}
 			return steps[idx:], nil
 		}
 		names = append(names, s.Name)

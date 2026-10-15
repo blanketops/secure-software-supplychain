@@ -54,7 +54,6 @@ func installCmd() *cobra.Command {
 	var signingIdentity string
 	var trustDomain string
 	var fromStep string
-	var onlyStep string
 	var externalSecretStore bool
 	var keyResidency string
 	var allowTrustChange bool
@@ -105,7 +104,6 @@ Example:
 				TrustDomain:      trustDomain,
 				AllowTrustChange: allowTrustChange,
 				FromStep:         fromStep,
-				OnlyStep:         onlyStep,
 
 				ExternalSecretStore: externalSecretStore,
 				KeyResidency:        keyResidency,
@@ -157,8 +155,6 @@ Example:
 	cmd.Flags().StringVar(&vaultAddr, "vault-addr", "",
 		"Use a Vault that already exists, at this address as the cluster reaches it, instead of running one; "+
 			"it is configured with the token in VAULT_TOKEN or ~/.vault-token, through VAULT_ADDR if that is set")
-	cmd.Flags().StringVar(&onlyStep, "only-step", "",
-		"Run this one step and nothing else, for example \"Vault\"")
 	cmd.Flags().StringVar(&fromStep, "from-step", "",
 		"Resume an interrupted install at this step (the name shown in the progress output, e.g. \"Tekton Chains\")")
 	return cmd

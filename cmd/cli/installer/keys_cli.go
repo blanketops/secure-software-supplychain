@@ -296,7 +296,7 @@ func (i *Installer) ShowKeys(ctx context.Context) error {
 	}
 	if !audited {
 		fmt.Println("\nThe audit log has no signatures: it is off, or nothing has been signed since it was\n" +
-			"turned on. `supplychain install --only-step \"Signing Keys\"` turns it on.")
+			"turned on. `supplychain install signing-keys` turns it on.")
 	}
 	return nil
 }

@@ -271,13 +271,6 @@ func buildTaskList(
 	return tasks
 }
 
-// Images lists the images the steps written in this package run, beyond those
-// the Tasks installed with the stack bring. The installer pulls them ahead,
-// so that the first build does not have to.
-func Images() []string {
-	return []string{cosignImage, curlImage, skopeoImage, busyboxImage}
-}
-
 // tlsCAVolumeSource is the CA of the in-cluster services' TLS certificates,
 // taken from the trust anchors ConfigMap. It is optional: against public
 // sigstore services there is no such CA, and the volume is then empty.

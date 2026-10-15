@@ -6,10 +6,9 @@ Start with `supplychain status`. It shows which part of the stack is missing or 
 certificates and the secret store's login, and most of what follows starts from one of its lines.
 
 **The install is slow.** Image pulls are nearly all of it. Each package pulls its own images when it is
-applied. On kind, where the node pulls one image at a time by default, run `hack/kind-parallel-pulls.sh
-<cluster>` (it changes the kubelet's `serializeImagePulls` and restarts the kubelet, not any pod), or create
-the cluster with `hack/kind-cluster.yaml`. An image shown as `(retrying)` failed to download and is being
-tried again, which on an unreliable connection is normal.
+applied. On kind, where the node pulls one image at a time by default, create the cluster with
+`hack/kind-cluster.yaml`, which turns on parallel pulls. An image shown as `(retrying)` failed to download
+and is being tried again, which on an unreliable connection is normal.
 
 **After running the installer again, a push no longer starts a build** and
 `tekton-triggers-core-interceptors` is not ready, logging "server key missing". Its certificate Secret was
@@ -33,7 +32,7 @@ service's signing was suspended; `supplychain keys resume <fulcio|rekor>` allows
 **Fulcio or Rekor answers with an error, with `--key-residency vault`.** They sign through Vault, so look
 there first: `kubectl get pods -n vault` (a sealed Vault shows `2/3`), then the service's agent,
 `kubectl logs -n rekor-system deploy/rekor-server -c vault-agent`. "permission denied" means its policy does
-not allow the request; `supplychain install --only-step "Signing Keys"` writes the policies again and never
+not allow the request; `supplychain install signing-keys` writes the policies again and never
 replaces a key.
 
 **A setup Job fails.** The
@@ -79,7 +78,7 @@ the webhook registers by itself once the new token has synced.
 
 **A sign or verify step fails with "x509: certificate signed by unknown authority".** The step does not have
 the CA that Rekor's and Fulcio's certificates come from. It is the `ca.crt` key of the `blanketops-sigstore-roots` ConfigMap in
-the build's namespace; if the key is missing, run `supplychain install --only-step "Tekton Chains"`, which
+the build's namespace; if the key is missing, run `supplychain install tekton-chains`, which
 collects the trust anchors again. If the CA itself was replaced, the same step distributes the new one.
 
 **An image that used to be admitted is refused after an upgrade.** If the upgrade moved SPIRE's discovery
@@ -108,7 +107,7 @@ kubectl get clusterstaticentry supply-chain-secrets                       # the 
 ```
 
 `1/2` means SPIRE has not issued the identity: the entry is missing, or the SPIRE agent is not running on the
-node. Re-run `supplychain install --only-step "SPIRE Identities"` and then `--only-step "Secret Store"` with the
+node. Re-run `supplychain install spire-identities` and then `supplychain install secret-store` with the
 same `--signing-identity` and `--trust-domain` as the install. If SPIRE itself was reinstalled its signing keys
 changed, and the same two steps make Vault trust the new ones.
 
