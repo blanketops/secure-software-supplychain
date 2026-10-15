@@ -88,6 +88,19 @@ The Tekton Dashboard is at `http://supplychain.localhost:8888/dashboard/` once t
 kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097   # http://localhost:9097
 ```
 
+## The SPIFFE UI (Tornjak)
+
+With `--signing-identity spiffe`, the SPIRE server runs [Tornjak](https://github.com/spiffe/tornjak) alongside
+it: a UI for the trust domain, its registered entries and attested agents. It is cluster-internal by design —
+a privileged, unauthenticated management surface — so it has no ingress. Reach it by port-forward:
+
+```bash
+kubectl port-forward -n spire-server svc/tornjak 3000:3000 10000:10000   # then open http://localhost:3000
+```
+
+The frontend is on 3000 and calls the backend API on 10000; forward both. To publish it, put an
+authenticating proxy (oauth2-proxy, mTLS) in front — do not add a raw ingress route.
+
 ## Read the results
 
 The last step of a successful build prints what it verified:

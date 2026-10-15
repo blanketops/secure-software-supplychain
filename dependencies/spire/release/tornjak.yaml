@@ -1,0 +1,78 @@
+# Tornjak — a UI and API for the SPIRE server of this stack.
+#
+# Tornjak runs as two sidecars in the spire-server pod (see the StatefulSet in
+# release.yaml): a backend that reaches the SPIRE server over its API socket —
+# the same /tmp/spire-server/private socket the server and controller-manager
+# already share — and a frontend that serves the React UI. It is installed only
+# under --signing-identity spiffe, where SPIRE exists; the whole SPIRE release
+# is skipped otherwise.
+#
+# It is NOT exposed through ingress. The Tornjak API can create and delete
+# SPIFFE registration entries, and the image is unauthenticated, so it is a
+# privileged management surface. Reach it from your machine with:
+#
+#   kubectl port-forward -n spire-server svc/tornjak 3000:3000 10000:10000
+#   # then open http://localhost:3000
+#
+# To publish it, put an authenticating proxy (oauth2-proxy, mTLS) in front — do
+# not add a raw ingress route.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tornjak-config
+  namespace: spire-server
+  labels:
+    app.kubernetes.io/name: tornjak
+    app.kubernetes.io/instance: spire
+    app.kubernetes.io/component: tornjak
+    app.kubernetes.io/managed-by: blanketops
+data:
+  # The backend reads this alongside the SPIRE server config. It reaches the
+  # server over the shared API socket and keeps its own small state in the
+  # server's data volume, beside the server's datastore.
+  server.conf: |
+    server {
+      # The SPIRE server API socket, shared in-pod via the spire-server-socket
+      # volume mounted at /tmp/spire-server/private on every container.
+      spire_socket_path = "unix:///tmp/spire-server/private/api.sock"
+
+      http {
+        port = 10000
+      }
+    }
+
+    plugins {
+      DataStore "sql" {
+        plugin_data {
+          drivername = "sqlite3"
+          filename = "/run/spire/data/tornjak.sqlite3"
+        }
+      }
+    }
+---
+# The Service is cluster-internal: no ingress, no LoadBalancer. It fronts the
+# two sidecar ports so a port-forward can reach the UI (3000) and, if needed,
+# the backend API (10000) directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tornjak
+  namespace: spire-server
+  labels:
+    app.kubernetes.io/name: tornjak
+    app.kubernetes.io/instance: spire
+    app.kubernetes.io/component: tornjak
+    app.kubernetes.io/managed-by: blanketops
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/instance: spire
+    app.kubernetes.io/component: server
+  ports:
+    - name: frontend
+      port: 3000
+      targetPort: 3000
+    - name: backend-http
+      port: 10000
+      targetPort: 10000

@@ -242,6 +242,64 @@ func TestSpireManifests(t *testing.T) {
 	}
 }
 
+// Tornjak is the SPIFFE management UI: a backend and frontend sidecar in the
+// spire-server pod, plus a ConfigMap and a cluster-internal Service. It is a
+// privileged, unauthenticated surface, so it is deliberately NOT exposed
+// through an Ingress — only reachable by port-forward.
+func TestTornjakSidecar(t *testing.T) {
+	// The sidecars live in the spire-server StatefulSet.
+	var sts *unstructured.Unstructured
+	for _, obj := range decodeAll(t, "dependencies/spire/release/release.yaml") {
+		if obj.GetKind() == "StatefulSet" && obj.GetName() == "spire-server" {
+			sts = obj
+		}
+	}
+	if sts == nil {
+		t.Fatal("no spire-server StatefulSet")
+	}
+	containers, _, _ := unstructured.NestedSlice(sts.Object, "spec", "template", "spec", "containers")
+	names := map[string]string{}
+	for _, c := range containers {
+		container, _ := c.(map[string]any)
+		name, _ := container["name"].(string)
+		image, _ := container["image"].(string)
+		names[name] = image
+	}
+	for _, want := range []string{"tornjak-backend", "tornjak-frontend"} {
+		if names[want] == "" {
+			t.Errorf("the spire-server pod has no %s sidecar", want)
+		}
+		// Images are pinned by digest, as everything else in the tree is.
+		if !strings.Contains(names[want], "@sha256:") {
+			t.Errorf("%s image %q is not pinned by digest", want, names[want])
+		}
+	}
+
+	// The ConfigMap and Service ship alongside the release.
+	kinds := map[string]int{}
+	ingress := 0
+	for _, obj := range decodeAll(t, "dependencies/spire/release/tornjak.yaml") {
+		kinds[obj.GetKind()]++
+		if obj.GetKind() == "Ingress" {
+			ingress++
+		}
+	}
+	if kinds["ConfigMap"] != 1 || kinds["Service"] != 1 {
+		t.Errorf("tornjak.yaml has %d ConfigMaps and %d Services, want 1 each", kinds["ConfigMap"], kinds["Service"])
+	}
+	// The security posture is the point: no Ingress anywhere for Tornjak.
+	if ingress != 0 {
+		t.Error("Tornjak has an Ingress; it is a privileged surface and must stay cluster-internal")
+	}
+	for _, dir := range []string{"ingress/routes"} {
+		for _, obj := range decodeAll(t, "dependencies/"+dir+"/tekton-dashboard.yaml") {
+			if strings.Contains(strings.ToLower(obj.GetName()), "tornjak") {
+				t.Error("a Tornjak ingress route exists; it must not be published")
+			}
+		}
+	}
+}
+
 func TestSpireStepsOnlyForSPIFFE(t *testing.T) {
 	steps := func(opts Options) (names []string) {
 		i := &Installer{opts: opts}

@@ -62,6 +62,18 @@ changes, so a revoked permission takes the identity away within a second, and ev
 When one fails the registration is removed and the `SupplyChain` reports `Unauthorized`, with the three answers
 in `status.authorization`. [Demo 2](../demo/README.md#demo-2-no-authorization-no-identity-no-certificate) shows it.
 
+### Seeing SPIRE: the Tornjak UI
+
+Under `spiffe`, the installer also runs [Tornjak](https://github.com/spiffe/tornjak) as two sidecars in the
+SPIRE server pod — a backend that reaches the server over its API socket, and a React frontend. It shows the
+trust domain, the registered entries (the two above, and any a `SupplyChain` currently holds), and the agents
+that have attested, so what SPIRE is doing can be read rather than inferred from logs.
+
+It is **cluster-internal only**: there is no ingress route for it. Tornjak's API can create and delete
+registration entries and ships unauthenticated, so publishing it would expose a privileged, open management
+surface. Reach it by port-forward (see [the usage guide](usage.md#the-spiffe-ui-tornjak)); to publish it, put
+an authenticating proxy in front — never a raw ingress.
+
 ### Two tiers of proof
 
 Every image a build produces carries proof from two independent identities, and both are required:

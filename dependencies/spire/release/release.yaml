@@ -1168,6 +1168,56 @@ spec:
               mountPath: /tmp
               subPath: spire-controller-manager
               readOnly: false
+
+        # Tornjak backend — the SPIFFE management API. It reaches the SPIRE
+        # server over the shared API socket and serves its HTTP API on 10000.
+        # Installed only under SPIFFE, like the rest of this SPIRE release.
+        # See dependencies/spire/release/tornjak.yaml for config and Service,
+        # and why it is cluster-internal only.
+        - name: tornjak-backend
+          image: "ghcr.io/spiffe/tornjak-backend:v1.4.2@sha256:f31fe4a7a8806e300611666fb4e985eea218df49de2c18ef5dc690182a9efa8d"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --spire-config
+            - /run/spire/config/server.conf
+            - --tornjak-config
+            - /run/spire/tornjak-config/server.conf
+          ports:
+            - name: tornjak-http
+              containerPort: 10000
+          volumeMounts:
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: tornjak-config
+              mountPath: /run/spire/tornjak-config
+              readOnly: true
+            - name: spire-data
+              mountPath: /run/spire/data
+              readOnly: false
+            - name: spire-server-socket
+              mountPath: /tmp/spire-server/private
+              readOnly: false
+          resources:
+            {}
+
+        # Tornjak frontend — the React UI. It is served on 3000 and talks to
+        # the backend over the pod's localhost. REACT_APP_API_SERVER_URI is the
+        # address the browser is told to call, so it is the port-forwarded
+        # backend, not an in-cluster name.
+        - name: tornjak-frontend
+          image: "ghcr.io/spiffe/tornjak-frontend:v1.4.2@sha256:bc944fb5cccd7a42a414bb719f9006dadd74f0cf529e40d9fa48d576cb4483b2"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT_FE
+              value: "3000"
+            - name: REACT_APP_API_SERVER_URI
+              value: "http://localhost:10000"
+          ports:
+            - name: tornjak-fe
+              containerPort: 3000
+          resources:
+            {}
       volumes:
         - name: server-tmp
           emptyDir: {}
@@ -1181,6 +1231,9 @@ spec:
         - name: controller-manager-config
           configMap:
             name: spire-controller-manager
+        - name: tornjak-config
+          configMap:
+            name: tornjak-config
   volumeClaimTemplates:
     - metadata:
         name: spire-data
