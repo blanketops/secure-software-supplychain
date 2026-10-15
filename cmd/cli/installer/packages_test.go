@@ -33,12 +33,13 @@ func spiffeInstaller() *Installer {
 func TestResolveStepMatches(t *testing.T) {
 	i := spiffeInstaller()
 	for token, want := range map[string]string{
-		"Fulcio":          "Fulcio",
-		"fulcio":          "Fulcio",
-		"FULCIO":          "Fulcio",
-		"metallb-install": "MetalLB Install",
-		"nginx":           "NGINX Ingress Controller", // unique prefix
-		"cert-manager":    "cert-manager",
+		"Fulcio":             "Fulcio",
+		"fulcio":             "Fulcio",
+		"FULCIO":             "Fulcio",
+		"metallb-install":    "MetalLB Install",
+		"nginx":              "NGINX Ingress Controller", // unique prefix
+		"cert-manager":       "cert-manager",
+		"ingress-controller": "NGINX Ingress Controller", // unique substring, not a prefix
 	} {
 		got, err := i.resolveStep(token)
 		if err != nil {

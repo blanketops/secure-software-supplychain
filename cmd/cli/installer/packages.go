@@ -50,11 +50,12 @@ func (i *Installer) StepNames() []string {
 	return names
 }
 
-// resolveStep matches one user-given token to a step name. It accepts the
-// exact name, its slug, or a unique prefix of the slug, all case-insensitively,
-// so `fulcio`, `Fulcio` and `metallb-install` all resolve. An ambiguous token
-// (for example `metallb`, which could be install or dependencies) is an error
-// that lists the candidates; an unknown one lists every step.
+// resolveStep matches one user-given token to a step name, case-insensitively,
+// trying in turn: the exact name or slug, then a unique slug prefix, then a
+// unique substring of the slug. So `fulcio`, `metallb-install`,
+// `nginx` and `ingress-controller` all resolve, while a token that still
+// matches more than one step (`metallb`, `ingress`) is refused with the
+// candidates listed, and an unknown one lists every step.
 func (i *Installer) resolveStep(token string) (string, error) {
 	want := slug(token)
 	names := i.StepNames()
@@ -65,22 +66,27 @@ func (i *Installer) resolveStep(token string) (string, error) {
 		}
 	}
 
-	var matches []string
-	for _, n := range names {
-		if strings.HasPrefix(slug(n), want) {
-			matches = append(matches, n)
+	// Prefix first, then substring; each only resolves when it is unique.
+	for _, match := range []func(s string) bool{
+		func(s string) bool { return strings.HasPrefix(s, want) },
+		func(s string) bool { return strings.Contains(s, want) },
+	} {
+		var matches []string
+		for _, n := range names {
+			if match(slug(n)) {
+				matches = append(matches, n)
+			}
+		}
+		if len(matches) == 1 {
+			return matches[0], nil
+		}
+		if len(matches) > 1 {
+			sort.Strings(matches)
+			return "", fmt.Errorf("%q matches more than one step: %s — name one exactly",
+				token, strings.Join(slugs(matches), ", "))
 		}
 	}
-	switch len(matches) {
-	case 1:
-		return matches[0], nil
-	case 0:
-		return "", fmt.Errorf("no step %q; the steps are: %s", token, strings.Join(slugs(names), ", "))
-	default:
-		sort.Strings(matches)
-		return "", fmt.Errorf("%q matches more than one step: %s — name one exactly",
-			token, strings.Join(slugs(matches), ", "))
-	}
+	return "", fmt.Errorf("no step %q; the steps are: %s", token, strings.Join(slugs(names), ", "))
 }
 
 // resolveSteps maps every requested token to a canonical step name, failing on
