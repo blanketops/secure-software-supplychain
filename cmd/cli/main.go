@@ -60,9 +60,10 @@ func installCmd() *cobra.Command {
 	var keyResidency string
 	var allowTrustChange bool
 	var vaultAddr string
+	var listSteps bool
 
 	cmd := &cobra.Command{
-		Use:   "install",
+		Use:   "install [package...]",
 		Short: "Install secure software supply chain dependencies onto the cluster",
 		Long: `Installs all secure software supply chain platform dependencies in the correct order:
   1. MetalLB
@@ -73,6 +74,18 @@ func installCmd() *cobra.Command {
 
 All manifests are embedded in the binary — no network access required
 beyond connectivity to the Kubernetes API server.
+
+With no arguments it installs everything. Name one or more packages to install
+or repair just those, in order, without the whole run — for example:
+
+  supplychain install metallb-install
+  supplychain install fulcio rekor
+  supplychain install --list        # the package names you can give
+
+Images are still pulled ahead in parallel for whatever is being installed.
+A package that needs another to be up already (Fulcio needs cert-manager, say)
+is not pulled in for you; install its prerequisites first, or run the full
+install.
 
 Use --webhook-host to set the public hostname for ingress routing
 (e.g. your Tailscale Funnel URL). This substitutes WEBHOOK_HOST in
@@ -109,10 +122,21 @@ Example:
 			if err != nil {
 				return fmt.Errorf("failed to create installer: %w", err)
 			}
+			if listSteps {
+				fmt.Println("Installable packages (give the name to 'install'):")
+				for _, name := range i.StepNames() {
+					fmt.Printf("  %s\n", name)
+				}
+				return nil
+			}
+			if err := i.SelectSteps(args); err != nil {
+				return err
+			}
 			return i.Install(ctx)
 		},
 	}
 
+	cmd.Flags().BoolVar(&listSteps, "list", false, "List the installable package names and exit")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig (defaults to in-cluster or ~/.kube/config)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")
 	cmd.Flags().StringVar(&webhookHost, "webhook-host", "",

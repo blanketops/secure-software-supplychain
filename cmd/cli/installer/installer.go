@@ -707,6 +707,23 @@ func (i *Installer) stepsToRun() ([]step, error) {
 			steps = append(steps, s)
 		}
 	}
+
+	// Per-package install: keep exactly the named steps, in installOrder,
+	// with the image pull-ahead in front so they still download in parallel.
+	if len(i.opts.OnlySteps) > 0 {
+		want := make(map[string]bool, len(i.opts.OnlySteps))
+		for _, name := range i.opts.OnlySteps {
+			want[name] = true
+		}
+		var chosen []step
+		for _, s := range steps {
+			if s.PullsImages || want[s.Name] {
+				chosen = append(chosen, s)
+			}
+		}
+		return chosen, nil
+	}
+
 	wanted, only := i.opts.FromStep, false
 	if i.opts.OnlyStep != "" {
 		wanted, only = i.opts.OnlyStep, true
