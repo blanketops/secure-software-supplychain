@@ -114,7 +114,14 @@ changed, and the same two steps make Vault trust the new ones.
 **Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
 controller reads the image's signatures and attestations from the registry, once for each of the four policies,
 and the API server gives it ten seconds. On a slow connection to the registry that is not always enough. The
-webhook fails closed, so nothing unverified is admitted; apply the workload again.
+webhook fails closed, so nothing unverified is admitted; apply the workload again. On a lossy uplink, where one
+dropped DNS reply costs five seconds, raise `timeoutSeconds` on the `policy.sigstore.dev` validating and mutating
+webhooks to 30, the most Kubernetes allows; policy-controller keeps the value when it updates its own webhook
+configuration. Admitting a signed image was measured at 4 to 12 seconds on a link losing a sixth of its packets.
+
+**Pushes stop starting builds, and GitHub's delivery log shows `500 ... EOF`.** Tailscale Funnel dropped the
+delivery before it reached the cluster. [Reaching the UIs](access.md#when-the-webhook-stops-arriving) shows how
+to check each hop and how to restore it.
 
 **A build fails at `sign-image-cosign` with a registry error after "tlog entry created".** The signature was
 logged in Rekor but could not be stored next to the image, usually a network failure talking to the registry.

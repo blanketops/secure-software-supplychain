@@ -715,7 +715,8 @@ What is public and what is not:
 - Funnel publishes everything served on that hostname, so ingress routes **only the webhook** there.
 - The Tekton Dashboard and SonarQube are routed on `--ui-host` (`supplychain.localhost` by default), which
   resolves only on your machine: `http://supplychain.localhost:8888/dashboard/` and
-  `http://supplychain.localhost:8888/sonarqube/`.
+  `http://supplychain.localhost:8888/sonarqube/`. To reach them from your other devices, publish them
+  tailnet-only, never through Funnel: see [Reaching the UIs](access.md).
 - Set a webhook secret (`spec.webhookSecretRef` on the `GitHubWebhook`) so that only GitHub's deliveries start
   builds.
 - `tailscale funnel reset` takes the hostname off the internet again.

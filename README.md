@@ -127,6 +127,7 @@ goes wrong.
 | [Installation](docs/installation.md) | The seven phases, including Vault, the credentials, and Tailscale Funnel |
 | [How it works](docs/concepts.md) | Identity, authorization, the two tiers of proof, admission, and evidence |
 | [Usage](docs/usage.md) | The resources you write, following a build, reading results, the CLI |
+| [Reaching the UIs](docs/access.md) | The links to every UI over Tailscale, which are safe to publish, and the webhook's path |
 | [Troubleshooting](docs/troubleshooting.md) | What goes wrong and why |
 | [Demos](demo/README.md) | The recordings above and how to make them again |
 
