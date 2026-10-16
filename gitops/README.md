@@ -1,8 +1,8 @@
-# infrastructure-gitops
+# gitops
 
-Argo CD definitions for running secure-software-supply-chain across two clusters: a build engine that builds,
-signs and attests images, and a read engine that only verifies them. The solution itself lives in the sibling
-repository `../secure-software-supply-chain`.
+Argo CD definitions for running the supply chain across two clusters: a build cluster that builds, signs and
+attests images, and a read cluster that only verifies them and runs the workloads. Argo CD runs in the read
+cluster and deploys to both from this directory. Commands below run from the repository root.
 
 ## Why two clusters
 
@@ -12,22 +12,22 @@ clusters that run applications.
 
 | Cluster | Runs | Managed here |
 |---|---|---|
-| Build engine (write) | cert-manager, Tekton, Sigstore, SPIRE, Vault, policy-controller, the operator | The tenant resources: SupplyChain, its roles, GitHubWebhook, SupplyChainPolicy |
-| Read engine (workload) | sigstore policy-controller only | policy-controller, the public trust anchors, the rendered TrustRoot and ClusterImagePolicies |
+| Build | cert-manager, Tekton, Sigstore, SPIRE, Vault, policy-controller, the operator | `supplychain`: the SupplyChain, its roles, the GitHubWebhook, the SupplyChainPolicy, the Rekor ingress |
+| Read | sigstore policy-controller, Argo CD, the workloads | `policy`: policy-controller, the public trust anchors, the rendered TrustRoot and ClusterImagePolicies; `for-kaniko-app`: the sample workload |
 
-## How trust reaches the read engine
+## How trust reaches the read cluster
 
 A SupplyChainPolicy is reconciled by the operator and requires the SupplyChain it references, so it cannot be
-applied to the read engine. It is applied to the build engine, where the operator renders a policy-controller
-TrustRoot and four ClusterImagePolicies (signature, authorization, chains, provenance). `hack/export-trust.sh`
+applied to the read cluster. It is applied to the build cluster, where the operator renders a policy-controller
+TrustRoot and four ClusterImagePolicies (signature, authorization, chains, provenance). `gitops/hack/export-trust.sh`
 copies those, together with the `blanketops-sigstore-roots` and `supply-chain-ca` ConfigMaps, into
-`platforms/secure-read-engine/trust/`. Committing that directory is what changes what the read engine admits.
+`gitops/policy/trust/`. Committing that directory is what changes what the read cluster admits.
 
-The read engine is not fully offline. The pipeline's own signature and authorization attestation carry a Rekor
+The read cluster is not fully offline. The pipeline's own signature and authorization attestation carry a Rekor
 bundle and verify offline, but Tekton Chains stores its signature and provenance without one, so policy-controller
-looks those entries up in Rekor. The export therefore rewrites every Rekor URL to an address the read engine can
-reach (`-r`), served by `platforms/secure-build-engine/rekor-ingress.yaml`; the read engine's policy-controller
-trusts the private CA through `policy-controller/trust-supply-chain-ca.yaml`. Fulcio and the CT log are never
+looks those entries up in Rekor. The export therefore rewrites every Rekor URL to an address the read cluster can
+reach (`-r`), served by `gitops/supplychain/rekor-ingress.yaml`; the read cluster's policy-controller trusts the
+private CA through `gitops/policy/policy-controller/trust-supply-chain-ca.yaml`. Fulcio and the CT log are never
 contacted during verification, and their URLs are left as rendered.
 
 | Exported URL | Verified against | Result |
@@ -36,10 +36,10 @@ contacted during verification, and their URLs are left as rendered.
 | Rekor through the ingress, Fulcio and CT log unreachable | signed image | admitted |
 | Rekor through the ingress, Fulcio and CT log unreachable | image signed by an earlier install | refused by all four policies |
 
-On two kind clusters on one machine (`kind-blanketops` building, `kind-blanketops-read` running only
-policy-controller and this directory), the read cluster admitted the build cluster's signed image, refused the
-same app signed under an earlier signing identity and refused an unsigned image, and the build cluster's ingress
-logged the read cluster's Rekor lookups (`POST /api/v1/log/entries/retrieve`, 200).
+On two kind clusters on one machine (`kind-blanketops` building, `kind-blanketops-read` verifying), the read
+cluster admitted the build cluster's signed image, refused the same app signed under an earlier signing identity
+and refused an unsigned and a tampered image, and the build cluster's ingress logged the read cluster's Rekor
+lookups (`POST /api/v1/log/entries/retrieve`, 200).
 
 ```
 read cluster                                  build cluster
@@ -53,87 +53,58 @@ read cluster                                  build cluster
 
 | Path | Contents |
 |---|---|
-| `argocd/` | The Applications, for the Argo CD that runs in the read cluster: `secure-read-engine` and `read-workloads` deploy to that cluster, `secure-build-engine` to the registered `build-cluster`. |
-| `platforms/secure-build-engine/` | Tenant resources, copied from the solution's `config/samples` and edited per tenant, and the Rekor ingress. |
-| `platforms/secure-read-engine/policy-controller/` | policy-controller v0.13.1, vendored from the solution's `dependencies/sigstore/policy-controller`, patched to trust the private CA. |
-| `platforms/secure-read-engine/trust/` | Generated by `hack/export-trust.sh`. Empty until the first export. |
-| `hack/export-trust.sh` | Exports the trust from the build engine and points it at the reachable Rekor. Waits for every SupplyChainPolicy to be Ready first. |
-| `workloads/for-kaniko-app/` | A sample workload for the read engine: the signed image, pinned by digest, in a namespace that opts in to verification. |
-| `hack/sync-from-solution.sh` | Refreshes the vendored policy-controller from the solution. |
+| `argocd/` | The three Applications, for the Argo CD in the read cluster: `supplychain` deploys to the registered `build-cluster`, `policy` and `for-kaniko-app` to the read cluster itself. |
+| `supplychain/` | The build cluster's tenant resources, copied from `config/samples` and edited per tenant, and the Rekor ingress. |
+| `policy/policy-controller/` | policy-controller v0.13.1, vendored from `dependencies/sigstore/policy-controller`, patched to trust the private CA and given the longest admission timeout. |
+| `policy/trust/` | Generated by `hack/export-trust.sh`; never edited by hand. |
+| `for-kaniko-app/` | The sample workload: the signed image, pinned by digest, in the `dev` namespace, which opts in to verification. |
+| `hack/export-trust.sh` | Exports the trust from the build cluster and points it at the reachable Rekor. Waits for every SupplyChainPolicy to be Ready first. |
+| `hack/sync-from-solution.sh` | Refreshes the vendored policy-controller from `dependencies/`. |
 | `hack/register-build-cluster.sh` | Registers the build cluster with the read cluster's Argo CD. The token stays in the cluster, never in Git. |
-| `hack/tailnet-links.sh` | Exposes the UIs and APIs of both clusters on this machine's Tailscale name and checks every link. |
-| `hack/argocd-github-sso.sh` | Turns on GitHub sign-in for the read cluster's Argo CD, limited to the `blanketops` organisation. |
+| `hack/tailnet-links.sh` | Publishes the UIs on this machine's Tailscale name and checks every link; see [Reaching the UIs](../docs/access.md). |
+| `hack/argocd-github-sso.sh` | Turns on GitHub sign-in for the read cluster's Argo CD, limited to one team of the organisation. |
 
 ## Getting started
 
-1. Install the build engine's platform and operator from the solution, in its documented order:
-   `supplychain install <packages>`, then `mage install deploy` (see its `docs/installation.md`).
-2. Install Argo CD in the read cluster, register the build cluster with `hack/register-build-cluster.sh`, and
-   apply the Applications: `kubectl --context <read-context> apply -k argocd/`.
-3. Once the SupplyChainPolicy is Ready on the build engine, export and commit its trust:
+1. Install the build cluster's platform and operator in the documented order:
+   `supplychain install <packages>`, then `mage install deploy` (see [Installation](../docs/installation.md)).
+2. Install Argo CD in the read cluster, register the build cluster with `gitops/hack/register-build-cluster.sh`,
+   and apply the Applications: `kubectl --context <read-context> apply -k gitops/argocd/`.
+3. Once the SupplyChainPolicy is Ready on the build cluster, export and commit its trust:
 
    ```
-   hack/export-trust.sh -c <build-context> -r https://<rekor-host>
-   git add platforms/secure-read-engine/trust && git commit -s -m "chore(trust): export from build engine"
+   gitops/hack/export-trust.sh -c <build-context> -r https://<rekor-host>
+   git add gitops/policy/trust && git commit -s -m "chore(trust): export from the build cluster"
    ```
 
-4. Label each workload namespace on the read engine with `policy.sigstore.dev/include=true`; policy-controller
-   only verifies images in labelled namespaces.
+4. Label each workload namespace on the read cluster with `policy.sigstore.dev/include=true`; policy-controller
+   only verifies images in labelled namespaces. `gitops/for-kaniko-app/namespace.yaml` does this for `dev`.
 
-## Reaching the clusters
+## Argo CD on a slow link
 
-Everything is reached through the Tailscale name of the machine that runs both kind clusters,
-`pop-os.tailf8145.ts.net`. Only the GitHub webhook is public, through Tailscale Funnel; every other link is
-served tailnet-only, so it answers on devices signed in to the tailnet and nowhere else. The solution's
-[Reaching the UIs](https://github.com/blanketops/secure-software-supplychain/blob/main/docs/access.md) is the
-reference for these links and for which UIs are safe to publish; this section covers what this repository runs.
-
-| Link | What | Reach | Backend |
-|---|---|---|---|
-| `https://pop-os.tailf8145.ts.net/` | GitHub push webhook, to the build engine's EventListener | Public (Funnel) | `127.0.0.1:8888`, the `kind-ingress-bridge` system unit, to ingress-nginx `172.18.255.200:80` |
-| `https://pop-os.tailf8145.ts.net:8081/` | Argo CD, in the read cluster | Tailnet | `argocd/argocd-server:443` |
-| `http://127.0.0.1:3000/` | Tornjak UI: SPIRE agents and registration entries | This machine only | `spire-server/tornjak:3000` and `:10000`; its API writes SPIRE entries without a login, so it is never served on the tailnet |
-| `https://pop-os.tailf8145.ts.net:9097/` | Tekton Dashboard: PipelineRuns and their logs | Tailnet | `tekton-pipelines/tekton-dashboard:9097` |
-| `https://pop-os.tailf8145.ts.net:9000/sonarqube/` | SonarQube | Tailnet | `default/sonarqube-sonarqube:9000` |
-| `https://pop-os.tailf8145.ts.net:3443/api/v1/log` | Rekor API, the build engine's transparency log | Tailnet | `rekor-system/rekor-server:443` |
-| `https://pop-os.tailf8145.ts.net:8443/` | for-kaniko-app, the sample workload in the read cluster | Tailnet | `workloads/for-kaniko-app:80` |
-| `https://pop-os.tailf8145.ts.net:8002/` | The solution's observer: supply chains, builds, signatures, Rekor entries, who may sign, admission policies, in the build cluster | Tailnet | `supplychain observe --context kind-blanketops --no-browser` on `127.0.0.1:8002` |
-
-Each tailnet link is a `kubectl port-forward` on `127.0.0.1`, run by a user systemd unit
-(`<name>-port-forward.service`) and served over HTTPS by `tailscale serve` on its own port. A port-forward keeps
-running after its pod is replaced but forwards nothing, so the units run it under `~/.local/bin/kpf-watch`, which
-exits when the local port stops answering and lets systemd start it again. Deleting the Tekton Dashboard pod
-brought its link back in about 15 seconds.
-
-The observer is the exception: `supplychain-observe.service` runs `supplychain observe` from the sibling
-repository's `bin/supplychain`, which starts its own `kubectl proxy` with this machine's credentials. It forwards
-only the Kubernetes reads its page makes and refuses everything else, Secrets and every write included, which is
-what makes it safe to serve beyond this machine. It exits when its proxy dies, so systemd alone restarts it.
-Rebuild the binary (`go build -o bin/supplychain ./cmd/cli`) and `systemctl --user restart supplychain-observe`
-to pick up a change.
+The Applications read this repository, about 7 MB to clone. Argo CD's repo-server gives `git fetch` 90 seconds
+and the controller waits 60 seconds for manifests; on a slow uplink the first clone never finishes and the
+Applications stay `Unknown` with "context deadline exceeded". Raise both once; later fetches only download what
+changed:
 
 ```
-hack/tailnet-links.sh           # write the units and serve entries, then check every link
-hack/tailnet-links.sh check     # status of every link
+kubectl -n argocd set env deploy/argocd-repo-server ARGOCD_EXEC_TIMEOUT=10m
+kubectl -n argocd patch cm argocd-cmd-params-cm --type merge \
+  -p '{"data":{"controller.repo.server.timeout.seconds":"600","server.repo.server.timeout.seconds":"600"}}'
+kubectl -n argocd rollout restart sts/argocd-application-controller
 ```
 
-The script needs the caller to be the Tailscale operator (`sudo tailscale set --operator=$USER`, once) and only
-restarts units whose definition changed. It checks the webhook through the public relay address: on this machine
-MagicDNS resolves the name to the tailnet address, which answers even when Funnel is down. When the webhook check
-fails while the local hop works (`curl -X POST -H 'Host: pop-os.tailf8145.ts.net' -d '{}' http://127.0.0.1:8888/`
-answers 202), Funnel has stopped accepting TLS after a network change; `sudo systemctl restart tailscaled` restores
-it, and the serve and Funnel configuration survive the restart. GitHub's delivery log
-(`gh api repos/<owner>/<repo>/hooks/<id>/deliveries`) shows such pushes as `500 ... EOF`; push again once the
-webhook check passes.
+## Signing in to Argo CD with GitHub
 
-The Argo CD admin password is kept outside Git, in `~/.config/argocd/admin-password` on that machine. It is the
-break-glass login; day to day, sign in with GitHub.
+Argo CD's bundled Dex signs people in with GitHub. Only members of the `argocd-admins` team of the `blanketops`
+organisation can sign in, and they get `role:admin`; anyone else gets no access. Add or remove people in that
+team on GitHub. A team rather than the organisation, because with an organisation listed Dex's GitHub connector
+checks membership but puts only `<org>:<team>` names in the groups claim, so members of an organisation without
+teams sign in with no permissions.
 
-### Signing in to Argo CD with GitHub
-
-Argo CD's bundled Dex signs people in with GitHub. Only members of the `blanketops` organisation can sign in,
-and they get `role:admin`; anyone else gets no access. GitHub has no API for creating OAuth Apps, so that step
-is done once in the browser, at `https://github.com/organizations/blanketops/settings/applications/new`:
+It needs a GitHub OAuth App, not a GitHub App: a GitHub App's callback URLs must match character for character,
+and its sign-in token carries everything the app may do. Register one at
+`https://github.com/organizations/blanketops/settings/applications/new`:
 
 | Field | Value |
 |---|---|
@@ -141,29 +112,33 @@ is done once in the browser, at `https://github.com/organizations/blanketops/set
 | Homepage URL | `https://pop-os.tailf8145.ts.net:8081` |
 | Authorization callback URL | `https://pop-os.tailf8145.ts.net:8081/api/dex/callback` |
 
-Then generate a client secret and run, with the app's client ID:
+Then generate a client secret and run, with the app's client ID (it starts with `Ov23`):
 
 ```
-hack/argocd-github-sso.sh -i <client-id>    # prompts for the client secret without echoing it
+gitops/hack/argocd-github-sso.sh -i <client-id>       # prompts for the client secret without echoing it
+gitops/hack/argocd-github-sso.sh -i <client-id> -k    # change the settings, keep the stored secret
 ```
 
 The script stores the secret only in the `argocd-secret` Secret, sets Argo CD's URL, the GitHub connector and
 the RBAC mapping, starts Dex and waits until it answers. The callback URL is a browser redirect, so it works
-although the address is tailnet-only.
+although the address is tailnet-only. The admin password, kept outside Git in `~/.config/argocd/admin-password`
+on that machine, stays as the break-glass login.
 
 ## Known gaps
 
 - The Rekor host is `rekor.172-18-255-200.nip.io`, which resolves to this machine's MetalLB address and is
-  reachable only from containers on the same Docker network. A read engine elsewhere needs a host that resolves to
-  the build engine's ingress; change it in `rekor-ingress.yaml` and in the export's `-r`.
+  reachable only from containers on the same Docker network. A read cluster elsewhere needs a host that resolves
+  to the build cluster's ingress; change it in `supplychain/rekor-ingress.yaml` and in the export's `-r`.
 - policy-controller validates ClusterImagePolicies with its own webhook, so they are rejected until it is running.
-  Argo CD's sync wave and retry cover this; applied by hand, run `kubectl apply --server-side -k
-  platforms/secure-read-engine` again once `policy-controller-webhook` is ready.
+  Argo CD's retry covers this; applied by hand, run `kubectl apply --server-side -k gitops/policy` again once
+  `policy-controller-webhook` is ready.
 - Rekor's write API is reachable on that host as well, because policy-controller's lookups are POST requests. Keep
   it off the public Funnel hostname.
-- Re-export after any change on the build engine that rotates a trust anchor or alters a policy; nothing
+- Re-export after any change on the build cluster that rotates a trust anchor or alters a policy; nothing
   detects the drift automatically.
 - Admitting the signed image takes 4 to 12 seconds on this machine's uplink, which drops a quarter of its
-  packets at times, and was overrunning policy-controller's default 10-second webhook timeout. The read engine
-  sets the maximum, 30 seconds (`policy-controller/webhook-timeout.yaml`). A timeout still refuses the pod, but
-  Argo CD then reports `failed calling webhook ... context deadline exceeded` instead of the policy decision.
+  packets at times, and was overrunning policy-controller's default 10-second webhook timeout. The read cluster
+  sets the maximum, 30 seconds (`policy/policy-controller/webhook-timeout.yaml`). A timeout still refuses the pod,
+  but Argo CD then reports `failed calling webhook ... context deadline exceeded` instead of the policy decision.
+- Argo CD itself is installed by hand from the upstream manifest, and its settings (Dex, RBAC, the timeouts
+  above) are applied by the scripts and commands here rather than reconciled from Git.

@@ -20,14 +20,13 @@ substitute its name (`tailscale status --json | jq -r '.Self.DNSName'`).
 | `https://pop-os.tailf8145.ts.net:9097/` | Tekton Dashboard: PipelineRuns and their logs | Tailnet | None; installed `--read-only=true` |
 | `https://pop-os.tailf8145.ts.net:9000/sonarqube/` | SonarQube | Tailnet | SonarQube's own |
 | `https://pop-os.tailf8145.ts.net:3443/api/v1/log` | Rekor API, the transparency log | Tailnet | None; see below |
-| `https://pop-os.tailf8145.ts.net:8081/` | Argo CD, in the verify-only read cluster | Tailnet | Argo CD's own (`admin`); GitHub sign-in through `hack/argocd-github-sso.sh` in infrastructure-gitops |
-| `https://pop-os.tailf8145.ts.net:8443/` | `for-kaniko-app`, the sample workload in the read cluster | Tailnet | None; a public demo page |
+| `https://pop-os.tailf8145.ts.net:8081/` | Argo CD, in the verify-only read cluster | Tailnet | GitHub, members of the `blanketops/argocd-admins` team (`gitops/hack/argocd-github-sso.sh`); `admin` as break-glass |
+| `https://pop-os.tailf8145.ts.net:8443/` | `for-kaniko-app`, the sample workload in the read cluster's `dev` namespace | Tailnet | None; a public demo page |
 | `http://127.0.0.1:3000/` | Tornjak, the SPIFFE UI | This machine only | None; never publish it (see below) |
 
 Argo CD and the sample workload belong to the two-cluster setup, in which a second cluster only verifies
-images. That setup lives in the sibling repository
-[infrastructure-gitops](https://github.com/blanketops/infrastructure-gitops). Its
-`hack/tailnet-links.sh` creates every link above and `hack/tailnet-links.sh check` prints them with the
+images; it is described in [gitops/](../gitops/README.md). `gitops/hack/tailnet-links.sh` creates every link
+above and `gitops/hack/tailnet-links.sh check` prints them with the
 status each answers with now.
 
 ## How a link is made
@@ -48,7 +47,7 @@ only the webhook as `(Funnel on)`.
 A port-forward has to outlive the terminal it was started from and the pod it points at. Run each one as a
 user systemd unit with `Restart=always`. That alone is not enough: when the pod behind it is replaced,
 `kubectl port-forward` can keep running and forward nothing, so systemd never restarts it. Run it under a
-watchdog that exits once the local port stops answering, as `hack/tailnet-links.sh` does with `kpf-watch`.
+watchdog that exits once the local port stops answering, as `gitops/hack/tailnet-links.sh` does with `kpf-watch`.
 The installation's Tekton Dashboard link came back about 15 seconds after its pod was deleted.
 
 ## What is safe to publish, and what is not
