@@ -70,7 +70,7 @@ func Serve(ctx context.Context, opts Options) error {
 
 	// ── 3. reverse proxy → kubectl proxy on :8001 ──────────────────────
 	k8sTarget, _ := url.Parse("http://" + proxyAddr)
-	rp := httputil.NewSingleHostReverseProxy(k8sTarget)
+	rp := newAPIProxy(k8sTarget)
 
 	// ── 4. routes ───────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -149,6 +149,20 @@ func Serve(ctx context.Context, opts Options) error {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutCtx)
+}
+
+// newAPIProxy forwards to kubectl proxy under its own address. kubectl proxy
+// refuses any Host but localhost (--accept-hosts), and a reverse proxy keeps
+// the browser's Host by default, so the page broke whenever it was opened by
+// any other name, such as a Tailscale one.
+func newAPIProxy(target *url.URL) *httputil.ReverseProxy {
+	rp := httputil.NewSingleHostReverseProxy(target)
+	direct := rp.Director
+	rp.Director = func(r *http.Request) {
+		direct(r)
+		r.Host = target.Host
+	}
+	return rp
 }
 
 // proxyProcess is the kubectl proxy the observer started.
