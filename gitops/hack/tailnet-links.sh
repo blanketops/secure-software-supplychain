@@ -45,7 +45,11 @@ links=(
   "tekton-dashboard|$build|tekton-pipelines|svc/tekton-dashboard|9097:9097|9097|http|/|Tekton Dashboard"
   "sonarqube|$build|default|svc/sonarqube-sonarqube|9000:9000|9000|http|/sonarqube/|SonarQube"
   "rekor|$build|rekor-system|svc/rekor-server|3443:443|3443|https|/api/v1/log|Rekor API"
-  "for-kaniko-app|$read|dev|svc/for-kaniko-app|8090:80|8443|http|/|for-kaniko-app (read cluster workload)"
+  # Adminer has its own login; hack/trillian-ui.sh gives it a read-only account.
+  "trillian-ui|$build|trillian-system|svc/trillian-adminer|8306:8080|8306|http|/|Trillian database (Adminer)"
+  # Trillian's MySQL itself, for a local client (mysql, phpMyAdmin, DBeaver).
+  # Raw MySQL, so this machine only; sign in as trillian_ro (hack/trillian-ui.sh).
+  "trillian-mysql|$build|trillian-system|svc/trillian-mysql|3307:3306|-|tcp||Trillian MySQL (read-only login)"
   # Not a port-forward: `supplychain observe` runs its own kubectl proxy and
   # forwards only the page's reads, so it is safe to serve on the tailnet.
   "observer|$build|-|observe|8002|8002|http|/|Supply chain observer (build cluster)"
@@ -70,7 +74,12 @@ trap 'kill $pf 2>/dev/null' EXIT TERM INT
 sleep 10
 fails=0
 while kill -0 "$pf" 2>/dev/null; do
-  if curl -sk -o /dev/null --max-time 5 "$url"; then fails=0; else
+  if [[ $url == tcp://* ]]; then
+    hp=${url#tcp://}; ok() { timeout 5 bash -c "</dev/tcp/${hp%:*}/${hp##*:}" 2>/dev/null; }
+  else
+    ok() { curl -sk -o /dev/null --max-time 5 "$url"; }
+  fi
+  if ok; then fails=0; else
     fails=$((fails + 1))
     [ "$fails" -ge 3 ] && { echo "kpf-watch: $url unreachable 3 times, restarting" >&2; exit 1; }
   fi
@@ -156,7 +165,12 @@ check() {
     IFS='|' read -r name _ _ _ ports serve scheme path what <<<"$l"
     if [[ $serve == - ]]; then
       local u="$scheme://127.0.0.1:$(local_port "$name" "$ports")$path"
-      code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "$u" || true)
+      if [[ $scheme == tcp ]]; then
+        local hp=${u#tcp://}
+        timeout 5 bash -c "</dev/tcp/${hp%:*}/${hp##*:}" 2>/dev/null && code=open || code=closed
+      else
+        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "$u" || true)
+      fi
       printf '%-40s %-48s %s\n' "$what (this machine)" "$u" "$code"
       continue
     fi

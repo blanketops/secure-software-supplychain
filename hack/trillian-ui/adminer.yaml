@@ -1,0 +1,62 @@
+# Adminer, a small web UI for SQL databases, preset to Trillian's MySQL. It
+# has its own login: sign in with the read-only account hack/trillian-ui.sh
+# creates (trillian_ro), whose credentials are only in the
+# trillian-mysql-readonly Secret. Cluster-internal; published tailnet-only by
+# gitops/hack/tailnet-links.sh, never through Funnel.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trillian-adminer
+  namespace: trillian-system
+  labels:
+    app.kubernetes.io/name: trillian-adminer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trillian-adminer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trillian-adminer
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: adminer
+        # 4.8.1-standalone, pinned by digest.
+        image: docker.io/library/adminer:4.8.1-standalone@sha256:34d37131366c5aa84e1693dbed48593ed6f95fb450b576c1a7a59d3a9c9e8802
+        env:
+        - name: ADMINER_DEFAULT_SERVER
+          value: trillian-mysql
+        ports:
+        - name: http
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trillian-adminer
+  namespace: trillian-system
+  labels:
+    app.kubernetes.io/name: trillian-adminer
+spec:
+  selector:
+    app.kubernetes.io/name: trillian-adminer
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
