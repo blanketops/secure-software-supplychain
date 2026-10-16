@@ -197,6 +197,18 @@ proxies to. It therefore works wherever `kubectl` does, needs your kubeconfig to
 not verify a Service's certificate when it proxies to it, which is why what is read is checked against the
 trust anchors rather than taken on the connection's word.
 
+Of the Kubernetes API, the page's server forwards only the reads the page itself makes (`GET` on the supply
+chain resources, ExternalSecrets and ClusterSecretStores, RBAC, ServiceAccounts and events) and refuses every
+other request, Secrets and writes included, so serving it beyond your machine does not lend out your
+kubeconfig's access. To run it as a service:
+
+```bash
+supplychain observe --context <context> --no-browser   # pins the cluster; listens on 127.0.0.1:8002
+```
+
+It refuses to start when `127.0.0.1:8001`, the port its `kubectl proxy` uses, is already taken, and exits when
+that proxy or its own server stops, so a service manager can start it again.
+
 ## Remove a SupplyChain
 
 ```bash
