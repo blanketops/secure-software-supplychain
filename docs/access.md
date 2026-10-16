@@ -101,6 +101,11 @@ kubectl -n trillian-system port-forward svc/trillian-mysql 3307:3306      # tail
 mysql -h 127.0.0.1 -P 3307 -u trillian_ro -p trillian                     # XAMPP: /opt/lampp/bin/mysql
 ```
 
+With XAMPP installed, `hack/trillian-phpmyadmin.sh` adds Trillian to its phpMyAdmin as a read-only server on that
+port (cookie login as `trillian_ro`, limited to the `trillian` database), turns XAMPP's HTTPS off so Apache does
+not collide with Tailscale on 443, and starts Apache; then open `http://localhost/phpmyadmin`. Run it as yourself:
+it asks for sudo, because XAMPP's files belong to root.
+
 ```sql
 SELECT TreeId, DisplayName, TreeState FROM Trees;
 SELECT TreeId, TreeSize, FROM_UNIXTIME(TreeHeadTimestamp / 1e9) FROM TreeHead ORDER BY TreeHeadTimestamp DESC;
