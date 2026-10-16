@@ -1205,6 +1205,10 @@ spec:
         # the backend over the pod's localhost. REACT_APP_API_SERVER_URI is the
         # address the browser is told to call, so it is the port-forwarded
         # backend, not an in-cluster name.
+        #
+        # At start the image writes build/tmp/env.js (react-inject-env), but
+        # build/tmp does not exist and build/ is root's, while this pod runs as
+        # uid 1000; without a writable mount there it exits with ENOENT.
         - name: tornjak-frontend
           image: "ghcr.io/spiffe/tornjak-frontend:v1.4.2@sha256:bc944fb5cccd7a42a414bb719f9006dadd74f0cf529e40d9fa48d576cb4483b2"
           imagePullPolicy: IfNotPresent
@@ -1216,9 +1220,14 @@ spec:
           ports:
             - name: tornjak-fe
               containerPort: 3000
+          volumeMounts:
+            - name: tornjak-frontend-tmp
+              mountPath: /usr/src/app/build/tmp
           resources:
             {}
       volumes:
+        - name: tornjak-frontend-tmp
+          emptyDir: {}
         - name: server-tmp
           emptyDir: {}
         - name: spire-config
