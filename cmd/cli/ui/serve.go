@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -40,18 +41,25 @@ const (
 	proxyReady = 5 * time.Second
 )
 
-// Serve starts kubectl proxy, serves the embedded UI on :8002, and reverse-proxies
-// all /api/ and /apis/ requests to kubectl proxy on :8001.
-// This avoids CORS entirely — the browser talks only to :8002.
-// Blocks until Ctrl+C.
-func Serve(ctx context.Context) error {
-	// ── 1. start kubectl proxy ──────────────────────────────────────────
-	proxyCtx, proxyCancel := context.WithCancel(ctx)
-	defer proxyCancel()
+// Options choose the cluster the observer reads and whether it opens a browser.
+type Options struct {
+	// Context is the kubeconfig context to read; empty means the current one.
+	Context string
+	// NoBrowser leaves the browser closed, for running the observer as a service.
+	NoBrowser bool
+}
 
-	if err := startProxy(proxyCtx); err != nil {
+// Serve starts kubectl proxy, serves the embedded UI on :8002, and reverse-proxies
+// the page's Kubernetes reads to kubectl proxy on :8001, refusing every other
+// request (see readOnly). This avoids CORS entirely — the browser talks only to :8002.
+// Blocks until Ctrl+C.
+func Serve(ctx context.Context, opts Options) error {
+	// ── 1. start kubectl proxy ──────────────────────────────────────────
+	proxy, err := startProxy(opts.Context)
+	if err != nil {
 		return fmt.Errorf("kubectl proxy: %w", err)
 	}
+	defer proxy.stop()
 
 	// ── 2. wait for proxy ───────────────────────────────────────────────
 	fmt.Printf("  waiting for kubectl proxy on %s...\n", proxyAddr)
@@ -89,15 +97,11 @@ func Serve(ctx context.Context) error {
 	})
 	mux.HandleFunc("/observer.css", serveFile("observer.css", "text/css; charset=utf-8"))
 
-	// Kubernetes core API — forwarded to kubectl proxy
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		rp.ServeHTTP(w, r)
-	})
-
-	// Kubernetes extension APIs — forwarded to kubectl proxy
-	mux.HandleFunc("/apis/", func(w http.ResponseWriter, r *http.Request) {
-		rp.ServeHTTP(w, r)
-	})
+	// Kubernetes API: only the page's reads, forwarded to kubectl proxy.
+	api := readOnly(rp)
+	mux.Handle("/api", api)
+	mux.Handle("/api/", api)
+	mux.Handle("/apis/", api)
 
 	// What Rekor, Fulcio and the CT log themselves say, decoded for the page.
 	mux.Handle("/sigstore/", newQuerier("http://"+proxyAddr).handler())
@@ -108,9 +112,10 @@ func Serve(ctx context.Context) error {
 		Handler: mux,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "  ui server error: %v\n", err)
+			serverErr <- err
 		}
 	}()
 
@@ -119,15 +124,26 @@ func Serve(ctx context.Context) error {
 	fmt.Println("  press Ctrl+C to stop")
 
 	// ── 6. open browser ─────────────────────────────────────────────────
-	time.Sleep(300 * time.Millisecond)
-	if err := openBrowser(uiURL); err != nil {
-		fmt.Printf("  open %s in your browser\n", uiURL)
+	if !opts.NoBrowser {
+		time.Sleep(300 * time.Millisecond)
+		if err := openBrowser(uiURL); err != nil {
+			fmt.Printf("  open %s in your browser\n", uiURL)
+		}
 	}
 
-	// ── 7. block until Ctrl+C ───────────────────────────────────────────
+	// ── 7. block until Ctrl+C, or until either half stops working ──────
+	// Returning an error when kubectl proxy or the server dies lets a
+	// service manager start the observer again instead of serving errors.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	select {
+	case <-quit:
+	case <-ctx.Done():
+	case <-proxy.exited:
+		return fmt.Errorf("kubectl proxy exited: %v", proxy.err)
+	case err := <-serverErr:
+		return fmt.Errorf("ui server on %s: %w", serveAddr, err)
+	}
 
 	fmt.Println("\n  shutting down...")
 	shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -135,22 +151,52 @@ func Serve(ctx context.Context) error {
 	return srv.Shutdown(shutCtx)
 }
 
-func startProxy(ctx context.Context) error {
+// proxyProcess is the kubectl proxy the observer started.
+type proxyProcess struct {
+	cmd    *exec.Cmd
+	exited chan struct{} // closed once kubectl proxy has exited
+	err    error         // why it exited, valid once exited is closed
+	once   sync.Once
+}
+
+// stop kills kubectl proxy and waits for it, so it never outlives the observer
+// and holds the port for the next one.
+func (p *proxyProcess) stop() {
+	p.once.Do(func() {
+		_ = p.cmd.Process.Kill()
+		<-p.exited
+	})
+}
+
+func startProxy(kubeContext string) (*proxyProcess, error) {
 	if _, err := exec.LookPath("kubectl"); err != nil {
-		return fmt.Errorf("kubectl not found in PATH")
+		return nil, fmt.Errorf("kubectl not found in PATH")
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", "proxy", "--port=8001", "--address=127.0.0.1")
+	// Anything already on the port would answer for us, possibly for another
+	// cluster or with no access at all; refuse rather than read through it.
+	l, err := net.Listen("tcp", proxyAddr)
+	if err != nil {
+		return nil, fmt.Errorf("%s is in use; stop whatever holds it (often an earlier kubectl proxy): %w", proxyAddr, err)
+	}
+	_ = l.Close()
+
+	args := []string{"proxy", "--port=8001", "--address=127.0.0.1"}
+	if kubeContext != "" {
+		args = append(args, "--context="+kubeContext)
+	}
+	cmd := exec.Command("kubectl", args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting kubectl proxy: %w", err)
+		return nil, fmt.Errorf("starting kubectl proxy: %w", err)
 	}
 	fmt.Printf("  kubectl proxy started (pid %d)\n", cmd.Process.Pid)
+	p := &proxyProcess{cmd: cmd, exited: make(chan struct{})}
 	go func() {
-		<-ctx.Done()
-		_ = cmd.Process.Kill()
+		p.err = cmd.Wait()
+		close(p.exited)
 	}()
-	return nil
+	return p, nil
 }
 
 func waitForPort(addr string, timeout time.Duration) error {

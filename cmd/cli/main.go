@@ -204,7 +204,8 @@ func statusCmd() *cobra.Command {
 }
 
 func observeCmd() *cobra.Command {
-	return &cobra.Command{
+	var opts ui.Options
+	cmd := &cobra.Command{
 		Use:   "observe",
 		Short: "Open the secure software supply chain observer in your browser",
 		Long: `Opens one page that shows a namespace's supply chains, webhooks and builds, every
@@ -213,14 +214,19 @@ log themselves say, who may build, sign and write admission policy and why, the
 admission policies, and the secret store.
 
 The page is served from this machine and reads the cluster through kubectl proxy,
-including Rekor, Fulcio and the CT log. It changes nothing in the cluster.`,
+including Rekor, Fulcio and the CT log. It changes nothing in the cluster: only
+the Kubernetes reads the page makes are forwarded, and every other request,
+Secrets and writes included, is refused.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println("  Secure Software Supply Chain observer")
 			fmt.Println("  ─────────────────────────────────────")
-			return ui.Serve(context.Background())
+			return ui.Serve(context.Background(), opts)
 		},
 	}
+	cmd.Flags().StringVar(&opts.Context, "context", "", "kubeconfig context to observe (defaults to the current one)")
+	cmd.Flags().BoolVar(&opts.NoBrowser, "no-browser", false, "Do not open a browser, for running the observer as a service")
+	return cmd
 }
 
 // initSonarQubeCmd bootstraps SonarQube after a fresh install.
