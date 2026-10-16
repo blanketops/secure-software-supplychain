@@ -1,0 +1,26 @@
+# Trust the build engine's private CA, as the solution's installer does on the
+# build engine (cmd/cli/installer/tls.go, addCATrust): mount the
+# supply-chain-ca ConfigMap and add it to SSL_CERT_DIR. The image's bundle of
+# public CAs is still read, so registries keep working. The ConfigMap itself is
+# exported into ../trust by hack/export-trust.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-controller-webhook
+  namespace: cosign-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: policy-controller-webhook
+        env:
+        - name: SSL_CERT_DIR
+          value: /etc/supply-chain-ca:/etc/ssl/certs
+        volumeMounts:
+        - name: supply-chain-ca
+          mountPath: /etc/supply-chain-ca
+          readOnly: true
+      volumes:
+      - name: supply-chain-ca
+        configMap:
+          name: supply-chain-ca

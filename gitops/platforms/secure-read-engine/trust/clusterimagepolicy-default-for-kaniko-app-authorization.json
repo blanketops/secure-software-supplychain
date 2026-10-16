@@ -1,0 +1,52 @@
+{
+  "apiVersion": "policy.sigstore.dev/v1beta1",
+  "kind": "ClusterImagePolicy",
+  "metadata": {
+    "finalizers": [
+      "clusterimagepolicies.policy.sigstore.dev"
+    ],
+    "labels": {
+      "blanketops.dev/managed": "true",
+      "blanketops.dev/supply-chain-policy": "for-kaniko-app",
+      "blanketops.dev/supply-chain-policy-namespace": "default"
+    },
+    "name": "default-for-kaniko-app-authorization"
+  },
+  "spec": {
+    "authorities": [
+      {
+        "attestations": [
+          {
+            "name": "authorization",
+            "policy": {
+              "data": "predicateType: \"https://blanketops.dev/attestations/authorization/v1\"\npredicate: {\n\tscope: {principal: \"system:serviceaccount:default:supply-chain-runner\", resource: \"supplychains\", verb: \"get\", allowed: true}\n\tintent: {principal: \"system:serviceaccount:default:supply-chain-runner\", resource: \"imagebuilds\", verb: \"create\", allowed: true}\n\toutput: {principal: \"system:serviceaccount:default:supply-chain-runner\", resource: \"imagesignatures\", verb: \"create\", allowed: true}\n}\n",
+              "type": "cue"
+            },
+            "predicateType": "https://blanketops.dev/attestations/authorization/v1"
+          }
+        ],
+        "ctlog": {
+          "trustRootRef": "default-for-kaniko-app",
+          "url": "https://rekor.172-18-255-200.nip.io"
+        },
+        "keyless": {
+          "identities": [
+            {
+              "issuer": "https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local",
+              "subject": "spiffe://blanketops.dev/ns/default/sa/supply-chain-runner"
+            }
+          ],
+          "trustRootRef": "default-for-kaniko-app",
+          "url": "https://fulcio-server.fulcio-system.svc.cluster.local"
+        },
+        "name": "authorization"
+      }
+    ],
+    "images": [
+      {
+        "glob": "index.docker.io/nkanyezisolutions/for-kaniko-app**"
+      }
+    ],
+    "mode": "enforce"
+  }
+}

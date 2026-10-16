@@ -1,0 +1,32 @@
+# What the supply-chain-policy-runner ServiceAccount must be allowed to do for
+# a SupplyChainPolicy to be rendered. Each rule backs one of its three proofs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secure-software-supply-chain-policy-runner
+rules:
+# scope: read the SupplyChain it sets policy for
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "supplychains" ]
+  verbs: [ "get" ]
+# intent: declare admission policy for it
+- apiGroups: [ "supplychain.blanketops.dev" ]
+  resources: [ "supplychainpolicies" ]
+  verbs: [ "create" ]
+# output: produce the admission policies
+- apiGroups: [ "policy.sigstore.dev" ]
+  resources: [ "clusterimagepolicies" ]
+  verbs: [ "create" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: secure-software-supply-chain-policy-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: secure-software-supply-chain-policy-runner
+subjects:
+- kind: ServiceAccount
+  name: supply-chain-policy-runner
+  namespace: default

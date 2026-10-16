@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: secure-read-engine
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/blanketops/infrastructure-gitops.git
+    targetRevision: main
+    path: platforms/secure-read-engine
+  destination:
+    # Argo CD runs in the read (workload) cluster, so this is its own cluster.
+    server: https://kubernetes.default.svc
+    namespace: cosign-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    # The policy-controller CRDs are large; client-side apply can exceed the
+    # last-applied annotation limit.
+    - ServerSideApply=true
+    # Keep the fields policy-controller fills in at runtime (below) when
+    # syncing, instead of resetting them on every self-heal.
+    - RespectIgnoreDifferences=true
+    # policy-controller validates ClusterImagePolicies with its own webhook,
+    # which refuses them until it is running; retry until it is.
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  # policy-controller (a knative webhook) reconciles its own webhook
+  # configurations: it injects the CA bundle and the service path, and adds a
+  # webhooks.knative.dev/exclude term to the namespace selector.
+  ignoreDifferences:
+  - group: admissionregistration.k8s.io
+    kind: MutatingWebhookConfiguration
+    name: policy.sigstore.dev
+    jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+    - .webhooks[]?.clientConfig.service.path
+    - .webhooks[]?.namespaceSelector
+  - group: admissionregistration.k8s.io
+    kind: ValidatingWebhookConfiguration
+    name: policy.sigstore.dev
+    jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+    - .webhooks[]?.clientConfig.service.path
+    - .webhooks[]?.namespaceSelector

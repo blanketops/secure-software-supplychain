@@ -1,0 +1,61 @@
+apiVersion: supplychain.blanketops.dev/v1alpha1
+kind: SupplyChainPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: secure-software-supply-chain
+    app.kubernetes.io/managed-by: kustomize
+  name: for-kaniko-app
+spec:
+  # The SupplyChain whose image this policy admits. The image repository, the
+  # Fulcio and CT log endpoints and the trust anchors come from it and from the
+  # blanketops-sigstore-roots ConfigMap.
+  supplyChainRef:
+    name: for-kaniko-app
+
+  # The ServiceAccount the policy is rendered on behalf of. Nothing is rendered
+  # until it passes three SubjectAccessReviews: scope (get supplychains),
+  # intent (create supplychainpolicies) and output (create
+  # clusterimagepolicies). Grant them with supplychain_v1alpha1_policyrole.yaml.
+  serviceAccountName: supply-chain-policy-runner
+
+  # enforce rejects an image that fails verification; warn admits it with a
+  # warning.
+  mode: enforce
+
+  # Who may sign. An image is admitted only if one of these identities signed
+  # it keylessly (Fulcio certificate with a CT log proof) and attested the
+  # three authorization proofs (scope, intent, output).
+  # Optional: defaults to the SupplyChain's ServiceAccount.
+  signers:
+  # Named by ServiceAccount, so the certificate subject and issuer follow the
+  # cluster's signing identity: a Kubernetes token subject, or a SPIFFE ID when
+  # the stack was installed with --signing-identity spiffe.
+  - serviceAccountName: supply-chain-runner
+  # A signer outside this namespace is stated by its exact certificate subject
+  # and issuer, which pins it regardless of the cluster's signing identity:
+  # - subject: spiffe://blanketops.dev/ns/release/sa/release-signer
+  #   issuer: https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
+
+  # The sigstore instance signatures and attestations are verified against.
+  # Rendered as the policy-controller TrustRoot.
+  # Optional: each url defaults to the SupplyChain's signing endpoints, and
+  # each pemRef to the matching key of the blanketops-sigstore-roots ConfigMap.
+  trustRoot:
+    # The CA that must have issued the signer's certificate.
+    fulcio:
+      url: https://fulcio-server.fulcio-system.svc.cluster.local
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: fulcio-root.pem
+    # The log every signature and attestation must be recorded in.
+    rekor:
+      url: https://rekor-server.rekor-system.svc.cluster.local
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: rekor.pub
+    # The log that must have witnessed the signer's certificate.
+    ctLog:
+      url: https://ctlog.ctlog-system.svc/fulcio
+      pemRef:
+        name: blanketops-sigstore-roots
+        key: ctfe.pub

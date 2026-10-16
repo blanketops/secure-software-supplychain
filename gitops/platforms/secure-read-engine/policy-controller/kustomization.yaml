@@ -1,0 +1,12 @@
+# sigstore policy-controller, vendored from the solution's
+# dependencies/sigstore/policy-controller by hack/sync-from-solution.sh.
+# Do not edit 00-namespace.yaml or release.yaml by hand; re-run the sync.
+# trust-supply-chain-ca.yaml and webhook-timeout.yaml are ours and survive a sync.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- 00-namespace.yaml
+- release.yaml
+patches:
+- path: trust-supply-chain-ca.yaml
+- path: webhook-timeout.yaml

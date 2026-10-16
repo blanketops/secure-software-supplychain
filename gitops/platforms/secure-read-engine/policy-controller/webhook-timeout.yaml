@@ -1,0 +1,22 @@
+# Give policy-controller the longest admission budget Kubernetes allows (30s,
+# default 10s). Verifying an image fetches a registry token, the manifest,
+# signatures and attestations, and looks Chains' entries up in Rekor; on a
+# lossy link one dropped DNS reply costs 5s, and past 10s the API server
+# reports "failed calling webhook ... context deadline exceeded" instead of the
+# policy decision. failurePolicy stays Fail, so a timeout still refuses the pod.
+# policy-controller keeps this field when it reconciles its own configuration.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: policy.sigstore.dev
+webhooks:
+- name: policy.sigstore.dev
+  timeoutSeconds: 30
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: policy.sigstore.dev
+webhooks:
+- name: policy.sigstore.dev
+  timeoutSeconds: 30

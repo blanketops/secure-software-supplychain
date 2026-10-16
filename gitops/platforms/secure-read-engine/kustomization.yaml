@@ -1,0 +1,7 @@
+# The read engine: sigstore policy-controller and the trust it enforces.
+# No operator, Tekton, SPIRE or Vault runs here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- policy-controller
+- trust

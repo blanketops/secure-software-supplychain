@@ -1,0 +1,19 @@
+# The build engine's tenant resources: one SupplyChain, the roles its
+# pipeline, EventListener and policy runner need, its GitHub webhook, and the
+# SupplyChainPolicy that renders the admission policies the read engine
+# enforces. Copied from the solution's config/samples; edit them per tenant.
+#
+# The platform under them (cert-manager, Tekton, Sigstore, SPIRE, Vault,
+# policy-controller) and the operator are not managed here. They are installed
+# imperatively, in order, by the solution: `supplychain install` and
+# `mage install deploy`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- supplychain.yaml
+- signingrole.yaml
+- eventlistenerrole.yaml
+- githubwebhook.yaml
+- policyrole.yaml
+- supplychainpolicy.yaml
+- rekor-ingress.yaml

@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: secure-build-engine
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/blanketops/infrastructure-gitops.git
+    targetRevision: main
+    path: platforms/secure-build-engine
+  destination:
+    # The build (write) cluster, registered with the Argo CD in the read
+    # cluster by a cluster secret named build-cluster. The secret holds a
+    # service account token, so it is created in the cluster, never committed;
+    # see hack/register-build-cluster.sh.
+    name: build-cluster
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

@@ -1,0 +1,43 @@
+{
+  "apiVersion": "policy.sigstore.dev/v1alpha1",
+  "kind": "TrustRoot",
+  "metadata": {
+    "finalizers": [
+      "trustroots.policy.sigstore.dev"
+    ],
+    "labels": {
+      "blanketops.dev/managed": "true",
+      "blanketops.dev/supply-chain-policy": "for-kaniko-app",
+      "blanketops.dev/supply-chain-policy-namespace": "default"
+    },
+    "name": "default-for-kaniko-app"
+  },
+  "spec": {
+    "sigstoreKeys": {
+      "certificateAuthorities": [
+        {
+          "certChain": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUNOekNDQWQyZ0F3SUJBZ0lJR1lrUzVQU1RMRUF3Q2dZSUtvWkl6ajBFQXdJd2ZqRU1NQW9HQTFVRUJoTUQKVlZOQk1STXdFUVlEVlFRSUV3cERZV3hwWm05eWJtbGhNUll3RkFZRFZRUUhFdzFUWVc0Z1JuSmhibU5wYzJOdgpNUll3RkFZRFZRUUpFdzAxTkRnZ1RXRnlhMlYwSUZOME1RNHdEQVlEVlFRUkV3VTFOekkzTkRFWk1CY0dBMVVFCkNoTVFUR2x1ZFhnZ1JtOTFibVJoZEdsdmJqQWVGdzB5TmpFd01UWXdOVFV6TlRWYUZ3MHlOekV3TVRZd05UVXoKTlRWYU1INHhEREFLQmdOVkJBWVRBMVZUUVRFVE1CRUdBMVVFQ0JNS1EyRnNhV1p2Y201cFlURVdNQlFHQTFVRQpCeE1OVTJGdUlFWnlZVzVqYVhOamJ6RVdNQlFHQTFVRUNSTU5OVFE0SUUxaGNtdGxkQ0JUZERFT01Bd0dBMVVFCkVSTUZOVGN5TnpReEdUQVhCZ05WQkFvVEVFeHBiblY0SUVadmRXNWtZWFJwYjI0d1dUQVRCZ2NxaGtqT1BRSUIKQmdncWhrak9QUU1CQndOQ0FBU2FJeGhIMWtMc2tLZUNqVVAxUmQzM24wcGhsT3Z1UTRLbUtOZHlDRWRxZHIwWgptUkNWZS9vL3RONExBVEtxcVZGNDZqSUM1U096dUlUcTMwcGFUMkc2bzBVd1F6QU9CZ05WSFE4QkFmOEVCQU1DCkFRWXdFZ1lEVlIwVEFRSC9CQWd3QmdFQi93SUJBVEFkQmdOVkhRNEVGZ1FVRTlDMURjR1BNcnpsNitVYTQ4YlYKbFFRWU5DWXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWdJOHFEbERJbEJJbXA1a0s1K2Y3eGVzYWQ4RUJsUjRhbwpUclJiZlUyNGw1WUNJUUMxRlVjcWY4N296TUFvL0NRcVcrb0dSNjZicFpTbzBSWmF4Zll0azFSSlhRPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=",
+          "subject": {
+            "commonName": "Linux Foundation",
+            "organization": "Linux Foundation"
+          },
+          "uri": "https://fulcio-server.fulcio-system.svc.cluster.local"
+        }
+      ],
+      "ctLogs": [
+        {
+          "baseURL": "https://ctlog.ctlog-system.svc/fulcio",
+          "hashAlgorithm": "sha-256",
+          "publicKey": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFY1E5WEJWNW5Nc0xsc2xOMS91MlBQTFc3MFJSQgo4ZWlmdElwY1ZYUWt0M0llTkVDcEQ1YmxvTkQwM2RlSkVscDUwMzhOT1Z5L2lYUTRmaUVoZ1ZRN2JRPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
+        }
+      ],
+      "tLogs": [
+        {
+          "baseURL": "https://rekor.172-18-255-200.nip.io",
+          "hashAlgorithm": "sha-256",
+          "publicKey": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFRDVYTUVtelZCbUdaY3pIaDdTcE1Qc0hEb1hBMgprR003ZklwbDk3U1Vhb1FJYkE3RWlMd29abDEzL2hwRHR4Rm1VRnBNYjlhN1VGNWFkQmkwbTRKTmZnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0t"
+        }
+      ]
+    }
+  }
+}

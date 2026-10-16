@@ -1,0 +1,42 @@
+# Rekor, reachable from outside the build cluster, so a read engine can look up
+# the entries Tekton Chains logs: Chains stores its signatures and provenance
+# without a Rekor bundle, so they cannot be verified offline.
+#
+# TLS is terminated by ingress-nginx with a certificate for the host issued by
+# supply-chain-ca, and re-encrypted to rekor-server, whose certificate is
+# verified against the same CA. The host must resolve, from the read engine,
+# to this cluster's ingress; rekor.172-18-255-200.nip.io resolves to the local
+# MetalLB address and only works on this machine.
+#
+# Rekor's write API is reachable too: policy-controller looks entries up with
+# POST /api/v1/log/entries/retrieve and /api/v1/index/retrieve, so the route
+# cannot be limited to GET. Do not publish this host through Funnel.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rekor
+  namespace: rekor-system
+  annotations:
+    cert-manager.io/cluster-issuer: supply-chain-ca
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: rekor-system/rekor-server-tls
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "on"
+    nginx.ingress.kubernetes.io/proxy-ssl-name: rekor-server.rekor-system.svc
+    nginx.ingress.kubernetes.io/proxy-ssl-server-name: "on"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - rekor.172-18-255-200.nip.io
+    secretName: rekor-ingress-tls
+  rules:
+  - host: rekor.172-18-255-200.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rekor-server
+            port:
+              name: https

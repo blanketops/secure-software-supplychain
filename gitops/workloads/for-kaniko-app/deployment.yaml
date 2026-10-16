@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: for-kaniko-app
+spec:
+  replicas: 1
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+      - name: web
+        # Built from ntlaletsi70/for-kaniko-app@secure under the SPIFFE signing
+        # identity. Pinned by digest: admission verifies exactly this image.
+        image: docker.io/nkanyezisolutions/for-kaniko-app@sha256:1ce7c51f7782327fe10f087814ce778adcc4e4b4ca94d0dfefdfe7ecf880161c
+        ports:
+        - name: http
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]

@@ -1,0 +1,11 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "supply-chain-ca",
+    "namespace": "cosign-system"
+  },
+  "data": {
+    "ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBmDCCAT6gAwIBAgIUYdeo1ESOcAFjUHitAzvLBKQDd5YwCgYIKoZIzj0EAwIw\nKjEoMCYGA1UEAxMfU2VjdXJlIFNvZnR3YXJlIFN1cHBseSBDaGFpbiBDQTAeFw0y\nNjEwMTYwNTQ4MzBaFw0zNjEwMTMwNTQ4MzBaMCoxKDAmBgNVBAMTH1NlY3VyZSBT\nb2Z0d2FyZSBTdXBwbHkgQ2hhaW4gQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC\nAAQbkGVFZQQWaqMPf2RzhbuwVDeXG+jxfstcJP0+Ijm5Na3tyqZx/h4qVMzkYxvM\n7FD2j5C6Z+eY/4g6ZX2WUCn0o0IwQDAOBgNVHQ8BAf8EBAMCAqQwDwYDVR0TAQH/\nBAUwAwEB/zAdBgNVHQ4EFgQUOG2ebQsBNIntVnS95C/2j6VgypowCgYIKoZIzj0E\nAwIDSAAwRQIhANXIq6NSfC1lx80LDS4wcujw8JAfY32RvHk0xKY9K5yRAiAwpgfP\nWfetQQSOZtDuEo+J186eVwNZE/F3xY9hvXXSYA==\n-----END CERTIFICATE-----\n"
+  }
+}
