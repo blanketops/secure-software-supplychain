@@ -1,10 +1,10 @@
-# A simple workload on the read engine: the for-kaniko-app image the build
-# engine built, signed and attested, pinned by digest. The namespace opts in
+# A simple workload on the read cluster: the for-kaniko-app image the build
+# cluster built, signed and attested, pinned by digest. The namespace opts in
 # to verification, so policy-controller admits the pods only if the image
-# satisfies every ClusterImagePolicy exported from the build engine.
+# satisfies every ClusterImagePolicy exported from the build cluster.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: workloads
+namespace: dev
 labels:
 - pairs:
     app.kubernetes.io/name: for-kaniko-app

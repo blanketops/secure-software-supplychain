@@ -1,22 +1,22 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: read-workloads
+  name: for-kaniko-app
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/blanketops/infrastructure-gitops.git
+    repoURL: https://github.com/blanketops/secure-software-supplychain.git
     targetRevision: main
-    path: workloads/for-kaniko-app
+    path: gitops/for-kaniko-app
   destination:
     server: https://kubernetes.default.svc
-    namespace: workloads
+    namespace: dev
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    # Admission refuses the pods until secure-read-engine's policies exist.
+    # Admission refuses the pods until the policy app's policies exist.
     retry:
       limit: 10
       backoff:

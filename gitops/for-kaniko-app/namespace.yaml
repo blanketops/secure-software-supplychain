@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: workloads
+  name: dev
   labels:
     # policy-controller verifies images only in namespaces with this label.
     policy.sigstore.dev/include: "true"

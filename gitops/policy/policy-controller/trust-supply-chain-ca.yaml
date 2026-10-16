@@ -1,5 +1,5 @@
-# Trust the build engine's private CA, as the solution's installer does on the
-# build engine (cmd/cli/installer/tls.go, addCATrust): mount the
+# Trust the build cluster's private CA, as the solution's installer does on the
+# build cluster (cmd/cli/installer/tls.go, addCATrust): mount the
 # supply-chain-ca ConfigMap and add it to SSL_CERT_DIR. The image's bundle of
 # public CAs is still read, so registries keep working. The ConfigMap itself is
 # exported into ../trust by hack/export-trust.sh.

@@ -1,10 +1,10 @@
-# Rekor, reachable from outside the build cluster, so a read engine can look up
+# Rekor, reachable from outside the build cluster, so a read cluster can look up
 # the entries Tekton Chains logs: Chains stores its signatures and provenance
 # without a Rekor bundle, so they cannot be verified offline.
 #
 # TLS is terminated by ingress-nginx with a certificate for the host issued by
 # supply-chain-ca, and re-encrypted to rekor-server, whose certificate is
-# verified against the same CA. The host must resolve, from the read engine,
+# verified against the same CA. The host must resolve, from the read cluster,
 # to this cluster's ingress; rekor.172-18-255-200.nip.io resolves to the local
 # MetalLB address and only works on this machine.
 #

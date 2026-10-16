@@ -1,8 +1,8 @@
 # Apply to the Argo CD in the read cluster:
-#   kubectl --context kind-blanketops-read apply -k argocd/
+#   kubectl --context kind-blanketops-read apply -k gitops/argocd/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-- secure-build-engine.yaml
-- secure-read-engine.yaml
-- read-workloads.yaml
+- supplychain.yaml
+- policy.yaml
+- for-kaniko-app.yaml

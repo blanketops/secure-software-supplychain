@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Register the build cluster with the Argo CD that runs in the read cluster,
-# as the cluster named build-cluster that argocd/secure-build-engine.yaml
+# as the cluster named build-cluster that argocd/supplychain.yaml
 # deploys to. Creates a ServiceAccount on the build cluster and stores its
 # token in an Argo CD cluster secret in the read cluster; the token never
 # goes into Git. Safe to run again.
@@ -27,7 +27,7 @@ done
 
 # Argo CD applies arbitrary manifests from Git to this cluster, so it is
 # given cluster-admin, as `argocd cluster add` does. Narrow the ClusterRole if
-# the build engine's directory is ever limited to known kinds.
+# the build cluster's directory is ever limited to known kinds.
 kubectl --context "$build" apply -f - <<'EOF'
 apiVersion: v1
 kind: ServiceAccount

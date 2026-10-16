@@ -1,6 +1,6 @@
-# The build engine's tenant resources: one SupplyChain, the roles its
+# The build cluster's tenant resources: one SupplyChain, the roles its
 # pipeline, EventListener and policy runner need, its GitHub webhook, and the
-# SupplyChainPolicy that renders the admission policies the read engine
+# SupplyChainPolicy that renders the admission policies the read cluster
 # enforces. Copied from the solution's config/samples; edit them per tenant.
 #
 # The platform under them (cert-manager, Tekton, Sigstore, SPIRE, Vault,

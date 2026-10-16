@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: secure-build-engine
+  name: supplychain
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/blanketops/infrastructure-gitops.git
+    repoURL: https://github.com/blanketops/secure-software-supplychain.git
     targetRevision: main
-    path: platforms/secure-build-engine
+    path: gitops/supplychain
   destination:
     # The build (write) cluster, registered with the Argo CD in the read
     # cluster by a cluster secret named build-cluster. The secret holds a

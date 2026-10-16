@@ -10,7 +10,7 @@
 #   -b  build cluster context  (default: kind-blanketops)
 #   -r  read cluster context   (default: kind-blanketops-read)
 #   -H  Tailscale DNS name     (default: this node's, from `tailscale status`)
-#   -s  supplychain binary     (default: ../secure-software-supply-chain/bin/supplychain)
+#   -s  supplychain binary     (default: bin/supplychain of this repository)
 #   install (default) writes the units and serve entries, then runs check.
 #   check prints every link with the HTTP status it answers with now.
 #
@@ -20,7 +20,7 @@ set -euo pipefail
 build=kind-blanketops
 read=kind-blanketops-read
 host=""
-supplychain=$(cd "$(dirname "$0")/../.." && pwd)/secure-software-supply-chain/bin/supplychain
+supplychain=$(cd "$(dirname "$0")/../.." && pwd)/bin/supplychain
 while getopts "b:r:H:s:" opt; do
   case $opt in
     b) build=$OPTARG ;;
@@ -45,7 +45,7 @@ links=(
   "tekton-dashboard|$build|tekton-pipelines|svc/tekton-dashboard|9097:9097|9097|http|/|Tekton Dashboard"
   "sonarqube|$build|default|svc/sonarqube-sonarqube|9000:9000|9000|http|/sonarqube/|SonarQube"
   "rekor|$build|rekor-system|svc/rekor-server|3443:443|3443|https|/api/v1/log|Rekor API"
-  "for-kaniko-app|$read|workloads|svc/for-kaniko-app|8090:80|8443|http|/|for-kaniko-app (read cluster workload)"
+  "for-kaniko-app|$read|dev|svc/for-kaniko-app|8090:80|8443|http|/|for-kaniko-app (read cluster workload)"
   # Not a port-forward: `supplychain observe` runs its own kubectl proxy and
   # forwards only the page's reads, so it is safe to serve on the tailnet.
   "observer|$build|-|observe|8002|8002|http|/|Supply chain observer (build cluster)"

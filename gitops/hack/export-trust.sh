@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Export the trust a SupplyChainPolicy rendered on the build engine into the
-# read engine: the public trust anchors (blanketops-sigstore-roots), the
+# Export the trust a SupplyChainPolicy rendered on the build cluster into the
+# read cluster: the public trust anchors (blanketops-sigstore-roots), the
 # policy-controller TrustRoot and the ClusterImagePolicies. Run it against the
 # build cluster, review the diff, commit; Argo CD applies it to the read cluster.
 #
 # usage: hack/export-trust.sh -r rekor-url [-c build-context] [-n namespace]
-#   -r  the build engine's Rekor as the read engine reaches it, e.g.
+#   -r  the build cluster's Rekor as the read cluster reaches it, e.g.
 #       https://rekor.172-18-255-200.nip.io (see
-#       platforms/secure-build-engine/rekor-ingress.yaml). Required: Tekton
+#       supplychain/rekor-ingress.yaml). Required: Tekton
 #       Chains stores its signatures and provenance without a Rekor bundle, so
 #       policy-controller looks them up in Rekor, and the in-cluster URL the
 #       operator renders does not resolve from another cluster.
@@ -34,7 +34,7 @@ for tool in kubectl jq base64 sha256sum; do
 done
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-out="$root/platforms/secure-read-engine/trust"
+out="$root/policy/trust"
 kc=(kubectl)
 [[ -n $context ]] && kc+=(--context "$context")
 
@@ -57,8 +57,8 @@ trap 'rm -rf "$tmp"' EXIT
   > "$tmp/configmap-roots.json"
 
 # The private CA every sigstore service's certificate chains to. The read
-# engine's policy-controller trusts it the way the installer makes the build
-# engine's do (policy-controller/trust-supply-chain-ca.yaml).
+# cluster's policy-controller trusts it the way the installer makes the build
+# cluster's do (policy-controller/trust-supply-chain-ca.yaml).
 "${kc[@]}" -n cosign-system get configmap supply-chain-ca -o json |
   jq '{apiVersion, kind, metadata: {name: .metadata.name, namespace: "cosign-system"}, data}' \
   > "$tmp/configmap-ca.json"
@@ -74,7 +74,7 @@ if [[ $count -eq 0 ]]; then
   exit 1
 fi
 
-# Point every Rekor lookup at the address the read engine can reach. Only
+# Point every Rekor lookup at the address the read cluster can reach. Only
 # Rekor is contacted during verification; the Fulcio and CT log URLs are
 # carried as identifiers and left as rendered.
 rewrite='if .kind == "TrustRoot" then .spec.sigstoreKeys.tLogs |= map(.baseURL = $rekor)
@@ -90,7 +90,7 @@ for i in $(seq 0 $((count - 1))); do
 done
 
 # Replace the previous export wholesale, so a policy deleted on the build
-# engine is pruned from the read engine.
+# cluster is pruned from the read cluster.
 rm -f "$out"/*.json
 for f in "${files[@]}"; do cp "$tmp/$f" "$out/"; done
 

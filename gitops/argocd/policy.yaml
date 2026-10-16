@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: secure-read-engine
+  name: policy
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/blanketops/infrastructure-gitops.git
+    repoURL: https://github.com/blanketops/secure-software-supplychain.git
     targetRevision: main
-    path: platforms/secure-read-engine
+    path: gitops/policy
   destination:
     # Argo CD runs in the read (workload) cluster, so this is its own cluster.
     server: https://kubernetes.default.svc
