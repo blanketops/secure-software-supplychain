@@ -1,0 +1,25 @@
+# How long finished runs stay in the cluster. Tekton Pruner deletes every
+# PipelineRun and TaskRun 15 minutes after it finishes, whether it succeeded or
+# failed. Nothing is lost by it: Tekton Results has archived the run and its
+# logs, the ImageBuildResult keeps the build's record, and the signatures and
+# attestations live in the registry and Rekor.
+#
+# Why 15 minutes and not at once: after a run finishes, Tekton Chains signs it
+# and attests its provenance, and the operator revisits the build for up to 10
+# minutes (evidenceWait in internal/controller/imagebuild_controller.go) to
+# record that evidence. The run has to exist until then.
+#
+# Applied after release.yaml, once the pruner's webhook is serving: the webhook
+# validates this ConfigMap and refuses it while it is down (failurePolicy Fail).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tekton-pruner-default-spec
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: tekton-pruner
+    pruner.tekton.dev/config-type: global
+data:
+  global-config: |-
+    enforcedConfigLevel: global
+    ttlSecondsAfterFinished: 900

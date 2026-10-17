@@ -68,6 +68,8 @@ var statusGroups = []statusGroup{
 		{kindDeployment, "tekton-pipelines", "tekton-results-watcher", "Results watcher"},
 		{kindDeployment, "tekton-pipelines", "tekton-results-retention-policy-agent", "Results retention"},
 		{"StatefulSet", "tekton-pipelines", "tekton-results-postgres", "Results database"},
+		{kindDeployment, "tekton-pipelines", "tekton-pruner-controller", "Pruner"},
+		{kindDeployment, "tekton-pipelines", "tekton-pruner-webhook", "Pruner webhook"},
 	}},
 	{Title: "SPIRE", Optional: "only with --signing-identity spiffe", Workloads: []workload{
 		{"StatefulSet", spireNamespace, "spire-server", "Server"},

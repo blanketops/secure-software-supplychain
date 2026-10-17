@@ -117,8 +117,10 @@ After signing, the three proofs are attached to the image with `cosign attest` (
 `https://blanketops.dev/attestations/authorization/v1`), signed by the same keyless identity. The signature says
 who built the image. The attestation says that identity was authorized, according to the API server, when it did.
 
-When the PipelineRun finishes, the controller records an `ImageBuildResult` and prunes old PipelineRuns (the
-last 3 succeeded and 1 failed are kept).
+When the PipelineRun finishes, the controller records an `ImageBuildResult`, which outlives the run. Tekton
+Pruner deletes the run and its TaskRuns 15 minutes after it finishes, succeeded or failed, once Tekton Chains has
+had time to sign it; Tekton Results keeps its history and logs. The controller's own pruning keeps the last 3
+succeeded and 1 failed runs of each `ImageBuild`, and as every build has one run it removes nothing.
 
 The `ImageSignature` is then completed from the evidence, not from the outcome of the run. It becomes `Signed`
 only when the build's signature is found on the image together with its Rekor entry, and its fields are that

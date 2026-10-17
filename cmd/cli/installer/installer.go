@@ -394,6 +394,27 @@ var installOrder = []step{
 		},
 	},
 	{
+		// Deletes finished PipelineRuns and TaskRuns, 15 minutes after they
+		// finish (retention/retention.yaml). Installed after Results, which
+		// archives every run, so a pruned run's record and logs remain there.
+		Name:  "Tekton Pruner",
+		Paths: []string{"dependencies/tekton/pruner"},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for Tekton Pruner to be ready...")
+			waitSp.start()
+			for _, name := range []string{"tekton-pruner-controller", "tekton-pruner-webhook"} {
+				if err := i.waitForDeployment(ctx, "tekton-pipelines", name); err != nil {
+					waitSp.fail("Tekton Pruner not ready")
+					return err
+				}
+			}
+			waitSp.succeed("Tekton Pruner ready")
+			// Its webhook validates the retention ConfigMap and refuses it
+			// until it is serving, so the retention is applied only now.
+			return i.applyDirectory(ctx, "dependencies/tekton/pruner/retention")
+		},
+	},
+	{
 		Name:  "MetalLB Dependencies",
 		Paths: []string{"dependencies/metallb/setup"},
 	},

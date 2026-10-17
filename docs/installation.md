@@ -108,12 +108,13 @@ full `spiffe`, `--key-residency vault` install.
 | 16 | Tekton Dashboard | always |
 | 17 | Tekton Tasks | always |
 | 18 | Tekton Results | always |
-| 19 | MetalLB Dependencies | always |
-| 20 | NGINX Ingress Controller | always |
-| 21 | Ingress Routes | always |
-| 22 | Secret Store Identity | `--signing-identity spiffe`, unless `--vault-addr`/`--external-secret-store` |
-| 23 | Secret Store | unless `--external-secret-store` |
-| 24 | SonarQube | always |
+| 19 | Tekton Pruner | always |
+| 20 | MetalLB Dependencies | always |
+| 21 | NGINX Ingress Controller | always |
+| 22 | Ingress Routes | always |
+| 23 | Secret Store Identity | `--signing-identity spiffe`, unless `--vault-addr`/`--external-secret-store` |
+| 24 | Secret Store | unless `--external-secret-store` |
+| 25 | SonarQube | always |
 
 The order is not arbitrary — later steps depend on earlier ones. SPIRE comes
 before Fulcio (Fulcio is told to trust SPIRE's issuer); Vault before Fulcio and
@@ -138,6 +139,7 @@ The table below is the same steps grouped by what they set up.
 | Tekton Chains | Signs every run and records SLSA v1.0 provenance next to the image |
 | Policy Controller | Admission: refuses images that do not satisfy a `SupplyChainPolicy` |
 | Tekton Dashboard, Tasks, Results | The UI, the pipeline's task definitions, and long-term run history |
+| Tekton Pruner | Deletes every PipelineRun and TaskRun 15 minutes after it finishes, succeeded or failed (`dependencies/tekton/pruner/retention/retention.yaml`). Runs stay long enough for Chains to sign them and for the operator to record that evidence; Results keeps their history and logs. |
 | NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
 | Secret Store Identity | *`spiffe` only.* The store's own SPIFFE identity: SPIRE issues it to one ServiceAccount, and a small pod keeps the current JWT-SVID where External Secrets can present it. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Secret Store | A login to Vault for External Secrets, limited to reading the secure software supply chain's secrets, and the `ClusterSecretStore` that uses it. With `spiffe` the login is that SPIFFE identity and nothing else. Skipped with `--external-secret-store`. |
