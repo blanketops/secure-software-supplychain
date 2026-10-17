@@ -8,9 +8,9 @@
     "labels": {
       "blanketops.dev/managed": "true",
       "blanketops.dev/supply-chain-policy": "for-kaniko-app",
-      "blanketops.dev/supply-chain-policy-namespace": "default"
+      "blanketops.dev/supply-chain-policy-namespace": "secure-software-supply-chain-system"
     },
-    "name": "default-for-kaniko-app"
+    "name": "secure-software-supply-chain-system-for-kaniko-app"
   },
   "spec": {
     "sigstoreKeys": {

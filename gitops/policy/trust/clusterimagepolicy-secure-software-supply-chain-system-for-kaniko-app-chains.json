@@ -8,21 +8,15 @@
     "labels": {
       "blanketops.dev/managed": "true",
       "blanketops.dev/supply-chain-policy": "for-kaniko-app",
-      "blanketops.dev/supply-chain-policy-namespace": "default"
+      "blanketops.dev/supply-chain-policy-namespace": "secure-software-supply-chain-system"
     },
-    "name": "default-for-kaniko-app-provenance"
+    "name": "secure-software-supply-chain-system-for-kaniko-app-chains"
   },
   "spec": {
     "authorities": [
       {
-        "attestations": [
-          {
-            "name": "provenance",
-            "predicateType": "https://slsa.dev/provenance/v1"
-          }
-        ],
         "ctlog": {
-          "trustRootRef": "default-for-kaniko-app",
+          "trustRootRef": "secure-software-supply-chain-system-for-kaniko-app",
           "url": "https://rekor.172-18-255-200.nip.io"
         },
         "keyless": {
@@ -32,10 +26,10 @@
               "subject": "spiffe://blanketops.dev/ns/tekton-chains/sa/tekton-chains-controller"
             }
           ],
-          "trustRootRef": "default-for-kaniko-app",
+          "trustRootRef": "secure-software-supply-chain-system-for-kaniko-app",
           "url": "https://fulcio-server.fulcio-system.svc.cluster.local"
         },
-        "name": "provenance"
+        "name": "chains"
       }
     ],
     "images": [
