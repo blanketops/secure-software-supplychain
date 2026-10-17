@@ -395,6 +395,11 @@ func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1
 		task := desired
 		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, &task, func() error {
 			task.Spec = desired.Spec
+			// Marked as the operator's, like everything else it creates.
+			if task.Labels == nil {
+				task.Labels = map[string]string{}
+			}
+			task.Labels[managedLabel] = "true"
 			// Every SupplyChain in the namespace runs these Tasks; they go
 			// when the last of them does.
 			_, err := shareWith(sc, &task, r.Scheme)
@@ -429,7 +434,7 @@ func sonarQubeTask(namespace string) tektonv1.Task {
 			},
 			Steps: []tektonv1.Step{{
 				Name:  "sonar-scan",
-				Image: "sonarsource/sonar-scanner-cli:latest",
+				Image: "docker.io/sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0@sha256:a3f4215076706c95a17a68c19322ee916e40a3acd081a8c1a1e839e0194afa57",
 				Env: []corev1.EnvVar{{
 					Name: "SONAR_TOKEN",
 					ValueFrom: &corev1.EnvVarSource{
@@ -462,7 +467,7 @@ func cosignSignTask(namespace string) tektonv1.Task {
 			},
 			Steps: []tektonv1.Step{{
 				Name:  "sign",
-				Image: "gcr.io/projectsigstore/cosign:v2.2.3",
+				Image: "gcr.io/projectsigstore/cosign:v2.2.3@sha256:8fc9cad121611e8479f65f79f2e5bea58949e8a87ffac2a42cb99cf0ff079ba7",
 				Env:   []corev1.EnvVar{{Name: "COSIGN_EXPERIMENTAL", Value: "1"}},
 				Args: []string{
 					"sign",
@@ -484,7 +489,7 @@ func tektonChainsAttestTask(namespace string) tektonv1.Task {
 			Results: []tektonv1.TaskResult{{Name: "IMAGE_URL", Type: tektonv1.ResultsTypeString}, {Name: "IMAGE_DIGEST", Type: tektonv1.ResultsTypeString}},
 			Steps: []tektonv1.Step{{
 				Name:  "attest",
-				Image: "gcr.io/go-containerregistry/crane:latest",
+				Image: "gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1",
 				Script: `#!/bin/sh
 set -e
 digest=$(crane digest $(params.IMAGE))

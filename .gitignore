@@ -44,3 +44,6 @@ allure-report/
 # Scratch logs and editor backups — never commit
 *.log
 *.bak
+
+# Coverage profile written by mage test
+cover.out

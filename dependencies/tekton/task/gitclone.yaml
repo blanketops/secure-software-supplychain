@@ -70,7 +70,7 @@ spec:
     description: Log the commands that are executed during `git-clone`'s operation.
     name: verbose
     type: string
-  - default: ghcr.io/tektoncd-catalog/git-clone:v1.1.0
+  - default: ghcr.io/tektoncd-catalog/git-clone:v1.1.0@sha256:b7fe6c370322586feb555c807f3fae7ca5d62c20ebbcca987114e69366151957
     description: The image providing the git-init binary that this Task runs.
     name: gitInitImage
     type: string

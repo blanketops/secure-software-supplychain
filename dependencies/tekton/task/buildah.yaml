@@ -28,14 +28,14 @@ spec:
     description: Verify TLS on the registry endpoint.
     name: TLSVERIFY
     type: string
-  - default: quay.io/buildah/stable:v1.35.0
+  - default: quay.io/buildah/stable:v1.35.0@sha256:de7c5d472921ad7d90c06002e2ed60611fc11eb00648b96379cfb16469c9b901
     description: Buildah image to use.
     name: BUILDER_IMAGE
     type: string
   results:
-  # Deliberately not IMAGE_URL / IMAGE_DIGEST: that pair tells Tekton Chains
-  # "this TaskRun produced this image". Nothing is published here, and the
-  # archive's digest is not the digest the registry will serve after the push.
+  #! Deliberately not IMAGE_URL / IMAGE_DIGEST: that pair tells Tekton Chains
+  #! "this TaskRun produced this image". Nothing is published here, and the
+  #! archive's digest is not the digest the registry will serve after the push.
   - description: Digest of the local image archive. Not a registry digest.
     name: ARCHIVE_DIGEST
     type: string

@@ -76,6 +76,13 @@ spec:
       CACHE_DIR="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy}"
       echo "Trivy cache dir: $CACHE_DIR"
 
+      # ── Java DB ────────────────────────────────────────────────────────
+      # The image carries no Java DB (about 1.3 GB). Trivy fetches it only
+      # when a scanned image contains .jar files; one already cached is used
+      # without an update.
+      SKIP_JAVA=""
+      if [ -d "$CACHE_DIR/java-db" ]; then SKIP_JAVA="--skip-java-db-update"; fi
+
       # ── What to scan ───────────────────────────────────────────────────
       # The local build archive when one is given, else the registry image.
       if [ -n "$(params.IMAGE_TAR)" ]; then
@@ -90,7 +97,7 @@ spec:
       trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
-        --skip-java-db-update \
+        $SKIP_JAVA \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \
@@ -107,7 +114,7 @@ spec:
       SCAN_OUTPUT=$(trivy image \
         --cache-dir "$CACHE_DIR" \
         --skip-db-update \
-        --skip-java-db-update \
+        $SKIP_JAVA \
         --exit-code 0 \
         --severity $(params.SEVERITY) \
         --scanners vuln \

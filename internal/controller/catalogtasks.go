@@ -37,7 +37,7 @@ import (
 // buildah, trivy-scanner), as embedded from dependencies/tekton/task. The
 // installer applies them to default only; a SupplyChain anywhere else gets
 // them from the operator.
-var catalogTaskFiles = []string{"gitclone.yaml", "buildah.yaml", "trivvyscanner.yaml"}
+var catalogTaskFiles = []string{"gitclone.yaml", "buildah.yaml", "trivyscanner.yaml"}
 
 const catalogTaskDir = "dependencies/tekton/task"
 
