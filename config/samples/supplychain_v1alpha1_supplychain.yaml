@@ -5,6 +5,7 @@ metadata:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
   name: your-app
+  namespace: secure-software-supply-chain-system
 spec:
   repository: your-org/your-app
   webhookHost: your-machine.your-tailnet.ts.net

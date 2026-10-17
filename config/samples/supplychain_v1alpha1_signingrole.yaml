@@ -25,4 +25,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner
-  namespace: default
+  namespace: secure-software-supply-chain-system

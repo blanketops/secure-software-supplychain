@@ -17,7 +17,7 @@
       </div>
       <label class="conn" for="ns">Namespace
         <select id="ns" onchange="loadAll()">
-          <option value="default">default</option>
+          <option value="secure-software-supply-chain-system">secure-software-supply-chain-system</option>
         </select>
       </label>
       <div class="conn" title="How the page reaches the cluster">
@@ -137,7 +137,9 @@
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-    const ns = () => $('ns').value || 'default';
+    // SupplyChains live in the operator's namespace unless placed elsewhere.
+    const HOME_NS = 'secure-software-supply-chain-system';
+    const ns = () => $('ns').value || HOME_NS;
 
     async function get(path) {
       const r = await fetch(path, { headers: { Accept: 'application/json' } });
@@ -648,7 +650,7 @@ subjects:
 
     async function loadNamespaces() {
       const all = await list(`${GROUP}/supplychains`);
-      const names = [...new Set(['default', ns(), ...all.map(c => c.metadata.namespace)])].sort();
+      const names = [...new Set([HOME_NS, ns(), ...all.map(c => c.metadata.namespace)])].sort();
       const current = ns();
       $('ns').innerHTML = names.map(n => `<option value="${esc(n)}"${n === current ? ' selected' : ''}>${esc(n)}</option>`).join('');
     }

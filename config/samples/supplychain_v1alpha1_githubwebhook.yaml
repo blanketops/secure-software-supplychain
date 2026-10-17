@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
   name: your-app-webhook
-  namespace: default
+  namespace: secure-software-supply-chain-system
 spec:
   # Repository to register the webhook on — owner/repo format.
   repository: your-org/your-app

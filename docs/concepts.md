@@ -200,8 +200,8 @@ not silently turn enforcement off.
 ### Reading the status
 
 ```bash
-kubectl get supplychainpolicies -n default -o wide
-kubectl get supplychainpolicy your-app -n default -o yaml
+kubectl get supplychainpolicies -n secure-software-supply-chain-system -o wide
+kubectl get supplychainpolicy your-app -n secure-software-supply-chain-system -o yaml
 ```
 
 | Status field | Meaning |

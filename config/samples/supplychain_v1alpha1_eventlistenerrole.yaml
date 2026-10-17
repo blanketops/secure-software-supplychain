@@ -10,7 +10,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: secure-software-supply-chain-eventlistener
-  namespace: default
+  namespace: secure-software-supply-chain-system
   labels:
     blanketops.dev/managed: "true"
     blanketops.dev/component: supply-chain-triggers
@@ -40,7 +40,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: secure-software-supply-chain-eventlistener
-  namespace: default
+  namespace: secure-software-supply-chain-system
   labels:
     blanketops.dev/managed: "true"
     blanketops.dev/component: supply-chain-triggers
@@ -51,7 +51,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner
-  namespace: default
+  namespace: secure-software-supply-chain-system
 ---
 # ClusterRole — cluster-scoped Triggers resources
 apiVersion: rbac.authorization.k8s.io/v1
@@ -83,4 +83,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: supply-chain-runner
-  namespace: default
+  namespace: secure-software-supply-chain-system

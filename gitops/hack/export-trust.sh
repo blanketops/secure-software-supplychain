@@ -12,12 +12,13 @@
 #       policy-controller looks them up in Rekor, and the in-cluster URL the
 #       operator renders does not resolve from another cluster.
 #   -c  kubeconfig context of the build cluster (default: current context)
-#   -n  namespace of the SupplyChainPolicies and the roots ConfigMap (default: default)
+#   -n  namespace of the SupplyChainPolicies and the roots ConfigMap
+#       (default: secure-software-supply-chain-system, the operator's)
 set -euo pipefail
 
 usage="usage: $0 -r rekor-url [-c build-context] [-n namespace]"
 context=""
-namespace="default"
+namespace="secure-software-supply-chain-system"
 rekor=""
 while getopts "c:n:r:" opt; do
   case $opt in

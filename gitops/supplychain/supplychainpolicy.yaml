@@ -5,6 +5,7 @@ metadata:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
   name: for-kaniko-app
+  namespace: secure-software-supply-chain-system
 spec:
   # The SupplyChain whose image this policy admits. The image repository, the
   # Fulcio and CT log endpoints and the trust anchors come from it and from the

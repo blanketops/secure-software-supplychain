@@ -5,6 +5,7 @@ metadata:
     app.kubernetes.io/name: secure-software-supply-chain
     app.kubernetes.io/managed-by: kustomize
   name: for-kaniko-app
+  namespace: secure-software-supply-chain-system
 spec:
   repository: ntlaletsi70/for-kaniko-app
   webhookHost: pop-os.tailf8145.ts.net

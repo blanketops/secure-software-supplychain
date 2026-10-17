@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +111,8 @@ func (f *fakeCluster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctlog := "/api/v1/namespaces/ctlog-system/services/https:ctlog:443/proxy/fulcio"
 	write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	switch path := r.URL.Path; {
-	case path == "/api/v1/namespaces/default/configmaps/"+trustAnchorsConfigMap:
+	case path == "/api/v1/namespaces/default/configmaps/"+trustAnchorsConfigMap,
+		path == "/api/v1/namespaces/"+homeNamespace+"/configmaps/"+trustAnchorsConfigMap:
 		write(map[string]any{"data": f.anchors})
 	case path == rekor+"/api/v1/log":
 		write(map[string]any{"rootHash": "abc123", "treeSize": len(f.entries), "treeID": "7441"})
@@ -329,7 +331,7 @@ func TestSearch(t *testing.T) {
 }
 
 func TestHandler(t *testing.T) {
-	_, q := newFakeCluster(t)
+	cluster, q := newFakeCluster(t)
 	server := httptest.NewServer(q.handler())
 	defer server.Close()
 
@@ -349,6 +351,11 @@ func TestHandler(t *testing.T) {
 	var summary Summary
 	if code := get("/sigstore/summary", &summary); code != http.StatusOK || summary.Rekor.TreeSize != 23 {
 		t.Errorf("summary: %d %+v", code, summary.Rekor)
+	}
+	// Without a namespace, the summary is of the operator's, where
+	// SupplyChains live.
+	if !slices.Contains(cluster.requests, "GET /api/v1/namespaces/"+homeNamespace+"/configmaps/"+trustAnchorsConfigMap) {
+		t.Errorf("the summary did not read the trust anchors of %s: %v", homeNamespace, cluster.requests)
 	}
 	var page EntryPage
 	if code := get("/sigstore/entries?limit=5", &page); code != http.StatusOK || len(page.Entries) != 5 {

@@ -11,7 +11,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: SupplyChain
 metadata:
   name: your-app
-  namespace: default
+  namespace: secure-software-supply-chain-system
 spec:
   repository: your-org/your-app
   serviceAccountName: supply-chain-runner
@@ -43,7 +43,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: GitHubWebhook
 metadata:
   name: your-app-webhook
-  namespace: default
+  namespace: secure-software-supply-chain-system
 spec:
   repository: your-org/your-app
   supplyChainRef:
@@ -61,7 +61,7 @@ apiVersion: supplychain.blanketops.dev/v1alpha1
 kind: ImageBuild
 metadata:
   name: your-app-manual-001
-  namespace: default
+  namespace: secure-software-supply-chain-system
 spec:
   supplyChainRef:
     name: your-app
@@ -74,10 +74,10 @@ spec:
 ## Follow a build
 
 ```bash
-kubectl get imagebuilds -n default -w            # Pending -> Running -> Succeeded | Failed
+kubectl get imagebuilds -n secure-software-supply-chain-system -w            # Pending -> Running -> Succeeded | Failed
 kubectl describe imagebuild <name>               # each step and how far it got
-kubectl get imagesignatures -n default           # who signed, Rekor index
-kubectl get imagebuildresults -n default         # digest, policy verification
+kubectl get imagesignatures -n secure-software-supply-chain-system           # who signed, Rekor index
+kubectl get imagebuildresults -n secure-software-supply-chain-system         # digest, policy verification
 tkn pipelinerun logs <name> -f
 ```
 
@@ -108,7 +108,7 @@ The last step of a successful build prints what it verified:
 ```
 Secure software supply chain policy verification
   Image:          docker.io/your-dockerhub-user/your-app:<sha>@sha256:...
-  Signer:         spiffe://<your-domain>/ns/default/sa/supply-chain-runner
+  Signer:         spiffe://<your-domain>/ns/secure-software-supply-chain-system/sa/supply-chain-runner
   Issuer:         https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local
   Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)
   Authorization:  verified (scope, intent, output allowed)
@@ -129,7 +129,7 @@ The same outcome is recorded on the `ImageBuildResult`, under `status.buildResul
 | `verifiedSigner` | The identity they were verified against |
 
 ```bash
-kubectl get imagebuildresult <name> -n default \
+kubectl get imagebuildresult <name> -n secure-software-supply-chain-system \
   -o custom-columns='PHASE:.status.phase,POLICY:.status.buildResults.policyVerification,CRITICAL:.status.buildResults.trivyCriticalCount,HIGH:.status.buildResults.trivyHighCount'
 ```
 

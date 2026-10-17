@@ -644,8 +644,15 @@ This applies the signing, event-listener and policy-runner roles, the `SupplyCha
 `SupplyChainPolicy`. The roles grant the build ServiceAccount the three permissions it is reviewed for before it
 is given an identity, and the policy ServiceAccount the three it needs before a policy is rendered.
 
+The samples go in the operator's own namespace, `secure-software-supply-chain-system`, the way Argo CD keeps its
+Applications in `argocd`: a SupplyChain's builds, their ServiceAccount, the credentials they read and its
+EventListener all live there, and nothing of ours is left in `default`. The operator copies the sigstore trust
+anchors (`blanketops-sigstore-roots`) into the namespace from the installer's copy in `tekton-chains`, keeps the
+copy in step, and removes it with the last SupplyChain or SupplyChainPolicy using it. A SupplyChain placed in any
+other namespace gets the same.
+
 ```bash
-kubectl get supplychain,supplychainpolicy,githubwebhook -n default
+kubectl get supplychain,supplychainpolicy,githubwebhook -n secure-software-supply-chain-system
 kubectl get clusterimagepolicies,trustroots
 ```
 
@@ -730,8 +737,8 @@ What is public and what is not:
 Push a commit, or start a build by hand (see [Trigger a build by hand](usage.md#trigger-a-build-by-hand)), then:
 
 ```bash
-kubectl get imagebuilds -n default -w           # Pending -> Running -> Succeeded
-kubectl get imagesignatures,imagebuildresults -n default
+kubectl get imagebuilds -n secure-software-supply-chain-system -w           # Pending -> Running -> Succeeded
+kubectl get imagesignatures,imagebuildresults -n secure-software-supply-chain-system
 ```
 
 A finished build has an `ImageSignature` that is `Signed`, with the Rekor index of its signature, and an

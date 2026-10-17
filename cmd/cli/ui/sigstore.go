@@ -97,6 +97,10 @@ var (
 	nsPattern     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 )
 
+// homeNamespace is where SupplyChains live unless placed elsewhere: the
+// operator's own namespace, as Argo CD keeps its Applications in argocd.
+const homeNamespace = "secure-software-supply-chain-system"
+
 // querier asks Rekor, Fulcio and the CT log through the Kubernetes API.
 type querier struct {
 	// kube is the address of the Kubernetes API, as kubectl proxy serves it.
@@ -725,7 +729,7 @@ func (q *querier) handler() http.Handler {
 	mux.HandleFunc("/sigstore/summary", func(w http.ResponseWriter, r *http.Request) {
 		namespace := r.URL.Query().Get("namespace")
 		if namespace == "" {
-			namespace = "default"
+			namespace = homeNamespace
 		}
 		if !nsPattern.MatchString(namespace) {
 			writeError(w, http.StatusBadRequest, errors.New("not a namespace name"))
