@@ -475,6 +475,13 @@ func (r *ImageBuildReconciler) settleIfRunDeleted(
 	if err := r.Status().Update(ctx, ib); err != nil {
 		return false, err
 	}
+	// As on any failed build, its signature record is failed too, rather than
+	// left Pending for a run that will not come back.
+	if phase == phaseFailed && r.Signature != nil {
+		if err := r.Signature.MarkFailed(ctx, ib); err != nil {
+			log.FromContext(ctx).Error(err, "failed to mark ImageSignature failed")
+		}
+	}
 	log.FromContext(ctx).Info("PipelineRun gone; build settled without running it again",
 		"pipelineRun", ib.Status.PipelineRunRef, "phase", phase, "reason", reason)
 	return true, nil

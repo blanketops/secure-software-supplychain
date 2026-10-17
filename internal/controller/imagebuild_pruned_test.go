@@ -26,7 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/go-logr/logr"
+
 	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 // Tekton Pruner deletes a PipelineRun some minutes after it finishes. A build
@@ -48,6 +51,14 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 		return r
 	}
 	run := &tektonv1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: "default"}}
+	// The build's signature record, Pending while its run is under way.
+	pendingSignature := func() *supplychainv1alpha1.ImageSignature {
+		s := &supplychainv1alpha1.ImageSignature{
+			ObjectMeta: metav1.ObjectMeta{Name: "your-app-main-abc1234", Namespace: "default"},
+		}
+		s.Status.Phase = "Pending"
+		return s
+	}
 
 	cases := []struct {
 		name string
@@ -58,6 +69,7 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 		build         *supplychainv1alpha1.ImageBuild
 		wantPhase     string
 		wantCondition string // reason of the PipelineRunDeleted condition; "" for none
+		wantSignature string // phase of the build's ImageSignature afterwards
 	}{
 		{
 			name:          "pruned after it succeeded",
@@ -65,6 +77,7 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 			build:         running(),
 			wantPhase:     phaseSucceeded,
 			wantCondition: "OutcomeFromResult",
+			wantSignature: "Pending", // recorded when the run finished; left as it is
 		},
 		{
 			name:          "pruned after it failed",
@@ -72,24 +85,28 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 			build:         running(),
 			wantPhase:     phaseFailed,
 			wantCondition: "OutcomeFromResult",
+			wantSignature: signing.PhaseFailed,
 		},
 		{
 			name:          "pruned before anything was recorded",
 			build:         running(),
 			wantPhase:     phaseFailed,
 			wantCondition: "NoRecordedOutcome",
+			wantSignature: signing.PhaseFailed,
 		},
 		{
-			name:      "its run still exists",
-			objects:   []client.Object{run.DeepCopy()},
-			build:     running(),
-			wantPhase: phaseRunning,
+			name:          "its run still exists",
+			objects:       []client.Object{run.DeepCopy()},
+			build:         running(),
+			wantPhase:     phaseRunning,
+			wantSignature: "Pending",
 		},
 		{
-			name:      "its run was just created and is not in the cache yet",
-			apiOnly:   []client.Object{run.DeepCopy()},
-			build:     running(),
-			wantPhase: phaseRunning,
+			name:          "its run was just created and is not in the cache yet",
+			apiOnly:       []client.Object{run.DeepCopy()},
+			build:         running(),
+			wantPhase:     phaseRunning,
+			wantSignature: "Pending",
 		},
 		{
 			name: "a new build, before it has a run",
@@ -98,7 +115,8 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 				ib.Status.Phase = phasePending
 				return ib
 			}(),
-			wantPhase: phasePending,
+			wantPhase:     phasePending,
+			wantSignature: "Pending",
 		},
 	}
 
@@ -107,12 +125,15 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 			ctx := context.Background()
 			scheme := ownershipScheme(t)
 			cached := fake.NewClientBuilder().WithScheme(scheme).
-				WithObjects(append([]client.Object{c.build}, c.objects...)...).
-				WithStatusSubresource(&supplychainv1alpha1.ImageBuild{}).Build()
+				WithObjects(append([]client.Object{c.build, pendingSignature()}, c.objects...)...).
+				WithStatusSubresource(&supplychainv1alpha1.ImageBuild{}, &supplychainv1alpha1.ImageSignature{}).Build()
 			api := fake.NewClientBuilder().WithScheme(scheme).
 				WithObjects(append(append([]client.Object{c.build.DeepCopy()}, c.objects...), c.apiOnly...)...).Build()
 
-			r := &ImageBuildReconciler{Client: cached, Scheme: scheme, APIReader: api}
+			r := &ImageBuildReconciler{
+				Client: cached, Scheme: scheme, APIReader: api,
+				Signature: signing.NewSignatureReconciler(cached, logr.Discard()),
+			}
 			if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(c.build)}); err != nil {
 				t.Fatalf("reconcile: %v", err)
 			}
@@ -130,6 +151,14 @@ func TestABuildWhosePipelineRunWasPrunedIsNotRunAgain(t *testing.T) {
 				t.Errorf("unexpected %s condition: %s", conditionRunDeleted, cond.Reason)
 			case c.wantCondition != "" && (cond == nil || cond.Reason != c.wantCondition):
 				t.Errorf("%s condition: got %v, want reason %s", conditionRunDeleted, cond, c.wantCondition)
+			}
+
+			var sig supplychainv1alpha1.ImageSignature
+			if err := cached.Get(ctx, client.ObjectKeyFromObject(c.build), &sig); err != nil {
+				t.Fatal(err)
+			}
+			if sig.Status.Phase != c.wantSignature {
+				t.Errorf("ImageSignature phase: got %q, want %q", sig.Status.Phase, c.wantSignature)
 			}
 
 			var runs tektonv1.PipelineRunList
