@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -124,6 +125,13 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		return ctrl.Result{}, r.notReady(ctx, &scp, "SigningDisabled",
 			fmt.Sprintf("SupplyChain %q does not sign its images", sc.Name))
+	}
+
+	// The policy reads the trust anchors from its own namespace; keep a copy
+	// there of the installer's. Without the installer's, the policy's own
+	// ConfigMaps are read as they are, and a missing one is reported below.
+	if err := ensureTrustAnchors(ctx, r.Client, r.Scheme, &scp); err != nil && !errors.Is(err, errTrustAnchorsMissing) {
+		return ctrl.Result{}, err
 	}
 
 	roots, missing, err := r.trustAnchors(ctx, &scp)
@@ -373,6 +381,11 @@ func (r *SupplyChainPolicyReconciler) policiesInNamespace(ctx context.Context, o
 			(obj.GetNamespace() == signing.SpireConfigNamespace && obj.GetName() == signing.SpireConfigName))
 	scope := []client.ListOption{client.InNamespace(obj.GetNamespace())}
 	if signingConfig {
+		scope = nil
+	}
+	// The installer's trust anchors are copied to every policy's namespace;
+	// the policies trusting them follow when they change.
+	if isConfigMap && isTrustAnchorsSource(obj) {
 		scope = nil
 	}
 

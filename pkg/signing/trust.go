@@ -26,9 +26,14 @@ import (
 )
 
 const (
-	// RootsConfigMap holds the sigstore trust anchors. Created by the installer
-	// in every namespace that signs or verifies.
+	// RootsConfigMap holds the sigstore trust anchors. The installer creates
+	// it in RootsSourceNamespace (and default); the operator keeps a copy in
+	// every other namespace with a SupplyChain or SupplyChainPolicy.
 	RootsConfigMap = "blanketops-sigstore-roots"
+
+	// RootsSourceNamespace holds the installer's copy of RootsConfigMap, the
+	// one the operator copies from. Tekton Chains signs with it there.
+	RootsSourceNamespace = ChainsConfigNamespace
 
 	// Keys of RootsConfigMap.
 	RootsFulcioKey = "fulcio-root.pem"

@@ -26,3 +26,10 @@ import "embed"
 //
 //go:embed dependencies/tekton/pipelines/*.yaml dependencies/metallb/release/release.yaml dependencies/cert-manager/release/*.yaml dependencies/cert-manager/ca/*.yaml dependencies/metallb/setup/*.yaml dependencies/sonarqube/*.yaml dependencies/vault/identity/*.yaml dependencies/vault/server/*.yaml dependencies/vault/spiffe/*.yaml dependencies/tekton/chains/*.yaml dependencies/tekton/dashboard/*.yaml dependencies/tekton/results/*.yaml dependencies/tekton/pruner/*.yaml dependencies/tekton/pruner/retention/*.yaml dependencies/tekton/task/*.yaml dependencies/tekton/triggers/core/*.yaml dependencies/tekton/triggers/interceptors/*.yaml dependencies/sigstore/fulcio/*.yaml dependencies/sigstore/rekor/*.yaml dependencies/sigstore/policy-controller/*.yaml dependencies/spire/crds/*.yaml dependencies/spire/release/*.yaml dependencies/spire/identities/*.yaml dependencies/ingress/controller/*.yaml  dependencies/ingress/routes/*.yaml
 var Dependencies embed.FS
+
+// TektonTasks embeds the Tekton catalog Tasks alone, for the operator: it
+// supplies them to SupplyChains outside default without carrying every
+// dependency's manifests in its binary.
+//
+//go:embed dependencies/tekton/task/*.yaml
+var TektonTasks embed.FS

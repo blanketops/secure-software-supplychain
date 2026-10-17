@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -121,6 +122,19 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.reconcileTasks(ctx, &sc); err != nil {
 		logger.Error(err, "failed to reconcile tasks")
 		return r.setPhase(ctx, &sc, "Degraded", err)
+	}
+
+	// ── Trust anchors ─────────────────────────────────────────────────────
+	// Every build mounts them from this namespace, and the installer only
+	// creates them in its own; keep a copy here before anything can build.
+	// Without the installer's copy there is nothing to copy, and a namespace
+	// that has its own (default does) is used as it is.
+	if err := ensureTrustAnchors(ctx, r.Client, r.Scheme, &sc); err != nil {
+		if !errors.Is(err, errTrustAnchorsMissing) {
+			logger.Error(err, "failed to ensure the trust anchors")
+			return r.setPhase(ctx, &sc, "Degraded", err)
+		}
+		logger.Info("No trust anchors to copy", "reason", err.Error())
 	}
 
 	// ── ServiceAccount ────────────────────────────────────────────────────
@@ -391,7 +405,8 @@ func (r *SupplyChainReconciler) reconcileTasks(ctx context.Context, sc *supplyv1
 		}
 		logger.Info("task reconciled", "task", task.Name, "result", result)
 	}
-	return nil
+	// The catalog Tasks the pipeline runs besides these.
+	return r.reconcileCatalogTasks(ctx, sc)
 }
 
 func customTasks(namespace string) []tektonv1.Task {
@@ -531,9 +546,13 @@ func (r *SupplyChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&triggersv1beta1.TriggerTemplate{}).
 		// The signing identity comes from Chains' and Tekton's SPIRE config;
 		// when either changes, every SupplyChain's registration is revisited.
+		// The installer's trust anchors likewise: each SupplyChain's copy
+		// follows them.
 		Watches(&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.supplyChainsForSigningConfig),
-			builder.WithPredicates(predicate.NewPredicateFuncs(isSigningConfig))).
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return isSigningConfig(obj) || isTrustAnchorsSource(obj)
+			}))).
 		// The signing identity is only registered while the build
 		// ServiceAccount passes its three reviews. When RBAC changes, a
 		// revoked permission takes the identity away now, not at the next
