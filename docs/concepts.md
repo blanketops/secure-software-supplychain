@@ -119,8 +119,10 @@ who built the image. The attestation says that identity was authorized, accordin
 
 When the PipelineRun finishes, the controller records an `ImageBuildResult`, which outlives the run. Tekton
 Pruner deletes the run and its TaskRuns 15 minutes after it finishes, succeeded or failed, once Tekton Chains has
-had time to sign it; Tekton Results keeps its history and logs. The controller's own pruning keeps the last 3
-succeeded and 1 failed runs of each `ImageBuild`, and as every build has one run it removes nothing.
+had time to sign it; Tekton Results keeps its history and logs. A build whose run is gone is never run again: it
+takes the outcome its `ImageBuildResult` recorded, and, when nothing was recorded (the operator was down from
+before the run ended until after it was pruned), it is `Failed`. Either way the build carries a
+`PipelineRunDeleted` condition saying which (`OutcomeFromResult` or `NoRecordedOutcome`).
 
 The `ImageSignature` is then completed from the evidence, not from the outcome of the run. It becomes `Signed`
 only when the build's signature is found on the image together with its Rekor entry, and its fields are that

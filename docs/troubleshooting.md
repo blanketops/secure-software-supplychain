@@ -119,6 +119,11 @@ dropped DNS reply costs five seconds, raise `timeoutSeconds` on the `policy.sigs
 webhooks to 30, the most Kubernetes allows; policy-controller keeps the value when it updates its own webhook
 configuration. Admitting a signed image was measured at 4 to 12 seconds on a link losing a sixth of its packets.
 
+**A build is `Failed` with the condition `PipelineRunDeleted`, reason `NoRecordedOutcome`.** Its PipelineRun was
+deleted before the operator recorded how it ended, usually because the operator was down from before the run
+finished until Tekton Pruner removed it 15 minutes later. The build is not run again, so nothing is signed twice;
+its run is still in Tekton Results. Push again, or start a build by hand, to build that commit anew.
+
 **Pushes stop starting builds, and GitHub's delivery log shows `500 ... EOF`.** Tailscale Funnel dropped the
 delivery before it reached the cluster. [Reaching the UIs](access.md#when-the-webhook-stops-arriving) shows how
 to check each hop and how to restore it.

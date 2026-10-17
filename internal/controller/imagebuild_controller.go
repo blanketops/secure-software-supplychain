@@ -24,6 +24,7 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,7 +38,6 @@ import (
 	"github.com/blanketops/secure-software-supplychain/pkg/evidence"
 	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 	pipeline "github.com/blanketops/secure-software-supplychain/pkg/tekton/pipeline"
-	"github.com/blanketops/secure-software-supplychain/pkg/tekton/pruner"
 	"github.com/blanketops/secure-software-supplychain/pkg/tekton/results"
 )
 
@@ -59,8 +59,11 @@ type ImageBuildReconciler struct {
 	Scheme    *runtime.Scheme
 	Mediator  *supplychain.Mediator
 	Recorder  *results.Recorder
-	Pruner    *pruner.Pruner
 	Signature *signing.SignatureReconciler
+	// APIReader reads past the informer cache. It confirms a build's
+	// PipelineRun is really gone, which the cache cannot: a run the reconciler
+	// has only just created may not be in it yet. Defaults to the manager's.
+	APIReader client.Reader
 }
 
 // +kubebuilder:rbac:groups=supplychain.blanketops.dev,resources=imagebuilds,verbs=get;list;watch;create;update;patch;delete
@@ -100,6 +103,13 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if ib.Status.Phase == phaseFailed {
 		logger.Info("ImageBuild terminal, skipping", "phase", ib.Status.Phase)
 		return ctrl.Result{}, nil
+	}
+
+	// A build whose PipelineRun is gone has finished: Tekton Pruner deletes
+	// runs some minutes after they end. Settle it from what was recorded;
+	// creating the run again would build and sign the commit a second time.
+	if settled, err := r.settleIfRunDeleted(ctx, &ib); settled || err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// ── 1. Resolve SupplyChain ────────────────────────────────────────────
@@ -161,20 +171,18 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				logger.Error(err, "failed to mark ImageSignature failed")
 			}
 		}
-		// 4c. Prune old PipelineRuns
-		if err := r.Pruner.PruneForImageBuild(ctx, &ib); err != nil {
-			logger.Error(err, "failed to prune PipelineRuns")
-		}
 
 		// Tekton Chains signs the run after it has finished, and adds that
 		// provenance to the image. Come back for it, so the recorded
-		// evidence is whole; give up on a run Chains never signs.
+		// evidence is whole; give up on a run Chains never signs. Tekton
+		// Pruner deletes the run only after this wait (its retention is
+		// longer than evidenceWait).
 		if ib.Status.Phase == phaseSucceeded && !evidence.ChainsDone(pr) && pr.Status.CompletionTime != nil &&
 			time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
 			return ctrl.Result{RequeueAfter: evidenceRetry}, nil
 		}
 
-		// 4d. The record is final: publish it to Tekton.
+		// 4c. The record is final: publish it to Tekton.
 		if err := r.publishResult(ctx, &ib, pr.Name); err != nil {
 			logger.Error(err, "Failed to publish ImageBuildResult to Tekton")
 		}
@@ -411,6 +419,67 @@ func (r *ImageBuildReconciler) stepStatuses(
 	return steps
 }
 
+// conditionRunDeleted is set on a build whose PipelineRun was deleted after it
+// had been created, and says where the build's outcome came from.
+const conditionRunDeleted = "PipelineRunDeleted"
+
+// settleIfRunDeleted settles a build whose PipelineRun no longer exists. Only
+// a build that already had a run is considered, and the run's absence is
+// confirmed past the cache. Its outcome is the one its ImageBuildResult
+// recorded when the run finished; without one, for example when the operator
+// was down from before the run ended until after it was pruned, the build is
+// Failed, as nothing shows it succeeded. The run is never created again.
+func (r *ImageBuildReconciler) settleIfRunDeleted(
+	ctx context.Context,
+	ib *supplychainv1alpha1.ImageBuild,
+) (bool, error) {
+	if ib.Status.PipelineRunRef == "" {
+		return false, nil
+	}
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	var pr tektonv1.PipelineRun
+	err := reader.Get(ctx, types.NamespacedName{Namespace: ib.Namespace, Name: ib.Status.PipelineRunRef}, &pr)
+	if err == nil {
+		return false, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("checking PipelineRun %s: %w", ib.Status.PipelineRunRef, err)
+	}
+
+	phase := phaseFailed
+	reason := "NoRecordedOutcome"
+	message := fmt.Sprintf("PipelineRun %s was deleted before this build recorded how it ended; "+
+		"it is not run again", ib.Status.PipelineRunRef)
+	var result supplychainv1alpha1.ImageBuildResult
+	switch err := r.Get(ctx, client.ObjectKeyFromObject(ib), &result); {
+	case err == nil && (result.Status.Phase == phaseSucceeded || result.Status.Phase == phaseFailed):
+		phase = result.Status.Phase
+		reason = "OutcomeFromResult"
+		message = fmt.Sprintf("PipelineRun %s was deleted after it finished; the outcome is the one "+
+			"its ImageBuildResult recorded", ib.Status.PipelineRunRef)
+	case err != nil && !apierrors.IsNotFound(err):
+		return false, fmt.Errorf("reading ImageBuildResult: %w", err)
+	}
+
+	ib.Status.Phase = phase
+	meta.SetStatusCondition(&ib.Status.Conditions, metav1.Condition{
+		Type:               conditionRunDeleted,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: ib.Generation,
+	})
+	if err := r.Status().Update(ctx, ib); err != nil {
+		return false, err
+	}
+	log.FromContext(ctx).Info("PipelineRun gone; build settled without running it again",
+		"pipelineRun", ib.Status.PipelineRunRef, "phase", phase, "reason", reason)
+	return true, nil
+}
+
 func (r *ImageBuildReconciler) setFailed(
 	ctx context.Context,
 	ib *supplychainv1alpha1.ImageBuild,
@@ -504,15 +573,14 @@ func (r *ImageBuildReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		logger.WithName("recorder"),
 	)
 
-	r.Pruner = pruner.New(
-		mgr.GetClient(),
-		logger.WithName("pruner"),
-	)
-
 	r.Signature = signing.NewSignatureReconciler(
 		mgr.GetClient(),
 		logger.WithName("signature"),
 	)
+
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&supplychainv1alpha1.ImageBuild{}).
