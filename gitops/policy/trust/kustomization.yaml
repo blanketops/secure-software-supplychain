@@ -12,3 +12,4 @@ resources:
 - clusterimagepolicy-secure-software-supply-chain-system-for-kaniko-app-authorization.json
 - clusterimagepolicy-secure-software-supply-chain-system-for-kaniko-app-chains.json
 - clusterimagepolicy-secure-software-supply-chain-system-for-kaniko-app-provenance.json
+- clusterimagepolicy-secure-software-supply-chain-system-for-kaniko-app-sbom.json

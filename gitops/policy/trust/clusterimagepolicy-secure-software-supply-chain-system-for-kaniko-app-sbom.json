@@ -1,0 +1,48 @@
+{
+  "apiVersion": "policy.sigstore.dev/v1beta1",
+  "kind": "ClusterImagePolicy",
+  "metadata": {
+    "finalizers": [
+      "clusterimagepolicies.policy.sigstore.dev"
+    ],
+    "labels": {
+      "blanketops.dev/managed": "true",
+      "blanketops.dev/supply-chain-policy": "for-kaniko-app",
+      "blanketops.dev/supply-chain-policy-namespace": "secure-software-supply-chain-system"
+    },
+    "name": "secure-software-supply-chain-system-for-kaniko-app-sbom"
+  },
+  "spec": {
+    "authorities": [
+      {
+        "attestations": [
+          {
+            "name": "sbom",
+            "predicateType": "https://cyclonedx.org/bom"
+          }
+        ],
+        "ctlog": {
+          "trustRootRef": "secure-software-supply-chain-system-for-kaniko-app",
+          "url": "https://rekor.172-18-255-200.nip.io"
+        },
+        "keyless": {
+          "identities": [
+            {
+              "issuer": "https://spire-spiffe-oidc-discovery-provider.spire-server.svc.cluster.local",
+              "subject": "spiffe://blanketops.dev/ns/secure-software-supply-chain-system/sa/supply-chain-runner"
+            }
+          ],
+          "trustRootRef": "secure-software-supply-chain-system-for-kaniko-app",
+          "url": "https://fulcio-server.fulcio-system.svc.cluster.local"
+        },
+        "name": "sbom"
+      }
+    ],
+    "images": [
+      {
+        "glob": "index.docker.io/nkanyezisolutions/for-kaniko-app**"
+      }
+    ],
+    "mode": "enforce"
+  }
+}
