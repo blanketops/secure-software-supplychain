@@ -19,7 +19,7 @@ an error when the server cannot be reached or rejects the login.
 | `Root(tx)` | The accumulated hash (Alh) of transaction `tx`, verified |
 | `Put`, `PutAll`, `Get`, `Verify` | Key-value writes and verified reads; `PutAll` writes every key in one transaction, each under `KeyMustNotExist` |
 
-The evidence itself (tables `builds`, `signatures`, `attestations`) is defined in `pkg/evidence/immudb.go`, and
+The evidence itself (tables `builds`, `signatures`, `provenances`, `sboms`, `attestations`) is defined in `pkg/evidence/immudb.go`, and
 described in [installation](../../docs/installation.md#where-the-evidence-is-stored-immudb).
 
 ## Tests

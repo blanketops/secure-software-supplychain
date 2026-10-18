@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -79,6 +80,8 @@ func buildRecords() []supplychainv1alpha1.SignatureRecord {
 		{Kind: KindSignature, SignedBy: SignedByChains, Subject: "spiffe://td/ns/tekton-chains/sa/tekton-chains-controller"},
 		{Kind: KindAttestation, SignedBy: SignedByChains, Subject: "spiffe://td/ns/tekton-chains/sa/tekton-chains-controller",
 			PredicateType: "https://slsa.dev/provenance/v1", RekorLogIndex: ptr(int64(103)), RekorLogID: "sha256:rekor"},
+		{Kind: KindAttestation, SignedBy: SignedByBuild, Subject: subject,
+			PredicateType: "https://cyclonedx.org/bom", RekorLogIndex: ptr(int64(104)), RekorLogID: "sha256:rekor"},
 	}
 }
 
@@ -121,8 +124,9 @@ func TestBuildEvidenceIsOneTransaction(t *testing.T) {
 	sameRecords(t, got.Records, records)
 }
 
-// TestBuildEvidenceTables: signatures and attestations land in their own
-// tables, one row each, so they can be queried with SQL.
+// TestBuildEvidenceTables: each kind of record lands in its own table, one
+// row each, so it can be queried with SQL: signatures, SLSA provenance,
+// SBOMs, and other attestations (the authorization proofs).
 func TestBuildEvidenceTables(t *testing.T) {
 	s := openStore(t)
 	b := testBuild(t)
@@ -136,11 +140,13 @@ func TestBuildEvidenceTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s: %v", TableBuilds, err)
 	}
-	if len(builds) != 1 || builds[0].Values["records"] != int64(4) || builds[0].Tx != tx {
-		t.Fatalf("%s rows = %+v; want one row of 4 records in tx %d", TableBuilds, builds, tx)
+	if len(builds) != 1 || builds[0].Values["records"] != int64(5) || builds[0].Tx != tx {
+		t.Fatalf("%s rows = %+v; want one row of 5 records in tx %d", TableBuilds, builds, tx)
 	}
 
-	for table, want := range map[string][]int64{TableSignatures: {0, 2}, TableAttestations: {1, 3}} {
+	for table, want := range map[string][]int64{
+		TableSignatures: {0, 2}, TableAttestations: {1}, TableProvenances: {3}, TableSBOMs: {4},
+	} {
 		rows, err := s.QueryVerified(table, []string{"digest", "n"},
 			"SELECT digest, n FROM "+table+" WHERE digest = @digest ORDER BY n", map[string]any{"digest": b.Digest})
 		if err != nil {
@@ -153,7 +159,7 @@ func TestBuildEvidenceTables(t *testing.T) {
 				t.Errorf("%s row %v in tx %d; want %d", table, r.Values["n"], r.Tx, tx)
 			}
 		}
-		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		if !slices.Equal(got, want) {
 			t.Errorf("%s holds records %v; want %v", table, got, want)
 		}
 	}

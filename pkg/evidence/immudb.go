@@ -18,6 +18,7 @@ package evidence
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,17 +27,45 @@ import (
 
 	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 	immudb "github.com/blanketops/secure-software-supplychain/pkg/immudb"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 // The SQL tables a build's evidence is stored in. A build, identified by its
-// image digest, has one row in builds and one row per record in signatures
-// or attestations, keyed by (digest, n): n is the record's position in the
-// build's evidence. All of a build's rows are written in one transaction.
+// image digest, has one row in builds and one row per record in the table of
+// its kind, keyed by (digest, n): n is the record's position in the build's
+// evidence. All of a build's rows are written in one transaction.
 const (
-	TableBuilds       = "builds"
-	TableSignatures   = "signatures"
+	TableBuilds     = "builds"
+	TableSignatures = "signatures"
+	// TableProvenances holds SLSA provenance attestations, TableSBOMs the
+	// SBOM attestations, and TableAttestations every other attestation (the
+	// build's authorization proofs).
+	TableProvenances  = "provenances"
+	TableSBOMs        = "sboms"
 	TableAttestations = "attestations"
 )
+
+// attestationTables are the tables of attestation records; their rows have
+// predicate_type as well.
+var attestationTables = []string{TableAttestations, TableProvenances, TableSBOMs}
+
+// sbomPredicateTypes are the SBOM formats cosign attests.
+var sbomPredicateTypes = []string{signing.SBOMPredicateType, "https://spdx.dev/Document"}
+
+// tableFor is the table a record of kind and predicateType is stored in.
+func tableFor(kind, predicateType string) (string, error) {
+	switch {
+	case kind == KindSignature:
+		return TableSignatures, nil
+	case kind != KindAttestation:
+		return "", fmt.Errorf("unknown kind %q", kind)
+	case strings.HasPrefix(predicateType, "https://slsa.dev/provenance/"):
+		return TableProvenances, nil
+	case slices.Contains(sbomPredicateTypes, predicateType):
+		return TableSBOMs, nil
+	}
+	return TableAttestations, nil
+}
 
 // recordColumns are the columns of a signature row; an attestation row has
 // predicate_type as well. Each is a field of SignatureRecord.
@@ -66,9 +95,14 @@ var schema = []string{
 	PRIMARY KEY (digest))`,
 	`CREATE TABLE IF NOT EXISTS ` + TableSignatures + ` (` + recordColumns + `
 	PRIMARY KEY (digest, n))`,
-	`CREATE TABLE IF NOT EXISTS ` + TableAttestations + ` (` + recordColumns + `
+}
+
+func init() {
+	for _, table := range attestationTables {
+		schema = append(schema, `CREATE TABLE IF NOT EXISTS `+table+` (`+recordColumns+`
 	predicate_type VARCHAR,
-	PRIMARY KEY (digest, n))`,
+	PRIMARY KEY (digest, n))`)
+	}
 }
 
 const selectRecord = `digest, n, signed_by, subject, issuer, key_fingerprint, certificate_fingerprint,
@@ -168,16 +202,13 @@ func insertRecord(digest string, n int, r supplychainv1alpha1.SignatureRecord) (
 		params["rekor_log_index"] = *r.RekorLogIndex
 	}
 	columns := strings.Fields(strings.ReplaceAll(selectRecord, ",", " "))
-	var table string
-	switch r.Kind {
-	case KindSignature:
-		table = TableSignatures
-	case KindAttestation:
-		table = TableAttestations
+	table, err := tableFor(r.Kind, r.PredicateType)
+	if err != nil {
+		return immudb.Statement{}, fmt.Errorf("evidence: record %d of %s: %w", n, digest, err)
+	}
+	if table != TableSignatures {
 		params["predicate_type"] = orNull(r.PredicateType)
 		columns = append(columns, "predicate_type")
-	default:
-		return immudb.Statement{}, fmt.Errorf("evidence: record %d of %s is of unknown kind %q", n, digest, r.Kind)
 	}
 	return immudb.Statement{
 		SQL: `INSERT INTO ` + table + ` (` + strings.Join(columns, ", ") + `)
@@ -218,10 +249,10 @@ func ReadBuildEvidence(s immudb.Store, digest string) (*StoredBuildEvidence, err
 	want, _ := row.Values["records"].(int64)
 
 	byPosition := map[int64]supplychainv1alpha1.SignatureRecord{}
-	for _, kind := range []string{KindSignature, KindAttestation} {
-		table, columns := TableSignatures, selectRecord
-		if kind == KindAttestation {
-			table, columns = TableAttestations, selectRecord+", predicate_type"
+	for _, table := range append([]string{TableSignatures}, attestationTables...) {
+		kind, columns := KindAttestation, selectRecord+", predicate_type"
+		if table == TableSignatures {
+			kind, columns = KindSignature, selectRecord
 		}
 		rows, err := s.QueryVerified(table, []string{"digest", "n"},
 			`SELECT `+columns+` FROM `+table+` WHERE digest = @digest`, params)
@@ -234,7 +265,7 @@ func ReadBuildEvidence(s immudb.Store, digest string) (*StoredBuildEvidence, err
 				return nil, fmt.Errorf("evidence: %s row %d of %s was written in tx %d, not in the build's tx %d", table, n, digest, r.Tx, out.Tx)
 			}
 			if _, dup := byPosition[n]; dup {
-				return nil, fmt.Errorf("evidence: record %d of %s is both a signature and an attestation", n, digest)
+				return nil, fmt.Errorf("evidence: record %d of %s is stored in two tables, the second %s", n, digest, table)
 			}
 			byPosition[n] = recordFromRow(kind, r.Values)
 		}
