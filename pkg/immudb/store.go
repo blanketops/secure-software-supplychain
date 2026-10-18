@@ -58,6 +58,15 @@ type Store interface {
 	// Verify reports whether transaction tx wrote value under key and its
 	// root is root.
 	Verify(key string, root []byte, tx uint64, value string) (ok bool, err error)
+	// ExecAll runs SQL statements in one transaction: all are committed or
+	// none. Inserting an existing primary key is ErrDuplicate.
+	ExecAll(stmts ...Statement) (tx uint64, root []byte, err error)
+	// QueryVerified runs a SELECT on table and verifies every returned row;
+	// pk names the primary key columns, which the query must select.
+	QueryVerified(table string, pk []string, sql string, params map[string]any) ([]Row, error)
+	// Root returns the root of transaction tx, verified against the
+	// client's trusted state.
+	Root(tx uint64) ([]byte, error)
 	// Database is the immudb database the store reads and writes.
 	Database() string
 	Close() error
@@ -199,6 +208,10 @@ func (s *immudbStore) Verify(key string, root []byte, tx uint64, value string) (
 
 func (s *immudbStore) Close() error {
 	return s.c.CloseSession(context.Background())
+}
+
+func (s *immudbStore) Root(tx uint64) ([]byte, error) {
+	return s.root(context.Background(), tx)
 }
 
 // root returns the accumulated linear hash of transaction tx, read with a

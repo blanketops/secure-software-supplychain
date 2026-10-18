@@ -394,6 +394,23 @@ network (`docker network inspect kind`, usually `172.18.0.1`), on the port it pu
 when immudb cannot be reached, nothing falls back: the build's result is not published,
 `status.evidence.ledgerMessage` of its `ImageBuildResult` says why, and the operator tries again.
 
+The evidence is stored in three SQL tables of that database, which the operator creates on its first write:
+
+| Table | One row per | Primary key |
+|---|---|---|
+| `builds` | Built image: its `digest`, `image`, `image_build` (namespace/name), `git_commit`, the number of `records`, and `stored_at` | `digest` |
+| `signatures` | Signature on the image: `signed_by` (`Build`, `Chains` or `Other`), the certificate `subject` and `issuer`, `key_fingerprint`, `certificate_fingerprint`, the PEM `certificate`, `not_before`, `not_after`, and its transparency log entry (`rekor_log_index`, `rekor_log_id`, `integrated_at`) | `digest`, `n` |
+| `attestations` | Attestation about the image: the same columns as `signatures`, and `predicate_type` | `digest`, `n` |
+
+A build's row and all of its record rows are written in one transaction, the one `status.evidence.ledger.tx`
+names; `n` is the record's position in `status.evidence.signatures`. A record of more than 64 KB fails the write
+and nothing of the build is stored: a build's rows are read back in one message of at most 4 MB. Read the tables
+with any immudb SQL client, for example the immudb web console (port 8080) or `immuclient`:
+
+```sql
+SELECT n, signed_by, subject, rekor_log_index FROM signatures WHERE digest = 'sha256:<digest>';
+```
+
 The unit tests of `pkg/immudb`, `pkg/evidence` and `pkg/tekton/results` need an immudb at `127.0.0.1:3322`
 (override with the same `IMMUDB_*` variables) and fail without one.
 

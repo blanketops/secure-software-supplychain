@@ -48,6 +48,10 @@ func ledgerFixture(t *testing.T) (*supplyv1alpha1.ImageBuild, *supplyv1alpha1.Im
 		Status: supplyv1alpha1.ImageBuildResultStatus{
 			Phase:       phaseSucceeded,
 			ImageDigest: digest,
+			ImageURL:    "test.invalid/" + t.Name(),
+			BuildResults: &supplyv1alpha1.PipelineStepResults{
+				Commit: "0123456789abcdef0123456789abcdef01234567",
+			},
 			Evidence: &supplyv1alpha1.BuildEvidence{
 				Complete: true,
 				Signatures: []supplyv1alpha1.SignatureRecord{
@@ -112,6 +116,13 @@ func TestStoreEvidenceWritesTheBuildToImmudb(t *testing.T) {
 	if int64(stored.Tx) != ledger.Tx || hex.EncodeToString(stored.Root) != ledger.Root || len(stored.Records) != 3 {
 		t.Fatalf("immudb holds tx %d root %x (%d records); the status says tx %d root %s",
 			stored.Tx, stored.Root, len(stored.Records), ledger.Tx, ledger.Root)
+	}
+	wantBuild := evidence.Build{
+		Digest: result.Status.ImageDigest, Image: result.Status.ImageURL,
+		ImageBuild: "dev/app-1", Commit: result.Status.BuildResults.Commit,
+	}
+	if stored.Build != wantBuild {
+		t.Fatalf("stored build = %+v; want %+v", stored.Build, wantBuild)
 	}
 
 	// Stored once: a second call changes nothing.

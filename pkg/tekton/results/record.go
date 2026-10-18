@@ -216,7 +216,7 @@ func (r *Recorder) StoreEvidence(ctx context.Context, ib *supplyv1alpha1.ImageBu
 		return nil
 	}
 
-	ledger, err := r.storeEvidence(result.Status.ImageDigest, ev.Signatures)
+	ledger, err := r.storeEvidence(buildOf(ib, &result), ev.Signatures)
 	if err != nil {
 		err = fmt.Errorf("storing the evidence of %s in immudb: %w", result.Status.ImageDigest, err)
 		ev.LedgerMessage = err.Error()
@@ -234,8 +234,22 @@ func (r *Recorder) StoreEvidence(ctx context.Context, ib *supplyv1alpha1.ImageBu
 	return nil
 }
 
+// buildOf is the build an ImageBuildResult records, as its evidence is
+// stored: the image digest and where the image came from.
+func buildOf(ib *supplyv1alpha1.ImageBuild, result *supplyv1alpha1.ImageBuildResult) evidence.Build {
+	b := evidence.Build{
+		Digest:     result.Status.ImageDigest,
+		Image:      result.Status.ImageURL,
+		ImageBuild: ib.Namespace + "/" + ib.Name,
+	}
+	if result.Status.BuildResults != nil {
+		b.Commit = result.Status.BuildResults.Commit
+	}
+	return b
+}
+
 func (r *Recorder) storeEvidence(
-	digest string,
+	b evidence.Build,
 	records []supplyv1alpha1.SignatureRecord,
 ) (*supplyv1alpha1.EvidenceLedger, error) {
 	if r.OpenLedger == nil {
@@ -247,12 +261,12 @@ func (r *Recorder) storeEvidence(
 	}
 	defer func() { _ = s.Close() }()
 
-	tx, root, err := evidence.PutBuildEvidence(s, digest, records)
+	tx, root, err := evidence.PutBuildEvidence(s, b, records)
 	n := len(records)
 	if errors.Is(err, immudb.ErrDuplicate) {
 		// Stored by an earlier reconcile whose status update was lost, or by
 		// another build of the same image: what is stored is the record.
-		stored, readErr := evidence.ReadBuildEvidence(s, digest)
+		stored, readErr := evidence.ReadBuildEvidence(s, b.Digest)
 		if readErr != nil {
 			return nil, fmt.Errorf("already stored, but it does not read back: %w", readErr)
 		}
