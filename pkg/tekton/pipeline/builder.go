@@ -70,13 +70,17 @@ const (
 // archive, in the shared workspace; the sign task attests it from there.
 const SBOMFile = "sbom.cdx.json"
 
-func BuildPipelineRun(
-	name, namespace string,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-	imageRef string,
-	sigCtx *signing.RunSigningContext,
-) *tektonv1.PipelineRun {
+// identitySource is what a cosign step needs in order to prove who it is to
+// Fulcio: the volume carrying its credential, where to mount it, and the
+// flags and environment that point cosign at it.
+type identitySource struct {
+	volume corev1.Volume
+	mount  corev1.VolumeMount
+	env    []corev1.EnvVar
+	flags  []string
+}
+
+func BuildPipelineRun(name, namespace string, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild, imageRef string, sigCtx *signing.RunSigningContext) *tektonv1.PipelineRun {
 	sa := sc.Spec.ServiceAccountName
 	if sa == "" {
 		sa = "default"
@@ -211,11 +215,7 @@ func buildResults(sc *supplyv1alpha1.SupplyChain, verified bool) []tektonv1.Pipe
 	return results
 }
 
-func buildTaskList(
-	sc *supplyv1alpha1.SupplyChain,
-	imageRef string,
-	sigCtx *signing.RunSigningContext,
-) []tektonv1.PipelineTask {
+func buildTaskList(sc *supplyv1alpha1.SupplyChain, imageRef string, sigCtx *signing.RunSigningContext) []tektonv1.PipelineTask {
 	tasks := []tektonv1.PipelineTask{}
 
 	// Step 1: git-clone — fetch source
@@ -515,11 +515,7 @@ func trivyTask(runAfter string) tektonv1.PipelineTask {
 	}
 }
 
-func signTask(
-	sc *supplyv1alpha1.SupplyChain,
-	imageRef, runAfter string,
-	sigCtx *signing.RunSigningContext,
-) tektonv1.PipelineTask {
+func signTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string, sigCtx *signing.RunSigningContext) tektonv1.PipelineTask {
 	endpoints := signing.EndpointsFor(sc)
 
 	task := signImageTask(imageRef, runAfter, endpoints, sigCtx.SigningIdentity())
@@ -606,16 +602,6 @@ printf '%s' "${PREDICATE}" > ` + authorizationPredicatePath + `
 	)
 }
 
-// identitySource is what a cosign step needs in order to prove who it is to
-// Fulcio: the volume carrying its credential, where to mount it, and the
-// flags and environment that point cosign at it.
-type identitySource struct {
-	volume corev1.Volume
-	mount  corev1.VolumeMount
-	env    []corev1.EnvVar
-	flags  []string
-}
-
 func identitySourceFor(identity signing.Identity) identitySource {
 	if identity.IsSPIFFE() {
 		// The SPIFFE CSI driver exposes the node agent's Workload API socket;
@@ -656,11 +642,7 @@ func identitySourceFor(identity signing.Identity) identitySource {
 	}
 }
 
-func signImageTask(
-	imageRef, runAfter string,
-	endpoints signing.Endpoints,
-	identity signing.Identity,
-) tektonv1.PipelineTask {
+func signImageTask(imageRef, runAfter string, endpoints signing.Endpoints, identity signing.Identity) tektonv1.PipelineTask {
 	source := identitySourceFor(identity)
 	return tektonv1.PipelineTask{
 		Name:     stepSign,
@@ -830,11 +812,7 @@ echo "IMAGE_DIGEST=${digest}"
 // the SupplyChain's ServiceAccount, with a Fulcio certificate chaining to the
 // trust anchors, a CT log proof and a Rekor entry; and the authorization
 // attestation must be signed the same way and show all three proofs allowed.
-func verifyTask(
-	sc *supplyv1alpha1.SupplyChain,
-	imageRef, runAfter string,
-	as signing.Identity,
-) tektonv1.PipelineTask {
+func verifyTask(sc *supplyv1alpha1.SupplyChain, imageRef, runAfter string, as signing.Identity) tektonv1.PipelineTask {
 	endpoints := signing.EndpointsFor(sc)
 	serviceAccount := sc.Spec.ServiceAccountName
 	if serviceAccount == "" {

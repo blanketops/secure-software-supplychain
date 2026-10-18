@@ -167,14 +167,7 @@ func (r *Recorder) write(
 // and their transparency log entries. Evidence that is already complete is
 // kept as it is: nothing more will be added to the image, and the registry
 // need not be asked again on every reconcile.
-func (r *Recorder) collectEvidence(
-	ctx context.Context,
-	ib *supplyv1alpha1.ImageBuild,
-	run *tektonv1.PipelineRun,
-	phase string,
-	buildResults *supplyv1alpha1.PipelineStepResults,
-	have *supplyv1alpha1.BuildEvidence,
-) *supplyv1alpha1.BuildEvidence {
+func (r *Recorder) collectEvidence(ctx context.Context, ib *supplyv1alpha1.ImageBuild, run *tektonv1.PipelineRun, phase string, buildResults *supplyv1alpha1.PipelineStepResults, have *supplyv1alpha1.BuildEvidence) *supplyv1alpha1.BuildEvidence {
 	if have != nil && have.Complete {
 		return have
 	}
@@ -248,10 +241,7 @@ func buildOf(ib *supplyv1alpha1.ImageBuild, result *supplyv1alpha1.ImageBuildRes
 	return b
 }
 
-func (r *Recorder) storeEvidence(
-	b evidence.Build,
-	records []supplyv1alpha1.SignatureRecord,
-) (*supplyv1alpha1.EvidenceLedger, error) {
+func (r *Recorder) storeEvidence(b evidence.Build, records []supplyv1alpha1.SignatureRecord) (*supplyv1alpha1.EvidenceLedger, error) {
 	if r.OpenLedger == nil {
 		return nil, errors.New("no immudb evidence store is configured")
 	}
@@ -378,12 +368,7 @@ func ExtractImageResults(run *tektonv1.PipelineRun) (imageURL, imageDigest strin
 	return r.ImageURL, r.ImageDigest
 }
 
-func applyStatus(
-	s *supplyv1alpha1.ImageBuildResultStatus,
-	phase, reason, pipelineRunName string,
-	completedAt *metav1.Time,
-	br *supplyv1alpha1.PipelineStepResults,
-) {
+func applyStatus(s *supplyv1alpha1.ImageBuildResultStatus, phase, reason, pipelineRunName string, completedAt *metav1.Time, br *supplyv1alpha1.PipelineStepResults) {
 	s.Phase = phase
 	s.Reason = reason
 	s.PipelineRunName = pipelineRunName

@@ -49,13 +49,7 @@ const (
 // Traffic flow:
 //
 //	GitHub → sc.Spec.WebhookHost → ingress-nginx → el-<name>:8080 → EventListener
-func EnsureEventListener(
-	ctx context.Context,
-	c client.Client,
-	scheme *runtime.Scheme,
-	sc *supplyv1alpha1.SupplyChain,
-	serviceAccountName string,
-) error {
+func EnsureEventListener(ctx context.Context, c client.Client, scheme *runtime.Scheme, sc *supplyv1alpha1.SupplyChain, serviceAccountName string) error {
 	namespace := sc.Namespace
 	supplyChainName := sc.Name
 
@@ -103,12 +97,7 @@ func EnsureEventListener(
 // ensureIngress creates or updates the nginx Ingress for the EventListener.
 // The host is sourced from sc.Spec.WebhookHost. If the host changes the
 // ingress is updated so GitHub always routes to the correct endpoint.
-func ensureIngress(
-	ctx context.Context,
-	c client.Client,
-	scheme *runtime.Scheme,
-	sc *supplyv1alpha1.SupplyChain,
-) error {
+func ensureIngress(ctx context.Context, c client.Client, scheme *runtime.Scheme, sc *supplyv1alpha1.SupplyChain) error {
 	host := sc.Spec.WebhookHost
 
 	var existing networkingv1.Ingress
@@ -202,9 +191,7 @@ func buildIngressRules(host string) []networkingv1.IngressRule {
 	return []networkingv1.IngressRule{rule}
 }
 
-func buildEventListener(
-	name, namespace, supplyChainName, serviceAccountName string,
-) *triggersv1beta1.EventListener {
+func buildEventListener(name, namespace, supplyChainName, serviceAccountName string) *triggersv1beta1.EventListener {
 	return &triggersv1beta1.EventListener{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
