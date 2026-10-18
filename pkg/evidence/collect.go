@@ -162,14 +162,7 @@ func Collect(ctx context.Context, opts Options) ([]supplyv1alpha1.SignatureRecor
 }
 
 // describe turns one layer of a signature or attestation image into a record.
-func describe(
-	ctx context.Context,
-	kind string,
-	image v1.Image,
-	layer v1.Descriptor,
-	log *rekor,
-	opts Options,
-) (*supplyv1alpha1.SignatureRecord, error) {
+func describe(ctx context.Context, kind string, image v1.Image, layer v1.Descriptor, log *rekor, opts Options) (*supplyv1alpha1.SignatureRecord, error) {
 	record := &supplyv1alpha1.SignatureRecord{Kind: kind, SignedBy: SignedByOther}
 	if err := describeSigner(record, layer.Annotations[annotationCertificate], opts); err != nil {
 		return record, err

@@ -53,13 +53,7 @@ func ChainsDone(run *tektonv1.PipelineRun) bool {
 // ForBuild collects the evidence for the image a build pushed. It always
 // returns a result: what could not be read is said in its message, so a
 // registry or a log that is briefly unreachable does not lose the rest.
-func ForBuild(
-	ctx context.Context,
-	c client.Reader,
-	sc *supplyv1alpha1.SupplyChain,
-	run *tektonv1.PipelineRun,
-	imageURL, digest string,
-) *supplyv1alpha1.BuildEvidence {
+func ForBuild(ctx context.Context, c client.Reader, sc *supplyv1alpha1.SupplyChain, run *tektonv1.PipelineRun, imageURL, digest string) *supplyv1alpha1.BuildEvidence {
 	now := metav1.Now()
 	endpoints := signing.EndpointsFor(sc)
 	result := &supplyv1alpha1.BuildEvidence{

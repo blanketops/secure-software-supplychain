@@ -83,15 +83,7 @@ type webhookResponse struct {
 // still there. It is taken over instead, given this configuration and secret,
 // and its ID returned, so that deliveries are signed with the secret this
 // cluster verifies them with.
-func (c *Client) CreateWebhook(
-	ctx context.Context,
-	repository string,
-	hookURL string,
-	events []string,
-	secret string,
-	insecureSSL bool,
-	contentType string,
-) (int64, error) {
+func (c *Client) CreateWebhook(ctx context.Context, repository string, hookURL string, events []string, secret string, insecureSSL bool, contentType string) (int64, error) {
 	if contentType == "" {
 		contentType = "json"
 	}
@@ -159,16 +151,7 @@ func (c *Client) CreateWebhook(
 }
 
 // UpdateWebhook updates an existing webhook on a GitHub repository.
-func (c *Client) UpdateWebhook(
-	ctx context.Context,
-	repository string,
-	webhookID int64,
-	hookURL string,
-	events []string,
-	secret string,
-	insecureSSL bool,
-	contentType string,
-) error {
+func (c *Client) UpdateWebhook(ctx context.Context, repository string, webhookID int64, hookURL string, events []string, secret string, insecureSSL bool, contentType string) error {
 	if contentType == "" {
 		contentType = "json"
 	}
@@ -220,11 +203,7 @@ func (c *Client) UpdateWebhook(
 
 // DeleteWebhook removes a webhook from a GitHub repository.
 // Returns nil if the webhook is already gone (404).
-func (c *Client) DeleteWebhook(
-	ctx context.Context,
-	repository string,
-	webhookID int64,
-) error {
+func (c *Client) DeleteWebhook(ctx context.Context, repository string, webhookID int64) error {
 	url := fmt.Sprintf("%s/repos/%s/hooks/%d", c.baseURL, repository, webhookID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
@@ -283,11 +262,7 @@ func (c *Client) FindWebhook(ctx context.Context, repository, hookURL string) (i
 }
 
 // WebhookExists checks whether a webhook with the given ID exists on the repository.
-func (c *Client) WebhookExists(
-	ctx context.Context,
-	repository string,
-	webhookID int64,
-) (bool, error) {
+func (c *Client) WebhookExists(ctx context.Context, repository string, webhookID int64) (bool, error) {
 	url := fmt.Sprintf("%s/repos/%s/hooks/%d", c.baseURL, repository, webhookID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

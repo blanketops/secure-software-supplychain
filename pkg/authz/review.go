@@ -66,14 +66,7 @@ func Principal(namespace, serviceAccount string) string {
 // This is distinct from the service account's RBAC bindings — the SA might
 // have broad permissions, but the SAR proves that *this specific action*
 // was authorized *at this specific moment*.
-func VerifyAuthorization(
-	ctx context.Context,
-	c client.Client,
-	serviceAccount string,
-	namespace string,
-	resource string,
-	verb string,
-) (*AuthzProof, error) {
+func VerifyAuthorization(ctx context.Context, c client.Client, serviceAccount string, namespace string, resource string, verb string) (*AuthzProof, error) {
 	return Verify(ctx, c, serviceAccount, namespace, Check{Group: SupplyChainGroup, Resource: resource, Verb: verb})
 }
 
@@ -93,13 +86,7 @@ type Check struct {
 // Verify performs the SubjectAccessReview for one Check. The returned proof is
 // set whenever the API server answered, including when it answered "denied",
 // in which case the error says so.
-func Verify(
-	ctx context.Context,
-	c client.Client,
-	serviceAccount string,
-	namespace string,
-	check Check,
-) (*AuthzProof, error) {
+func Verify(ctx context.Context, c client.Client, serviceAccount string, namespace string, check Check) (*AuthzProof, error) {
 	resource, verb := check.Resource, check.Verb
 	reviewNamespace := namespace
 	if check.ClusterScoped {
