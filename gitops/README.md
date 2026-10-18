@@ -19,7 +19,8 @@ clusters that run applications.
 
 A SupplyChainPolicy is reconciled by the operator and requires the SupplyChain it references, so it cannot be
 applied to the read cluster. It is applied to the build cluster, where the operator renders a policy-controller
-TrustRoot and four ClusterImagePolicies (signature, authorization, chains, provenance). `gitops/hack/export-trust.sh`
+TrustRoot and its ClusterImagePolicies (signature, authorization, chains, provenance, and sbom when the SupplyChain
+scans). `gitops/hack/export-trust.sh`
 copies those, together with the `blanketops-sigstore-roots` and `supply-chain-ca` ConfigMaps, into
 `gitops/policy/trust/`. Committing that directory is what changes what the read cluster admits.
 

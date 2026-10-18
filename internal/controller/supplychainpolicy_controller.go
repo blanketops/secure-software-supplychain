@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -175,6 +176,11 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	for _, p := range rendered.ClusterImagePolicies {
 		policyNames = append(policyNames, p.GetName())
+	}
+	// A requirement the SupplyChain no longer meets (an SBOM after the scan
+	// was turned off) must stop being enforced, or every image is refused.
+	if err := r.deleteUnrendered(ctx, &scp, policyNames); err != nil {
+		return ctrl.Result{}, err
 	}
 	scp.Status.TrustRoot = rendered.TrustRoot.GetName()
 	scp.Status.ClusterImagePolicies = policyNames
@@ -334,6 +340,35 @@ func (r *SupplyChainPolicyReconciler) deleteRendered(
 	scp.Status.RekorURL = ""
 	scp.Status.CTLogURL = ""
 	scp.Status.TrustAnchors = nil
+	return nil
+}
+
+// deleteUnrendered deletes the ClusterImagePolicies of scp, found by label,
+// whose names are not in keep: requirements an earlier rendering made that
+// this one no longer does.
+func (r *SupplyChainPolicyReconciler) deleteUnrendered(
+	ctx context.Context,
+	scp *supplychainv1alpha1.SupplyChainPolicy,
+	keep []string,
+) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(policy.ClusterImagePolicyGVK)
+	if err := r.List(ctx, list, client.MatchingLabels{
+		policy.LabelPolicyNamespace: scp.Namespace,
+		policy.LabelPolicyName:      scp.Name,
+	}); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		obj := &list.Items[i]
+		if slices.Contains(keep, obj.GetName()) {
+			continue
+		}
+		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		logf.FromContext(ctx).Info("Deleted policy no longer rendered", "name", obj.GetName())
+	}
 	return nil
 }
 

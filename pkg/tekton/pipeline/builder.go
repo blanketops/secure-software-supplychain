@@ -54,6 +54,9 @@ const (
 	// Steps of one task share /workspace.
 	authorizationPredicatePath = "/workspace/authorization-predicate.json"
 	authorizationPolicyPath    = "/workspace/authorization-policy.cue"
+	// sbomWorkspace is the name the sign task mounts the shared workspace
+	// under, to read the SBOM trivy-scanner wrote there.
+	sbomWorkspace = "source"
 	// imageArchive is the build output in the shared workspace.
 	imageArchive          = "image.tar"
 	workspaceShared       = "shared-data"
@@ -62,6 +65,10 @@ const (
 	// workspaceTrivyCache removed — Trivy DB is now baked into the scanner image.
 	// See dependencies/tekton/task/trivy-db/Dockerfile.
 )
+
+// SBOMFile is where trivy-scanner writes the CycloneDX SBOM of the build
+// archive, in the shared workspace; the sign task attests it from there.
+const SBOMFile = "sbom.cdx.json"
 
 func BuildPipelineRun(
 	name, namespace string,
@@ -516,17 +523,45 @@ func signTask(
 	endpoints := signing.EndpointsFor(sc)
 
 	task := signImageTask(imageRef, runAfter, endpoints, sigCtx.SigningIdentity())
-	if sigCtx == nil {
-		return task
-	}
 	// The proofs were collected before the run started; without them there is
 	// nothing to attest, and the signature alone still stands.
-	predicate, err := sigCtx.AuthorizationPredicateJSON()
-	if err != nil {
-		return task
+	if sigCtx != nil {
+		if predicate, err := sigCtx.AuthorizationPredicateJSON(); err == nil {
+			withAuthorizationAttestation(&task, predicate)
+		}
 	}
-	withAuthorizationAttestation(&task, predicate)
+	// The SBOM exists whenever the archive was scanned.
+	if sc.Spec.Steps.Trivy {
+		withSBOMAttestation(&task)
+	}
 	return task
+}
+
+// withSBOMAttestation extends the sign task so the CycloneDX SBOM
+// trivy-scanner wrote from the build archive is attested to the pushed digest
+// by the same keyless identity that signed it. SupplyChainPolicy requires
+// this attestation at admission.
+func withSBOMAttestation(task *tektonv1.PipelineTask) {
+	spec := &task.TaskSpec.TaskSpec
+	var sign tektonv1.Step
+	for _, step := range spec.Steps {
+		if step.Name == "sign" {
+			sign = step
+		}
+	}
+	spec.Workspaces = append(spec.Workspaces, tektonv1.WorkspaceDeclaration{Name: sbomWorkspace, ReadOnly: true})
+	task.Workspaces = append(task.Workspaces, tektonv1.WorkspacePipelineTaskBinding{Name: sbomWorkspace, Workspace: workspaceShared})
+	spec.Steps = append(spec.Steps, tektonv1.Step{
+		Name:         "attest-sbom",
+		Image:        sign.Image,
+		VolumeMounts: sign.VolumeMounts,
+		Env:          sign.Env,
+		Args: append([]string{
+			"attest",
+			"--predicate=$(workspaces." + sbomWorkspace + ".path)/" + SBOMFile,
+			"--type=" + signing.SBOMAttestationType,
+		}, sign.Args[1:]...),
+	})
 }
 
 // withAuthorizationAttestation extends the sign task so the three
@@ -831,6 +866,24 @@ func verifyTask(
 	str := func(name, value string) tektonv1.Param {
 		return tektonv1.Param{Name: name, Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}}
 	}
+	// The SBOM attestation exists whenever the archive was scanned, and is
+	// signed as the image is.
+	var sbomSteps []tektonv1.Step
+	sbomReport := ""
+	if sc.Spec.Steps.Trivy {
+		sbomSteps = []tektonv1.Step{{
+			Name:         "verify-sbom",
+			Image:        cosignImage,
+			VolumeMounts: roots,
+			Env:          trust,
+			Args: append(append([]string{
+				"verify-attestation",
+				"--type=" + signing.SBOMAttestationType,
+			}, signer...), image),
+		}}
+		sbomReport = `echo "  SBOM:           verified (CycloneDX, signed by ${IDENTITY})"
+`
+	}
 
 	return tektonv1.PipelineTask{
 		Name:     stepVerify,
@@ -861,7 +914,7 @@ func verifyTask(
 						},
 					},
 				}, tlsCAVolumeSource()},
-				Steps: []tektonv1.Step{
+				Steps: append(append([]tektonv1.Step{
 					{
 						// The cosign image has no shell; see withAuthorizationAttestation.
 						Name:  "write-authorization-policy",
@@ -907,7 +960,8 @@ printf '%s' "${POLICY}" > ` + authorizationPolicyPath + `
 							"--type=" + provenancePredicateType,
 						}, chains...), image),
 					},
-					{
+				}, sbomSteps...),
+					tektonv1.Step{
 						// Only reached when every verification passed: a failing
 						// step stops the task, so the results stay unset.
 						Name:  "report",
@@ -930,11 +984,10 @@ echo "  Signature:      verified (Fulcio certificate, CT log proof, Rekor entry)
 echo "  Authorization:  verified (scope, intent, output allowed)"
 echo "  Chains signer:  ${CHAINS_IDENTITY}"
 echo "  Chains:         verified (image signature, SLSA provenance)"
-echo "  Rekor:          ${REKOR_URL}"
+` + sbomReport + `echo "  Rekor:          ${REKOR_URL}"
 echo "  Result:         PASS"
 `,
-					},
-				},
+					}),
 			},
 		},
 		Params: tektonv1.Params{

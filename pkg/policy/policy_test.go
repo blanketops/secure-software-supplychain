@@ -461,3 +461,49 @@ func TestRenderRequiresChainsSignatureAndProvenance(t *testing.T) {
 		t.Errorf("provenance predicateType = %v, want %s", predicate, ProvenancePredicateType)
 	}
 }
+
+// A SupplyChain that scans and signs produces an SBOM attestation, so its
+// policy requires one, from the build's own identity. One that does not scan
+// produces none, and requiring it would refuse every image.
+func TestRenderRequiresTheSBOM(t *testing.T) {
+	scp, sc, roots := fixtures(t)
+	name := ResourceName(scp)
+	sbomPolicy := func(r *Rendered) map[string]any {
+		for _, p := range r.ClusterImagePolicies {
+			if p.GetName() == name+"-sbom" {
+				return p.Object["spec"].(map[string]any)["authorities"].([]any)[0].(map[string]any)
+			}
+		}
+		return nil
+	}
+
+	got, err := Render(scp, sc, roots, signing.KubernetesIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbomPolicy(got) != nil {
+		t.Errorf("SupplyChain without a scan got an SBOM policy")
+	}
+
+	sc.Spec.Steps = supplyv1alpha1.StepsSpec{Sign: true, Trivy: true}
+	got, err = Render(scp, sc, roots, signing.KubernetesIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := sbomPolicy(got)
+	if authority == nil {
+		t.Fatalf("no ClusterImagePolicy %s-sbom among %d", name, len(got.ClusterImagePolicies))
+	}
+	identities := authority["keyless"].(map[string]any)["identities"].([]any)
+	want := map[string]any{
+		"issuer":  signing.KubernetesOIDCIssuer,
+		"subject": "https://kubernetes.io/namespaces/team-a/serviceaccounts/supply-chain-runner",
+	}
+	if len(identities) != 1 || !reflect.DeepEqual(identities[0], want) {
+		t.Errorf("%s-sbom trusts %v, want the build's identity %v", name, identities, want)
+	}
+	attestations := authority["attestations"].([]any)
+	if predicate := attestations[0].(map[string]any)["predicateType"]; predicate != signing.SBOMPredicateType {
+		t.Errorf("sbom predicateType = %v, want %s", predicate, signing.SBOMPredicateType)
+	}
+}

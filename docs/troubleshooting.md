@@ -112,7 +112,8 @@ same `--signing-identity` and `--trust-domain` as the install. If SPIRE itself w
 changed, and the same two steps make Vault trust the new ones.
 
 **Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
-controller reads the image's signatures and attestations from the registry, once for each of the four policies,
+controller reads the image's signatures and attestations from the registry, once for each of the policies (four,
+five with the SBOM),
 and the API server gives it ten seconds. On a slow connection to the registry that is not always enough. The
 webhook fails closed, so nothing unverified is admitted; apply the workload again. On a lossy uplink, where one
 dropped DNS reply costs five seconds, raise `timeoutSeconds` on the `policy.sigstore.dev` validating and mutating

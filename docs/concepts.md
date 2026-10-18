@@ -80,14 +80,14 @@ Every image a build produces carries proof from two independent identities, and 
 
 | Tier | Identity | What it adds to the image |
 |---|---|---|
-| Authority | The `SupplyChain`'s build ServiceAccount | A signature, and an attestation of the three authorization proofs |
+| Authority | The `SupplyChain`'s build ServiceAccount | A signature, an attestation of the three authorization proofs, and a CycloneDX SBOM attestation when the build scans |
 | Centre | Tekton Chains' controller | A signature, and SLSA v1.0 provenance of the run |
 
 Chains signs first, as soon as the push completes; the build's sign step waits for that signature before adding
-its own, because both are stored under the same registry tag. The last pipeline step verifies all four, and a
-`SupplyChainPolicy` renders four `ClusterImagePolicy` objects (`<ns>-<name>`, `-authorization`, `-chains`,
-`-provenance`). An image must pass every one of them to be admitted, so neither identity can vouch for an image
-on its own.
+its own, because both are stored under the same registry tag. The last pipeline step verifies them all, and a
+`SupplyChainPolicy` renders one `ClusterImagePolicy` per requirement (`<ns>-<name>`, `-authorization`, `-chains`,
+`-provenance`, and `-sbom` when the `SupplyChain` scans). An image must pass every one of them to be admitted, so
+neither identity can vouch for an image on its own.
 
 ---
 
@@ -171,14 +171,20 @@ State `signers` to accept more than one identity. State `trustRoot` to trust a d
 
 ### What gets rendered
 
-One `TrustRoot` and two `ClusterImagePolicies`, all cluster-scoped and named `<namespace>-<name>`. An image is
-admitted only if it passes both policies:
+One `TrustRoot` and a `ClusterImagePolicy` per requirement, all cluster-scoped and named `<namespace>-<name>`
+with a suffix. An image is admitted only if it passes every policy:
 
 | Check | Policy |
 |---|---|
 | Signed keylessly by one of the signers, with a Fulcio certificate chaining to the trust root | `<namespace>-<name>` |
 | That certificate has a CT log proof and the signature is in Rekor | `<namespace>-<name>` |
 | Carries an authorization attestation, signed the same way, with scope, intent and output all allowed | `<namespace>-<name>-authorization` |
+| Signed by Tekton Chains | `<namespace>-<name>-chains` |
+| Carries SLSA v1.0 provenance signed by Tekton Chains | `<namespace>-<name>-provenance` |
+| Carries a CycloneDX SBOM attestation signed by one of the signers; rendered only when the `SupplyChain` scans and signs, the only builds that produce one | `<namespace>-<name>-sbom` |
+
+The SBOM is written by the Trivy step from the same archive it scans and pushes, and attested by the sign step.
+A policy that an earlier rendering made and this one no longer does is deleted.
 
 A wrong Fulcio root, Rekor key or CT log key each cause rejection, as does a missing signature or attestation.
 

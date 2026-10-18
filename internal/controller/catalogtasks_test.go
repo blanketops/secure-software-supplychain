@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	"github.com/blanketops/secure-software-supplychain/pkg/tekton/pipeline"
 )
 
 // The pipeline runs git-clone, buildah and trivy-scanner by name from the
@@ -90,4 +92,29 @@ func TestTheCatalogTasksFollowASupplyChainToItsNamespace(t *testing.T) {
 				task.Spec.Description, task.OwnerReferences)
 		}
 	})
+}
+
+// The SBOM the sign task attests is written by trivy-scanner, from the same
+// archive it scans, into the shared workspace under pipeline.SBOMFile.
+func TestTrivyTaskWritesTheSBOM(t *testing.T) {
+	tasks, err := catalogTasks("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.Name != "trivy-scanner" {
+			continue
+		}
+		script := task.Spec.Steps[0].Script
+		for _, want := range []string{
+			"--format cyclonedx",
+			`--output "$(workspaces.manifest-dir.path)/` + pipeline.SBOMFile + `"`,
+		} {
+			if !strings.Contains(script, want) {
+				t.Errorf("trivy-scanner script does not contain %s", want)
+			}
+		}
+		return
+	}
+	t.Fatal("no trivy-scanner Task")
 }

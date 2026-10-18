@@ -232,7 +232,7 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		Expect(meta.IsStatusConditionTrue(scp.Status.Conditions, conditionReady)).To(BeTrue())
 		Expect(scp.Status.TrustRoot).To(Equal(renderedName))
 		Expect(scp.Status.ClusterImagePolicies).To(Equal([]string{
-			renderedName, authorizationName, renderedName + "-chains", renderedName + "-provenance",
+			renderedName, authorizationName, renderedName + "-chains", renderedName + "-provenance", renderedName + "-sbom",
 		}))
 		Expect(scp.Status.Images).To(ConsistOf("index.docker.io/your-dockerhub-user/policy-test-app**"))
 		Expect(scp.Status.Signers).To(Equal([]supplychainv1alpha1.SignerIdentity{{
@@ -291,6 +291,36 @@ var _ = Describe("SupplyChainPolicy Controller", func() {
 		}
 		_, err = getNamed(policy.ClusterImagePolicyGVK, authorizationName)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("removes a policy it no longer renders", func() {
+		createSupplyChain()
+		createRoots()
+		staleName := renderedName + "-obsolete"
+
+		_, err := reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+
+		By("leaving a policy of this SupplyChainPolicy that an earlier rendering made")
+		var scp supplychainv1alpha1.SupplyChainPolicy
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		stale, err := getNamed(policy.ClusterImagePolicyGVK, authorizationName)
+		Expect(err).NotTo(HaveOccurred())
+		obsolete := &unstructured.Unstructured{Object: map[string]any{"spec": stale.Object["spec"]}}
+		obsolete.SetGroupVersionKind(policy.ClusterImagePolicyGVK)
+		obsolete.SetName(staleName)
+		obsolete.SetLabels(stale.GetLabels())
+		Expect(k8sClient.Create(ctx, obsolete)).To(Succeed())
+
+		_, err = reconcilePolicy()
+		Expect(err).NotTo(HaveOccurred())
+		_, err = getNamed(policy.ClusterImagePolicyGVK, staleName)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "a policy no longer rendered is still enforced")
+		_, err = getNamed(policy.ClusterImagePolicyGVK, renderedName+"-sbom")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, policyKey, &scp)).To(Succeed())
+		Expect(scp.Status.ClusterImagePolicies).NotTo(ContainElement(staleName))
 	})
 
 	It("accepts stated signers and a pinned Rekor log", func() {

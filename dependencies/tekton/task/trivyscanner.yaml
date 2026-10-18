@@ -93,6 +93,18 @@ spec:
         echo "Running trivy scan on $(params.IMAGE_PATH)"
       fi
 
+      # The SBOM of exactly what is scanned and pushed. The sign task attests
+      # it to the pushed digest; the CycloneDX format scans nothing.
+      trivy image \
+        --cache-dir "$CACHE_DIR" \
+        --skip-db-update \
+        $SKIP_JAVA \
+        --timeout 10m \
+        --format cyclonedx \
+        --output "$(workspaces.manifest-dir.path)/sbom.cdx.json" \
+        $TARGET
+      echo "SBOM:     $(workspaces.manifest-dir.path)/sbom.cdx.json"
+
       # ── SARIF scan — for structured report output ──────────────────────
       trivy image \
         --cache-dir "$CACHE_DIR" \

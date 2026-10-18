@@ -36,11 +36,16 @@ func testPipelineRun(t *testing.T) *tektonv1.PipelineRun {
 
 func testPipelineRunAs(t *testing.T, identity signing.Identity) *tektonv1.PipelineRun {
 	t.Helper()
+	return testPipelineRunWith(t, identity, supplyv1alpha1.StepsSpec{Sign: true, Attest: true})
+}
+
+func testPipelineRunWith(t *testing.T, identity signing.Identity, steps supplyv1alpha1.StepsSpec) *tektonv1.PipelineRun {
+	t.Helper()
 	sc := &supplyv1alpha1.SupplyChain{
 		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
 		Spec: supplyv1alpha1.SupplyChainSpec{
 			Image:              supplyv1alpha1.ImageSpec{Registry: "docker.io", Name: "org/app"},
-			Steps:              supplyv1alpha1.StepsSpec{Sign: true, Attest: true},
+			Steps:              steps,
 			ServiceAccountName: "supply-chain-runner",
 		},
 	}
@@ -378,6 +383,84 @@ func TestSignTaskAttestsTheAuthorizationProofs(t *testing.T) {
 	for _, want := range []string{`"scope"`, `"intent"`, `"output"`, `"allowed":true`} {
 		if !strings.Contains(predicate, want) {
 			t.Errorf("predicate %s is missing %s", predicate, want)
+		}
+	}
+}
+
+// The SBOM trivy-scanner wrote from the build archive is attested to the
+// pushed digest by the same keyless identity that signs the image, read
+// from the shared workspace the scan wrote it to.
+func TestSignTaskAttestsTheSBOM(t *testing.T) {
+	pr := testPipelineRunWith(t, signing.Identity{}, supplyv1alpha1.StepsSpec{Sign: true, Attest: true, Trivy: true})
+	sign := findTask(t, pr, stepSign)
+
+	var bound bool
+	for _, ws := range sign.Workspaces {
+		if ws.Name == "source" && ws.Workspace == workspaceShared {
+			bound = true
+		}
+	}
+	if !bound {
+		t.Fatalf("sign task workspaces %v do not bind the shared workspace as source", sign.Workspaces)
+	}
+
+	steps := sign.TaskSpec.Steps
+	last := steps[len(steps)-1]
+	if last.Name != "attest-sbom" {
+		t.Fatalf("last sign step = %q, want attest-sbom", last.Name)
+	}
+	args := strings.Join(last.Args, " ")
+	for _, want := range []string{
+		"attest",
+		"--type=" + signing.SBOMAttestationType,
+		"--predicate=$(workspaces.source.path)/" + SBOMFile,
+		"$(params.IMAGE)@$(params.DIGEST)",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("attest-sbom args %q are missing %q", args, want)
+		}
+	}
+	// Same identity and endpoints as the image signature.
+	signArgs := steps[1].Args
+	if strings.Join(last.Args[len(last.Args)-len(signArgs)+1:], " ") != strings.Join(signArgs[1:], " ") {
+		t.Errorf("attest-sbom does not sign as the image is signed:\n %v\n %v", last.Args, signArgs)
+	}
+}
+
+// The verify task checks the SBOM attestation as admission will.
+func TestVerifiesTheSBOM(t *testing.T) {
+	pr := testPipelineRunWith(t, signing.Identity{}, supplyv1alpha1.StepsSpec{Sign: true, Attest: true, Trivy: true})
+	var found bool
+	for _, step := range findTask(t, pr, stepVerify).TaskSpec.Steps {
+		if step.Name != "verify-sbom" {
+			continue
+		}
+		found = true
+		args := strings.Join(step.Args, " ")
+		for _, want := range []string{
+			"verify-attestation",
+			"--type=" + signing.SBOMAttestationType,
+			"--certificate-identity=$(params.IDENTITY)",
+			"$(params.IMAGE)@$(params.DIGEST)",
+		} {
+			if !strings.Contains(args, want) {
+				t.Errorf("verify-sbom args %q are missing %q", args, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("verify task has no verify-sbom step")
+	}
+}
+
+// Without the scan there is no SBOM, so nothing attests or verifies one.
+func TestNoSBOMWithoutTheScan(t *testing.T) {
+	pr := testPipelineRun(t)
+	for _, name := range []string{stepSign, stepVerify} {
+		for _, step := range findTask(t, pr, name).TaskSpec.Steps {
+			if strings.Contains(step.Name, "sbom") {
+				t.Errorf("%s has step %s without a scan", name, step.Name)
+			}
 		}
 	}
 }

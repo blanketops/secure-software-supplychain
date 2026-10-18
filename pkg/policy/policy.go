@@ -168,19 +168,31 @@ func Render(
 		},
 	}
 
-	// Policies that match an image must all pass, so these are four separate
-	// requirements: two from the build's own identity, two from Chains.
+	// Policies that match an image must all pass, so these are separate
+	// requirements: two from the build's own identity, two from Chains, and
+	// the SBOM when the build produces one.
+	policies := []*unstructured.Unstructured{
+		newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature", identities))),
+		newObject(ClusterImagePolicyGVK, name+"-authorization", scp, policySpec(authorized)),
+		newObject(ClusterImagePolicyGVK, name+"-chains", scp, policySpec(authority("chains", chainsIdentities))),
+		newObject(ClusterImagePolicyGVK, name+"-provenance", scp, policySpec(provenance)),
+	}
+	// The pipeline attests an SBOM only when it scans the archive and signs;
+	// requiring one otherwise would refuse every image.
+	if sc.Spec.Steps.Trivy && sc.Spec.Steps.Sign {
+		sbom := authority("sbom", identities)
+		sbom["attestations"] = []any{
+			map[string]any{"name": "sbom", "predicateType": signing.SBOMPredicateType},
+		}
+		policies = append(policies, newObject(ClusterImagePolicyGVK, name+"-sbom", scp, policySpec(sbom)))
+	}
+
 	return &Rendered{
-		TrustRoot: newObject(TrustRootGVK, name, scp, trustRootSpec),
-		ClusterImagePolicies: []*unstructured.Unstructured{
-			newObject(ClusterImagePolicyGVK, name, scp, policySpec(authority("signature", identities))),
-			newObject(ClusterImagePolicyGVK, name+"-authorization", scp, policySpec(authorized)),
-			newObject(ClusterImagePolicyGVK, name+"-chains", scp, policySpec(authority("chains", chainsIdentities))),
-			newObject(ClusterImagePolicyGVK, name+"-provenance", scp, policySpec(provenance)),
-		},
-		Images:    images,
-		Signers:   signers,
-		Endpoints: endpoints,
+		TrustRoot:            newObject(TrustRootGVK, name, scp, trustRootSpec),
+		ClusterImagePolicies: policies,
+		Images:               images,
+		Signers:              signers,
+		Endpoints:            endpoints,
 		TrustAnchors: supplyv1alpha1.TrustAnchorFingerprints{
 			FulcioRoot: signing.Fingerprint(roots[signing.RootsFulcioKey]),
 			RekorKey:   signing.Fingerprint(roots[signing.RootsRekorKey]),
