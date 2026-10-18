@@ -15,132 +15,209 @@ limitations under the License.
 */
 package immudb
 
-import "testing"
+import (
+	"bytes"
+	"errors"
+	"strconv"
+	"testing"
+	"time"
+)
 
-func fresh() Store {
-	return newMemStore("immudb-spike-test-salt")
+// openTestStore connects to the immudb server from the environment (see
+// Open). The tests need a running immudb and fail when there is none.
+func openTestStore(t *testing.T) Store {
+	t.Helper()
+	s, err := Open()
+	if err != nil {
+		t.Fatalf("immudb is required for these tests: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
 }
 
-// TestPutGetVerifyRoundTrip: a record must verify against the root captured at
-// the moment of the read.
+// uniqueKey returns a key no earlier run has written: immudb keeps every
+// write, so fixed keys would collide with the previous run.
+func uniqueKey(t *testing.T, name string) string {
+	return t.Name() + "/" + name + "/" + strconv.FormatInt(time.Now().UnixNano(), 10)
+}
+
+func put(t *testing.T, s Store, key, value string) (uint64, []byte) {
+	t.Helper()
+	tx, root, err := s.Put(key, value)
+	if err != nil {
+		t.Fatalf("Put(%q): %v", key, err)
+	}
+	if tx == 0 || len(root) == 0 {
+		t.Fatalf("Put(%q) = tx %d, root %x: want a transaction and its root", key, tx, root)
+	}
+	return tx, root
+}
+
 func TestPutGetVerifyRoundTrip(t *testing.T) {
-	s := fresh()
-	rootA := putAndGet(t, s, "sig", "sha256:abc")
-	rootB := putAndGet(t, s, "att", "sha256:def")
+	s := openTestStore(t)
+	key, value := uniqueKey(t, "sig"), "sha256:abc"
+	tx, root := put(t, s, key, value)
 
-	if !verifyOK(t, s, rootA, rootIdx(t, s, "sig"), "sha256:abc") {
-		t.Fatalf("expected Sig to verify against its own root")
+	got, gtx, groot, err := s.Get(key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
 	}
-	if !verifyOK(t, s, rootB, rootIdx(t, s, "att"), "sha256:def") {
-		t.Fatalf("expected Att to verify against its own root")
+	if got != value || gtx != tx || !bytes.Equal(groot, root) {
+		t.Fatalf("Get = %q, tx %d, root %x; want %q, tx %d, root %x", got, gtx, groot, value, tx, root)
+	}
+	if ok, err := s.Verify(key, root, tx, value); err != nil || !ok {
+		t.Fatalf("Verify = %v, %v; want true", ok, err)
 	}
 }
 
-// TestTamperDetection_Value: the core invariant. A read is verifiable against
-// its frozen root; any change to the stored value after the read must fail it.
-func TestTamperDetection_Value(t *testing.T) {
-	s := fresh()
-	root := putAndGet(t, s, "sig", "sha256:abc")
-	idx := rootIdx(t, s, "sig")
+// TestVerifyRejectsTampering: Verify must fail for any value, root, key or
+// transaction other than the ones written.
+func TestVerifyRejectsTampering(t *testing.T) {
+	s := openTestStore(t)
+	key := uniqueKey(t, "sig")
+	tx, root := put(t, s, key, "sha256:abc")
+	otherTx, otherRoot := put(t, s, uniqueKey(t, "att"), "sha256:abc")
 
-	mutateValue(t, s, "sig", "sha256:abd") // a tamperer flipped a byte
-
-	if ok, err := s.Verify(root, idx, "sha256:abc"); err != nil || ok {
-		t.Fatalf("expected Verify(false) after value tamper: %v %v", ok, err)
+	cases := map[string]struct {
+		key   string
+		root  []byte
+		tx    uint64
+		value string
+	}{
+		"value":       {key, root, tx, "sha256:abd"},
+		"root":        {key, otherRoot, tx, "sha256:abc"},
+		"transaction": {key, root, otherTx, "sha256:abc"},
+		"key":         {uniqueKey(t, "absent"), root, tx, "sha256:abc"},
+	}
+	for name, c := range cases {
+		if ok, err := s.Verify(c.key, c.root, c.tx, c.value); ok {
+			t.Errorf("Verify with a different %s = true (err %v); want false", name, err)
+		}
 	}
 }
 
 func TestDuplicateRejected(t *testing.T) {
-	s := fresh()
-	putAndGet(t, s, "sig", "sha256:abc")
-	if _, _, err := s.Put("sig", "sha256:abc"); err != ErrDuplicate {
-		t.Fatalf("expected ErrDuplicate on repeated key, got %v", err)
+	s := openTestStore(t)
+	key := uniqueKey(t, "sig")
+	put(t, s, key, "sha256:abc")
+	if _, _, err := s.Put(key, "sha256:other"); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("second Put = %v; want ErrDuplicate", err)
+	}
+	if got, _, _, err := s.Get(key); err != nil || got != "sha256:abc" {
+		t.Fatalf("Get after rejected Put = %q, %v; want the first value", got, err)
 	}
 }
 
 func TestNotFound(t *testing.T) {
-	s := fresh()
-	if _, _, _, err := s.Get("does-not-exist"); err != ErrNotFound {
-		t.Fatalf("expected ErrNotFound, got %v", err)
+	s := openTestStore(t)
+	if _, _, _, err := s.Get(uniqueKey(t, "absent")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get = %v; want ErrNotFound", err)
 	}
 }
 
-func TestIndexesSequential(t *testing.T) {
-	s := fresh()
-	for _, k := range []string{"sig", "att", "prov"} {
-		if _, _, _, err := s.Get(k); err != ErrNotFound {
-			t.Fatalf("before Put(%q): %v", k, err)
-		}
-		putAndGet(t, s, k, "sha256:xx")
+// TestPutAllIsOneTransaction: every entry of a PutAll lands in the same
+// transaction and verifies against its root.
+func TestPutAllIsOneTransaction(t *testing.T) {
+	s := openTestStore(t)
+	entries := []Entry{
+		{Key: uniqueKey(t, "sig"), Value: "signature"},
+		{Key: uniqueKey(t, "att"), Value: "attestation"},
+		{Key: uniqueKey(t, "sbom"), Value: "sbom"},
 	}
-	for i, k := range []string{"sig", "att", "prov"} {
-		if got := rootIdx(t, s, k); got != uint64(i) {
-			t.Fatalf("index of %s = %d, want %d", k, got, i)
+	tx, root, err := s.PutAll(entries)
+	if err != nil {
+		t.Fatalf("PutAll: %v", err)
+	}
+	for _, e := range entries {
+		got, gtx, groot, err := s.Get(e.Key)
+		if err != nil || got != e.Value || gtx != tx || !bytes.Equal(groot, root) {
+			t.Fatalf("Get(%s) = %q, tx %d, %v; want %q in tx %d", e.Key, got, gtx, err, e.Value, tx)
+		}
+		if ok, err := s.Verify(e.Key, root, tx, e.Value); err != nil || !ok {
+			t.Fatalf("Verify(%s) = %v, %v; want true", e.Key, ok, err)
 		}
 	}
 }
 
+// TestPutAllIsAtomic: if one key exists, none of the entries is written.
+func TestPutAllIsAtomic(t *testing.T) {
+	s := openTestStore(t)
+	existing := uniqueKey(t, "existing")
+	put(t, s, existing, "first")
+	fresh := uniqueKey(t, "fresh")
+
+	_, _, err := s.PutAll([]Entry{{Key: fresh, Value: "new"}, {Key: existing, Value: "second"}})
+	if !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("PutAll with an existing key = %v; want ErrDuplicate", err)
+	}
+	if _, _, _, err := s.Get(fresh); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(%s) after the rejected PutAll = %v; want ErrNotFound", fresh, err)
+	}
+}
+
+func TestPutAllRejectsRepeatedKeyAndEmpty(t *testing.T) {
+	s := openTestStore(t)
+	key := uniqueKey(t, "sig")
+	if _, _, err := s.PutAll([]Entry{{Key: key, Value: "a"}, {Key: key, Value: "b"}}); err == nil {
+		t.Fatal("PutAll with a repeated key = nil error")
+	}
+	if _, _, err := s.PutAll(nil); err == nil {
+		t.Fatal("PutAll with no entries = nil error")
+	}
+}
+
+// TestAppendDoesNotBreakEarlierProof: later writes must not invalidate the
+// proof of an earlier one.
 func TestAppendDoesNotBreakEarlierProof(t *testing.T) {
-	s := fresh()
-	root := putAndGet(t, s, "sig", "sha256:abc")
-	idx := rootIdx(t, s, "sig")
+	s := openTestStore(t)
+	key := uniqueKey(t, "sig")
+	tx, root := put(t, s, key, "sha256:abc")
+	put(t, s, uniqueKey(t, "att"), "sha256:def")
 
-	if !verifyOK(t, s, root, idx, "sha256:abc") {
-		t.Fatalf("expected Sig to verify before further writes")
-	}
-
-	putAndGet(t, s, "att", "sha256:def") // later append must not invalidate the first proof
-
-	if !verifyOK(t, s, root, idx, "sha256:abc") {
-		t.Fatalf("expected Sig to remain valid after an append")
+	if ok, err := s.Verify(key, root, tx, "sha256:abc"); err != nil || !ok {
+		t.Fatalf("Verify after a later write = %v, %v; want true", ok, err)
 	}
 }
 
-func TestLeafInjective(t *testing.T) {
-	s := fresh()
-	putAndGet(t, s, "sig", "sha256:abc")
-	putAndGet(t, s, "att", "sha256:abc") // same value, different key must land at a different index
-	if rootIdx(t, s, "sig") == rootIdx(t, s, "att") {
-		t.Fatalf("distinct entries must be at distinct indices")
+// TestReadFromAnotherSession: entries live in the database, not the client,
+// so a second session reads and verifies what the first wrote.
+func TestReadFromAnotherSession(t *testing.T) {
+	key, value := uniqueKey(t, "sig"), "sha256:abc"
+	tx, root := put(t, openTestStore(t), key, value)
+
+	other := openTestStore(t)
+	got, gtx, groot, err := other.Get(key)
+	if err != nil || got != value || gtx != tx || !bytes.Equal(groot, root) {
+		t.Fatalf("Get from a second session = %q, tx %d, root %x, %v; want %q, tx %d, root %x",
+			got, gtx, groot, err, value, tx, root)
+	}
+	if ok, err := other.Verify(key, root, tx, value); err != nil || !ok {
+		t.Fatalf("Verify from a second session = %v, %v; want true", ok, err)
 	}
 }
 
-func putAndGet(t *testing.T, s Store, key, value string) []byte {
-	t.Helper()
-	idx, root, err := s.Put(key, value)
-	if err != nil {
-		t.Fatalf("Put(%q): %v", key, err)
+// TestOpenFailsWithoutServer: there is no fallback store; an unreachable
+// server is an error.
+func TestOpenFailsWithoutServer(t *testing.T) {
+	t.Setenv("IMMUDB_PORT", "1")
+	s, err := Open()
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("Open with no server = nil error; want ErrConnect")
 	}
-	if got, _, _, err := s.Get(key); err != nil || got != value {
-		t.Fatalf("Get mismatch: got %q, %v", got, err)
+	if !errors.Is(err, ErrConnect) {
+		t.Fatalf("Open with no server = %v; want ErrConnect", err)
 	}
-	if idx != rootIdx(t, s, key) {
-		t.Fatalf("put index %d != get index %d", idx, rootIdx(t, s, key))
-	}
-	return root
 }
 
-func rootIdx(t *testing.T, s Store, key string) uint64 {
-	t.Helper()
-	_, idx, _, err := s.Get(key)
-	if err != nil {
-		t.Fatalf("Get(%q): %v", key, err)
+func TestOpenFailsWithWrongPassword(t *testing.T) {
+	t.Setenv("IMMUDB_PASSWORD", "not-the-password")
+	s, err := Open()
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("Open with a wrong password = nil error; want ErrConnect")
 	}
-	return idx
-}
-
-func verifyOK(t *testing.T, s Store, root []byte, idx uint64, value string) bool {
-	t.Helper()
-	ok, err := s.Verify(root, idx, value)
-	return err == nil && ok
-}
-
-// mutateValue simulates an external storage tamper: it flips the value stored
-// for a key after a read, so Verify() must report that the snapshot is no longer
-// authentic. It reaches through the concrete memStore (white-box, same package)
-// to exercise the tamper path without building a real immudb server.
-func mutateValue(t *testing.T, s Store, key, value string) {
-	t.Helper()
-	m := s.(*memStore)
-	m.valByKey[key] = value
+	if !errors.Is(err, ErrConnect) {
+		t.Fatalf("Open with a wrong password = %v; want ErrConnect", err)
+	}
 }

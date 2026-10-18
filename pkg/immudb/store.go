@@ -13,19 +13,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+// Package immudb stores supply chain evidence in an immudb database. Every
+// write and read goes to the server and is verified against the client's
+// trusted state; there is no in-memory fallback.
 package immudb
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
+	"strings"
 
+	"github.com/codenotary/immudb/embedded"
+	"github.com/codenotary/immudb/pkg/api/schema"
 	immudbclient "github.com/codenotary/immudb/pkg/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var (
@@ -34,22 +42,50 @@ var (
 	ErrConnect   = errors.New("immudb: failed to open immudb session")
 )
 
+// Store is an append-only, tamper-evident key-value store.
+//
+// tx is the immudb transaction that wrote the value. root is that
+// transaction's accumulated linear hash (Alh), which commits to the whole
+// history up to and including the write.
 type Store interface {
-	Put(key, value string) (idx uint64, root []byte, err error)
-	Get(key string) (value string, idx uint64, root []byte, err error)
-	Verify(root []byte, idx uint64, value string) (ok bool, err error)
+	// Put writes a new key. It returns ErrDuplicate if the key exists.
+	Put(key, value string) (tx uint64, root []byte, err error)
+	// PutAll writes every entry in a single transaction. Every key must be
+	// new: if any exists, nothing is written and the error is ErrDuplicate.
+	PutAll(entries []Entry) (tx uint64, root []byte, err error)
+	// Get returns the current value of key, or ErrNotFound.
+	Get(key string) (value string, tx uint64, root []byte, err error)
+	// Verify reports whether transaction tx wrote value under key and its
+	// root is root.
+	Verify(key string, root []byte, tx uint64, value string) (ok bool, err error)
 	Close() error
 }
 
-type immudbStore struct {
-	mu         sync.Mutex
-	idxByKeyMu sync.Mutex
-	idxByKey   map[string]uint64
-	keyByIdx   map[uint64]string
-	rootsByKey map[string][]byte
-	c          immudbclient.ImmuClient
+// Entry is one key and value of a PutAll transaction.
+type Entry struct {
+	Key   string
+	Value string
 }
 
+type immudbStore struct {
+	c immudbclient.ImmuClient
+}
+
+// Open connects to the immudb server configured by IMMUDB_ADDR, IMMUDB_PORT,
+// IMMUDB_USER, IMMUDB_PASSWORD and IMMUDB_DB (defaults: the immudb container's
+// 127.0.0.1:3322, immudb/immudb, database securesoftwaresupplychain). It
+// returns an error if the server cannot be reached or rejects the login.
+func Open() (Store, error) {
+	return New(
+		getenv("IMMUDB_ADDR", "127.0.0.1"),
+		getenvInt("IMMUDB_PORT", 3322),
+		getenv("IMMUDB_USER", "immudb"),
+		getenv("IMMUDB_PASSWORD", "immudb"),
+		getenv("IMMUDB_DB", "securesoftwaresupplychain"),
+	)
+}
+
+// New opens a session on the given immudb server and database.
 func New(addr string, port int, user, password, database string) (Store, error) {
 	opts := immudbclient.DefaultOptions()
 	opts.Address = addr
@@ -64,139 +100,118 @@ func New(addr string, port int, user, password, database string) (Store, error) 
 	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("%w: state dir: %w", ErrConnect, err)
 	}
+
 	// NewClient (not NewImmuClient): NewImmuClient already dials the server, so
 	// the OpenSession below would fail with "session already opened".
 	c := immudbclient.NewClient().WithOptions(opts)
-
-	ctx := context.Background()
-	if err := c.OpenSession(ctx, []byte(user), []byte(password), database); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrConnect, err)
+	if err := c.OpenSession(context.Background(), []byte(user), []byte(password), database); err != nil {
+		return nil, fmt.Errorf("%w at %s:%d (user %s, database %s): %w", ErrConnect, addr, port, user, database, err)
 	}
-
-	return &immudbStore{
-		c:          c,
-		idxByKey:   make(map[string]uint64),
-		keyByIdx:   make(map[uint64]string),
-		rootsByKey: make(map[string][]byte),
-	}, nil
+	return &immudbStore{c: c}, nil
 }
 
-func (s *immudbStore) Put(key, value string) (idx uint64, root []byte, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *immudbStore) Put(key, value string) (uint64, []byte, error) {
+	return s.PutAll([]Entry{{Key: key, Value: value}})
+}
 
-	if _, dup := s.idxByKey[key]; dup {
-		return 0, nil, ErrDuplicate
+func (s *immudbStore) PutAll(entries []Entry) (uint64, []byte, error) {
+	if len(entries) == 0 {
+		return 0, nil, errors.New("immudb: no entries to write")
+	}
+	ctx := context.Background()
+	req := &schema.SetRequest{}
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if seen[e.Key] {
+			return 0, nil, fmt.Errorf("immudb: key %s appears twice in one transaction", e.Key)
+		}
+		seen[e.Key] = true
+		k := []byte(e.Key)
+		req.KVs = append(req.KVs, &schema.KeyValue{Key: k, Value: []byte(e.Value)})
+		req.Preconditions = append(req.Preconditions, schema.PreconditionKeyMustNotExist(k))
 	}
 
-	ctx := context.Background()
-	txHeader, err := s.c.VerifiedSet(ctx, []byte(key), []byte(value))
+	// VerifiedSet takes no preconditions and only one key, so write with
+	// SetAll and then prove the write with verified reads of every key and of
+	// the transaction.
+	hdr, err := s.c.SetAll(ctx, req)
+	if err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			return 0, nil, fmt.Errorf("%w: a key of the %d-entry transaction starting with %s exists", ErrDuplicate, len(entries), entries[0].Key)
+		}
+		return 0, nil, fmt.Errorf("immudb: put %s: %w", entries[0].Key, err)
+	}
+	for _, e := range entries {
+		entry, err := s.c.VerifiedGetAt(ctx, []byte(e.Key), hdr.Id)
+		if err != nil {
+			return 0, nil, fmt.Errorf("immudb: verify put %s at tx %d: %w", e.Key, hdr.Id, err)
+		}
+		if string(entry.Value) != e.Value {
+			return 0, nil, fmt.Errorf("immudb: put %s at tx %d: stored value differs from the value written", e.Key, hdr.Id)
+		}
+	}
+	root, err := s.root(ctx, hdr.Id)
 	if err != nil {
 		return 0, nil, err
 	}
-
-	idx = txHeader.Id
-	root = txHeader.BlRoot
-
-	s.idxByKeyMu.Lock()
-	s.idxByKey[key] = idx
-	s.keyByIdx[idx] = key
-	s.rootsByKey[key] = root
-	s.idxByKeyMu.Unlock()
-
-	return idx, root, nil
+	return hdr.Id, root, nil
 }
 
-func (s *immudbStore) Get(key string) (value string, idx uint64, root []byte, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	idx, ok := s.idxByKey[key]
-	if !ok {
-		return "", 0, nil, ErrNotFound
-	}
-
+func (s *immudbStore) Get(key string) (string, uint64, []byte, error) {
 	ctx := context.Background()
 	entry, err := s.c.VerifiedGet(ctx, []byte(key))
+	if err != nil {
+		if isKeyNotFound(err) {
+			return "", 0, nil, fmt.Errorf("%w: %s", ErrNotFound, key)
+		}
+		return "", 0, nil, fmt.Errorf("immudb: get %s: %w", key, err)
+	}
+	root, err := s.root(ctx, entry.Tx)
 	if err != nil {
 		return "", 0, nil, err
 	}
-
-	s.idxByKeyMu.Lock()
-	root = s.rootsByKey[key]
-	s.idxByKeyMu.Unlock()
-
 	return string(entry.Value), entry.Tx, root, nil
 }
 
-func (s *immudbStore) Verify(root []byte, idx uint64, value string) (ok bool, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	key, ok := s.keyByIdx[idx]
-	if !ok {
-		return false, errors.New("immudb: index out of range")
-	}
-
+func (s *immudbStore) Verify(key string, root []byte, tx uint64, value string) (bool, error) {
 	ctx := context.Background()
-	entry, err := s.c.VerifiedGet(ctx, []byte(key))
+	entry, err := s.c.VerifiedGetAt(ctx, []byte(key), tx)
+	if err != nil {
+		if isKeyNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("immudb: verify %s at tx %d: %w", key, tx, err)
+	}
+	if entry.Tx != tx || string(entry.Value) != value {
+		return false, nil
+	}
+	got, err := s.root(ctx, tx)
 	if err != nil {
 		return false, err
 	}
-
-	if string(entry.Value) != value {
-		return false, nil
-	}
-
-	s.idxByKeyMu.Lock()
-	anchored := s.rootsByKey[key]
-	s.idxByKeyMu.Unlock()
-
-	if len(anchored) == 0 {
-		return false, errors.New("immudb: no root anchored")
-	}
-	if !equalRoot(string(anchored), string(root)) {
-		return false, nil
-	}
-	return true, nil
+	return bytes.Equal(got, root), nil
 }
 
 func (s *immudbStore) Close() error {
 	return s.c.CloseSession(context.Background())
 }
 
-type memStore struct {
-	mu       sync.Mutex
-	salt     string
-	order    []string
-	valByKey map[string]string
-	idxByKey map[string]uint64
-	roots    []string
-}
-
-func newMemStore(salt string) Store {
-	return &memStore{
-		salt:     salt,
-		valByKey: make(map[string]string),
-		idxByKey: make(map[string]uint64),
-		roots:    []string{hash([]byte(salt))},
-	}
-}
-
-func Open() Store {
-	// Read configuration from environment (see .env.example / .env). Overrides
-	// defaults documented by the immudb Go SDK.
-	addr := getenv("IMMUDB_ADDR", "127.0.0.1")
-	port := getenvInt("IMMUDB_PORT", 3322)
-	user := getenv("IMMUDB_USER", "immudb")
-	password := getenv("IMMUDB_PASSWORD", "immudb")
-	database := getenv("IMMUDB_DB", "securesoftwaresupplychain")
-
-	store, err := New(addr, port, user, password, database)
+// root returns the accumulated linear hash of transaction tx, read with a
+// proof against the client's trusted state.
+func (s *immudbStore) root(ctx context.Context, tx uint64) ([]byte, error) {
+	vtx, err := s.c.VerifiedTxByID(ctx, tx)
 	if err != nil {
-		return newMemStore("immudb-fallback-salt")
+		return nil, fmt.Errorf("immudb: verify tx %d: %w", tx, err)
 	}
-	return store
+	alh := schema.TxHeaderFromProto(vtx.Header).Alh()
+	return alh[:], nil
+}
+
+// isKeyNotFound reports whether err is the server's "key not found". The
+// server sends it as gRPC Unknown, so only the message identifies it.
+func isKeyNotFound(err error) bool {
+	st, ok := status.FromError(err)
+	return ok && strings.HasSuffix(st.Message(), embedded.ErrKeyNotFound.Error())
 }
 
 // stateDir is the default directory for the immudb client's state files.
@@ -227,91 +242,4 @@ func getenvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
-}
-
-func (m *memStore) Put(key, value string) (uint64, []byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, dup := m.valByKey[key]; dup {
-		return 0, nil, ErrDuplicate
-	}
-
-	idx := uint64(len(m.order))
-	leaf := m.leafFor(key, value)
-	m.roots = append(m.roots, hash(append([]byte(m.roots[idx]), leaf[:]...)))
-	m.order = append(m.order, key)
-	m.idxByKey[key] = idx
-	m.valByKey[key] = value
-	return idx, []byte(m.roots[idx]), nil
-}
-
-func (m *memStore) leafFor(key, value string) [sha256.Size]byte {
-	var b = make([]byte, 0, len(key)+1+len(value)+1)
-	b = append(b, key...)
-	b = append(b, 0)
-	b = append(b, value...)
-	return sha256.Sum256(b)
-}
-
-func (m *memStore) Get(key string) (string, uint64, []byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	idx, ok := m.idxByKey[key]
-	if !ok {
-		return "", 0, nil, ErrNotFound
-	}
-	return m.valByKey[key], idx, []byte(m.roots[len(m.roots)-1]), nil
-}
-
-func (m *memStore) Verify(root []byte, idx uint64, value string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if idx >= uint64(len(m.order)) {
-		return false, errors.New("immudb: index out of range")
-	}
-	key := m.order[idx]
-	if m.valByKey[key] != value {
-		return false, nil
-	}
-	if !equalRoot(m.roots[idx], string(root)) {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (m *memStore) Close() error { return nil }
-
-func hash(data []byte) string {
-	return hexEncode(sha256.Sum256(data))
-}
-
-func hexEncode(sum [sha256.Size]byte) string {
-	var b [sha256.Size * 2]byte
-	for i, v := range sum {
-		b[i*2] = hexNibble(v >> 4)
-		b[i*2+1] = hexNibble(v & 0x0f)
-	}
-	return string(b[:])
-}
-
-func hexNibble(v byte) byte {
-	if v < 10 {
-		return '0' + v
-	}
-	return 'a' + (v - 10)
-}
-
-func equalRoot(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
