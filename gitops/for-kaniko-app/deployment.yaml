@@ -10,10 +10,10 @@ spec:
         runAsNonRoot: true
       containers:
       - name: web
-        # Built from ntlaletsi70/for-kaniko-app@secure (b85756f) under the SPIFFE
+        # Built from ntlaletsi70/for-kaniko-app@secure (8e91632) under the SPIFFE
         # signing identity, with an attested SBOM. Pinned by digest: admission
         # verifies exactly this image.
-        image: docker.io/nkanyezisolutions/for-kaniko-app@sha256:9a5dd0687087fc1635466f913b50dda6371afd076b12d6a00e81a7a56b18f3a1
+        image: docker.io/nkanyezisolutions/for-kaniko-app@sha256:790f6d621d82a53b4eaf429b456f8b135a3efd2c14a2671272a7d7d557938104
         ports:
         - name: http
           containerPort: 8080
