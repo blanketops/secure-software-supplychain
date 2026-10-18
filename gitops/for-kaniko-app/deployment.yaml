@@ -6,6 +6,9 @@ spec:
   replicas: 1
   template:
     spec:
+      # The pod talks to nothing in the cluster, so it gets no
+      # ServiceAccount token.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
       containers:
