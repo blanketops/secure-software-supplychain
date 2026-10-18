@@ -209,11 +209,7 @@ func (r *SupplyChainReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // of the run's ServiceAccount. The "<registrySecret>-chains" pull secret is
 // synced for that purpose; without it on the ServiceAccount Chains cannot
 // store anything next to the image.
-func (r *SupplyChainReconciler) ensureServiceAccount(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	name string,
-) error {
+func (r *SupplyChainReconciler) ensureServiceAccount(ctx context.Context, sc *supplyv1alpha1.SupplyChain, name string) error {
 	logger := log.FromContext(ctx)
 
 	var pullSecrets []corev1.LocalObjectReference
@@ -300,11 +296,7 @@ func runnerServiceAccount(sc *supplyv1alpha1.SupplyChain) string {
 // Under the Kubernetes identity the ServiceAccount token is the identity and
 // there is nothing to register or withhold; the proofs are recorded and every
 // build is still reviewed before it starts.
-func (r *SupplyChainReconciler) ensureSigningIdentity(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	saName string,
-) (bool, error) {
+func (r *SupplyChainReconciler) ensureSigningIdentity(ctx context.Context, sc *supplyv1alpha1.SupplyChain, saName string) (bool, error) {
 	identity, err := signing.LoadIdentity(ctx, r.Client)
 	if err != nil {
 		return false, err

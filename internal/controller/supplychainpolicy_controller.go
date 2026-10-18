@@ -197,10 +197,7 @@ func (r *SupplyChainPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 // trustAnchors reads the PEM of each trust anchor from the ConfigMap key the
 // policy points at. It returns them under their default key names, or the name
 // of the first ConfigMap that does not exist.
-func (r *SupplyChainPolicyReconciler) trustAnchors(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-) (roots map[string]string, missing string, err error) {
+func (r *SupplyChainPolicyReconciler) trustAnchors(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy) (roots map[string]string, missing string, err error) {
 	configMaps := map[string]*corev1.ConfigMap{}
 	roots = map[string]string{}
 	for anchor, source := range policy.TrustSources(scp) {
@@ -226,10 +223,7 @@ func (r *SupplyChainPolicyReconciler) trustAnchors(
 //
 // One this operator created belongs to every policy that uses it and is
 // removed with the last of them; one made by hand is left as it is.
-func (r *SupplyChainPolicyReconciler) ensureServiceAccount(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-) error {
+func (r *SupplyChainPolicyReconciler) ensureServiceAccount(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy) error {
 	name := scp.Spec.ServiceAccountName
 	if name == "" {
 		name = policy.DefaultServiceAccount
@@ -265,11 +259,7 @@ func (r *SupplyChainPolicyReconciler) ensureServiceAccount(
 
 // apply creates or updates one rendered resource. It refuses to touch a
 // resource of the same name that belongs to something else.
-func (r *SupplyChainPolicyReconciler) apply(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-	desired *unstructured.Unstructured,
-) (controllerutil.OperationResult, error) {
+func (r *SupplyChainPolicyReconciler) apply(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy, desired *unstructured.Unstructured) (controllerutil.OperationResult, error) {
 	obj := emptyLike(desired)
 	return controllerutil.CreateOrUpdate(ctx, r.Client, obj, func() error {
 		if obj.GetResourceVersion() != "" && !policy.OwnedBy(obj, scp) {
@@ -304,10 +294,7 @@ func (r *SupplyChainPolicyReconciler) finalize(ctx context.Context, scp *supplyc
 	return r.Update(ctx, scp)
 }
 
-func (r *SupplyChainPolicyReconciler) deleteRendered(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-) error {
+func (r *SupplyChainPolicyReconciler) deleteRendered(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy) error {
 	log := logf.FromContext(ctx)
 	// ClusterImagePolicies first, so none references a missing TrustRoot. They
 	// are found by label, which also catches any left from an older rendering.
@@ -346,11 +333,7 @@ func (r *SupplyChainPolicyReconciler) deleteRendered(
 // deleteUnrendered deletes the ClusterImagePolicies of scp, found by label,
 // whose names are not in keep: requirements an earlier rendering made that
 // this one no longer does.
-func (r *SupplyChainPolicyReconciler) deleteUnrendered(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-	keep []string,
-) error {
+func (r *SupplyChainPolicyReconciler) deleteUnrendered(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy, keep []string) error {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(policy.ClusterImagePolicyGVK)
 	if err := r.List(ctx, list, client.MatchingLabels{
@@ -372,20 +355,11 @@ func (r *SupplyChainPolicyReconciler) deleteUnrendered(
 	return nil
 }
 
-func (r *SupplyChainPolicyReconciler) notReady(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-	reason, message string,
-) error {
+func (r *SupplyChainPolicyReconciler) notReady(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy, reason, message string) error {
 	return r.setReady(ctx, scp, metav1.ConditionFalse, reason, message)
 }
 
-func (r *SupplyChainPolicyReconciler) setReady(
-	ctx context.Context,
-	scp *supplychainv1alpha1.SupplyChainPolicy,
-	status metav1.ConditionStatus,
-	reason, message string,
-) error {
+func (r *SupplyChainPolicyReconciler) setReady(ctx context.Context, scp *supplychainv1alpha1.SupplyChainPolicy, status metav1.ConditionStatus, reason, message string) error {
 	scp.Status.ObservedGeneration = scp.Generation
 	meta.SetStatusCondition(&scp.Status.Conditions, metav1.Condition{
 		Type:               conditionReady,

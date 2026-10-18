@@ -43,12 +43,7 @@ type Mediator struct {
 	SonarQubeExternalSecretReconciler *sonarqube.SonarQubeSecretReconciler
 }
 
-func New(
-	c client.Client,
-	scheme *runtime.Scheme,
-	log logr.Logger,
-	recorder record.EventRecorder,
-) *Mediator {
+func New(c client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *Mediator {
 	return &Mediator{
 		Client:   c,
 		Scheme:   scheme,
@@ -61,11 +56,7 @@ func New(
 	}
 }
 
-func (m *Mediator) EnsurePrerequisites(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-) (bool, error) {
+func (m *Mediator) EnsurePrerequisites(ctx context.Context, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) (bool, error) {
 	log := m.Log.WithValues(
 		"supply-chain", sc.Name,
 		"image-build", ib.Name,
@@ -131,11 +122,7 @@ func (m *Mediator) EnsurePrerequisites(
 // Same pattern as the secret reconcilers — a separate block that the
 // controller calls in sequence. Prerequisites ensure cluster state,
 // signing establishes cryptographic identity for this run.
-func (m *Mediator) EstablishSigningContext(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-) (*signing.RunSigningContext, error) {
+func (m *Mediator) EstablishSigningContext(ctx context.Context, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) (*signing.RunSigningContext, error) {
 	log := m.Log.WithValues(
 		"supply-chain", sc.Name,
 		"image-build", ib.Name,
@@ -165,11 +152,7 @@ func (m *Mediator) EstablishSigningContext(
 	return sigCtx, nil
 }
 
-func (m *Mediator) secretExists(
-	ctx context.Context,
-	name string,
-	namespace string,
-) bool {
+func (m *Mediator) secretExists(ctx context.Context, name string, namespace string) bool {
 	var s corev1.Secret
 	err := m.Client.Get(ctx, client.ObjectKey{
 		Name:      name,
@@ -178,11 +161,7 @@ func (m *Mediator) secretExists(
 	return err == nil
 }
 
-func (m *Mediator) recordWarning(
-	ib *supplyv1alpha1.ImageBuild,
-	reason string,
-	err error,
-) {
+func (m *Mediator) recordWarning(ib *supplyv1alpha1.ImageBuild, reason string, err error) {
 	if m.Recorder != nil {
 		m.Recorder.Event(
 			ib,
