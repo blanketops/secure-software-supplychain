@@ -89,12 +89,7 @@ func ResourceName(scp *supplyv1alpha1.SupplyChainPolicy) string {
 // ServiceAccount signed it keylessly (Fulcio cert chained to the trust root,
 // embedded CT log proof, Rekor entry) and attested that it passed the three
 // authorization checks before signing.
-func Render(
-	scp *supplyv1alpha1.SupplyChainPolicy,
-	sc *supplyv1alpha1.SupplyChain,
-	roots map[string]string,
-	identity signing.Identity,
-) (*Rendered, error) {
+func Render(scp *supplyv1alpha1.SupplyChainPolicy, sc *supplyv1alpha1.SupplyChain, roots map[string]string, identity signing.Identity) (*Rendered, error) {
 	name := ResourceName(scp)
 	endpoints := EndpointsFor(scp, sc)
 
@@ -249,11 +244,7 @@ func TrustSources(scp *supplyv1alpha1.SupplyChainPolicy) map[string]supplyv1alph
 // the cluster's signing identity names a ServiceAccount (a Kubernetes token
 // subject or a SPIFFE ID). With none stated, the only signer is the
 // ServiceAccount the SupplyChain's pipeline signs with.
-func resolveSigners(
-	scp *supplyv1alpha1.SupplyChainPolicy,
-	supplyChainServiceAccount string,
-	identity signing.Identity,
-) []supplyv1alpha1.SignerIdentity {
+func resolveSigners(scp *supplyv1alpha1.SupplyChainPolicy, supplyChainServiceAccount string, identity signing.Identity) []supplyv1alpha1.SignerIdentity {
 	if len(scp.Spec.Signers) == 0 {
 		return []supplyv1alpha1.SignerIdentity{{
 			Issuer:  identity.Issuer,
@@ -291,12 +282,7 @@ func OwnedBy(obj *unstructured.Unstructured, scp *supplyv1alpha1.SupplyChainPoli
 	return labels[LabelPolicyNamespace] == scp.Namespace && labels[LabelPolicyName] == scp.Name
 }
 
-func newObject(
-	gvk schema.GroupVersionKind,
-	name string,
-	scp *supplyv1alpha1.SupplyChainPolicy,
-	spec map[string]any,
-) *unstructured.Unstructured {
+func newObject(gvk schema.GroupVersionKind, name string, scp *supplyv1alpha1.SupplyChainPolicy, spec map[string]any) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{Object: map[string]any{"spec": spec}}
 	obj.SetGroupVersionKind(gvk)
 	obj.SetName(name)

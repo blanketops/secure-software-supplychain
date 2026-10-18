@@ -48,11 +48,7 @@ var (
 // Authorize runs the three checks for the ServiceAccount of scp. It always
 // runs all three, so the returned proofs show everything that is missing; the
 // error is non-nil if any was denied or could not be evaluated.
-func Authorize(
-	ctx context.Context,
-	c client.Client,
-	scp *supplyv1alpha1.SupplyChainPolicy,
-) (*supplyv1alpha1.PolicyAuthorization, error) {
+func Authorize(ctx context.Context, c client.Client, scp *supplyv1alpha1.SupplyChainPolicy) (*supplyv1alpha1.PolicyAuthorization, error) {
 	serviceAccount := scp.Spec.ServiceAccountName
 	if serviceAccount == "" {
 		serviceAccount = DefaultServiceAccount
