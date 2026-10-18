@@ -191,14 +191,14 @@ func TestReadBuildEvidenceRejectsRecordFromAnotherTransaction(t *testing.T) {
 	if err := EnsureSchema(s); err != nil {
 		t.Fatalf("EnsureSchema: %v", err)
 	}
-	params := map[string]any{"digest": b.Digest}
+	params := map[string]any{"digest": b.Digest, "image": b.Image}
 	if _, _, err := s.ExecAll(immudb.Statement{
 		SQL: "INSERT INTO " + TableSignatures + " (digest, n, signed_by) VALUES (@digest, 0, 'Build')", Params: params,
 	}); err != nil {
 		t.Fatalf("inserting the record: %v", err)
 	}
 	if _, _, err := s.ExecAll(immudb.Statement{
-		SQL: "INSERT INTO " + TableBuilds + " (digest, records) VALUES (@digest, 1)", Params: params,
+		SQL: "INSERT INTO " + TableBuilds + " (digest, image, records) VALUES (@digest, @image, 1)", Params: params,
 	}); err != nil {
 		t.Fatalf("inserting the build: %v", err)
 	}
@@ -215,9 +215,9 @@ func TestReadBuildEvidenceRejectsMissingRecord(t *testing.T) {
 	if err := EnsureSchema(s); err != nil {
 		t.Fatalf("EnsureSchema: %v", err)
 	}
-	params := map[string]any{"digest": b.Digest}
+	params := map[string]any{"digest": b.Digest, "image": b.Image}
 	if _, _, err := s.ExecAll(
-		immudb.Statement{SQL: "INSERT INTO " + TableBuilds + " (digest, records) VALUES (@digest, 2)", Params: params},
+		immudb.Statement{SQL: "INSERT INTO " + TableBuilds + " (digest, image, records) VALUES (@digest, @image, 2)", Params: params},
 		immudb.Statement{SQL: "INSERT INTO " + TableSignatures + " (digest, n, signed_by) VALUES (@digest, 0, 'Build')", Params: params},
 	); err != nil {
 		t.Fatalf("inserting: %v", err)
