@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,22 +13,35 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package evidence
 
 import (
 	"testing"
 
-	immudb "github.com/blanketops/secure-software-supplychain/pkg/immudb"
 	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
+	immudb "github.com/blanketops/secure-software-supplychain/pkg/immudb"
 )
 
-// TestNewPipelineWritesEvidenceToImmub is the contract for the new-pipeline
-// decision: evidence must go to immub, not back to the registry. It writes a
+// ptr returns a pointer to v. A small helper so tests can populate pointer
+// fields (e.g. RekorLogIndex) without a separate helper function.
+func ptr[T any](v T) *T { return &v }
+
+// sameInt64Ptr reports whether a and b are both nil or point to equal values.
+func sameInt64Ptr(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// TestNewPipelineWritesEvidenceToImmudb is the contract for the new-pipeline
+// decision: evidence must go to immudb, not back to the registry. It writes a
 // signature and an attestation record for one build, reads both back, and
 // requires every read to Verify() as authentic against the frozen root at the
 // moment of the read. Because the configured store is immudb, nothing lands in
 // the registry here; each record is keyed "<Kind>:<Digest>".
-func TestNewPipelineWritesEvidenceToImmub(t *testing.T) {
+func TestNewPipelineWritesEvidenceToImmudb(t *testing.T) {
 	const digest = "sha256:abc"
 
 	records := []supplychainv1alpha1.SignatureRecord{
@@ -39,7 +52,7 @@ func TestNewPipelineWritesEvidenceToImmub(t *testing.T) {
 			Issuer:         "https://oidc.example.idp",
 			KeyFingerprint: "sha256:0123456789abcdef",
 			Certificate:    "-----BEGIN CERTIFICATE-----mock-----END CERTIFICATE-----",
-			RekorLogIndex:  ptr(100),
+			RekorLogIndex:  ptr(int64(100)),
 			RekorLogID:     "sha256:rekord",
 		},
 		{
@@ -71,15 +84,15 @@ func TestNewPipelineWritesEvidenceToImmub(t *testing.T) {
 	for i, want := range records {
 		gotRec := got[i]
 		if gotRec.Kind != want.Kind || gotRec.SignedBy != want.SignedBy ||
-			gotRec.Subject != want.Subject || gotRec.RekorLogIndex == nil {
+			gotRec.Subject != want.Subject || !sameInt64Ptr(gotRec.RekorLogIndex, want.RekorLogIndex) {
 			t.Fatalf("record %d mismatch: got %+v want %+v", i, gotRec, want)
 		}
 
 		// The per-record, tamper-evident round trip that the read-back relies on.
 		key := gotRec.Kind + ":" + digest
-		if _, idx, root, err := s.Get(key); err != nil {
+		if value, idx, root, err := s.Get(key); err != nil {
 			t.Fatalf("Get(%s) = %v", key, err)
-		} else if ok, err := s.Verify(root, idx, got); err != nil || !ok {
+		} else if ok, err := s.Verify(root, idx, value); err != nil || !ok {
 			t.Fatalf("Verify(%s) = %v, %v", key, ok, err)
 		}
 	}
@@ -102,14 +115,14 @@ func TestNewPipelineRoundTrip(t *testing.T) {
 		t.Fatalf("PutEvidenceRecords: %v", err)
 	}
 
-	out, err := ReadEvidenceRecords(s, digest)
+	got, err := ReadEvidenceRecords(s, digest)
 	if err != nil {
 		t.Fatalf("ReadEvidenceRecords: %v", err)
 	}
-	if len(out) != 1 {
-		t.Fatalf("got %d records", len(out))
+	if len(got) != 1 {
+		t.Fatalf("got %d records", len(got))
 	}
-	if out[0].Kind != rec.Kind || out[0].PredicateType != rec.PredicateType || out[0].Subject != rec.Subject {
-		t.Fatalf("round-trip mismatch: got %+v want %+v", out[0], rec)
+	if got[0].Kind != rec.Kind || got[0].PredicateType != rec.PredicateType || got[0].Subject != rec.Subject {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", got[0], rec)
 	}
 }

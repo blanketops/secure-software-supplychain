@@ -17,6 +17,7 @@ package evidence
 
 import (
 	"encoding/json"
+	errors "errors"
 
 	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 	immudb "github.com/blanketops/secure-software-supplychain/pkg/immudb"
@@ -30,7 +31,7 @@ const (
 	evidenceKeyPrefix = "evidence"
 )
 
-// PutEvidenceRecords writes the controller's evidence records to immub for new
+// PutEvidenceRecords writes the controller's evidence records to immudb for new
 // pipelines that must not rewrite the registry's evidence layers. Records are
 // serialized as JSON and keyed "<Kind>:<Digest>". Returns the number of records
 // written (0 if the slice is empty).
@@ -51,7 +52,7 @@ func PutEvidenceRecords(s immudb.Store, digest string, records []supplychainv1al
 	return len(records), nil
 }
 
-// ReadEvidenceRecords reads the evidence records immub holds for a digest, in
+// ReadEvidenceRecords reads the evidence records immudb holds for a digest, in
 // kind order (Signature, Attestation), and re-verifies each against the frozen
 // root it was written under. It does not touch the registry.
 func ReadEvidenceRecords(s immudb.Store, digest string) ([]supplychainv1alpha1.SignatureRecord, error) {

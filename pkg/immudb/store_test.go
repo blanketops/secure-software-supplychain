@@ -18,7 +18,7 @@ package immudb
 import "testing"
 
 func fresh() Store {
-	return newMemStore("immub-spike-test-salt")
+	return newMemStore("immudb-spike-test-salt")
 }
 
 // TestPutGetVerifyRoundTrip: a record must verify against the root captured at

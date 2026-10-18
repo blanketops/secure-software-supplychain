@@ -19,7 +19,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -56,21 +58,25 @@ func New(addr string, port int, user, password, database string) (Store, error) 
 	opts.Username = user
 	opts.Password = password
 	opts.CurrentDatabase = database
-
-	c, err := immudbclient.NewImmuClient(opts)
-	if err != nil {
-		return nil, ErrConnect
+	// The SDK persists its verified-state and server-identity files in Dir,
+	// which defaults to the working directory. Keep them out of the source tree.
+	opts.Dir = getenv("IMMUDB_STATE_DIR", stateDir())
+	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("%w: state dir: %w", ErrConnect, err)
 	}
+	// NewClient (not NewImmuClient): NewImmuClient already dials the server, so
+	// the OpenSession below would fail with "session already opened".
+	c := immudbclient.NewClient().WithOptions(opts)
 
 	ctx := context.Background()
 	if err := c.OpenSession(ctx, []byte(user), []byte(password), database); err != nil {
-		return nil, ErrConnect
+		return nil, fmt.Errorf("%w: %w", ErrConnect, err)
 	}
 
 	return &immudbStore{
-		c:         c,
-		idxByKey:  make(map[string]uint64),
-		keyByIdx:  make(map[uint64]string),
+		c:          c,
+		idxByKey:   make(map[string]uint64),
+		keyByIdx:   make(map[uint64]string),
 		rootsByKey: make(map[string][]byte),
 	}, nil
 }
@@ -129,7 +135,7 @@ func (s *immudbStore) Verify(root []byte, idx uint64, value string) (ok bool, er
 
 	key, ok := s.keyByIdx[idx]
 	if !ok {
-		return false, errors.New("immub: index out of range")
+		return false, errors.New("immudb: index out of range")
 	}
 
 	ctx := context.Background()
@@ -147,7 +153,7 @@ func (s *immudbStore) Verify(root []byte, idx uint64, value string) (ok bool, er
 	s.idxByKeyMu.Unlock()
 
 	if len(anchored) == 0 {
-		return false, errors.New("immub: no root anchored")
+		return false, errors.New("immudb: no root anchored")
 	}
 	if !equalRoot(string(anchored), string(root)) {
 		return false, nil
@@ -180,9 +186,9 @@ func newMemStore(salt string) Store {
 func Open() Store {
 	// Read configuration from environment (see .env.example / .env). Overrides
 	// defaults documented by the immudb Go SDK.
-	addr := getenv("IMMUB_ADDR", "127.0.0.1")
-	port := getenvInt("IMMUB_PORT", 3322)
-	user := getenv("IMMUDB_USER", "immub")
+	addr := getenv("IMMUDB_ADDR", "127.0.0.1")
+	port := getenvInt("IMMUDB_PORT", 3322)
+	user := getenv("IMMUDB_USER", "immudb")
 	password := getenv("IMMUDB_PASSWORD", "immudb")
 	database := getenv("IMMUDB_DB", "securesoftwaresupplychain")
 
@@ -191,6 +197,15 @@ func Open() Store {
 		return newMemStore("immudb-fallback-salt")
 	}
 	return store
+}
+
+// stateDir is the default directory for the immudb client's state files.
+func stateDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "immudb")
 }
 
 // getenv returns the value of the environment variable named by key. If the
@@ -255,7 +270,7 @@ func (m *memStore) Verify(root []byte, idx uint64, value string) (bool, error) {
 	defer m.mu.Unlock()
 
 	if idx >= uint64(len(m.order)) {
-		return false, errors.New("immub: index out of range")
+		return false, errors.New("immudb: index out of range")
 	}
 	key := m.order[idx]
 	if m.valByKey[key] != value {

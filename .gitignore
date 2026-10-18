@@ -45,5 +45,8 @@ allure-report/
 *.log
 *.bak
 
+# Config env
+.env
+
 # Coverage profile written by mage test
 cover.out
