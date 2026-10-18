@@ -18,15 +18,30 @@ package immudb
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
 
 // openTestStore connects to the immudb server from the environment (see
-// Open). The tests need a running immudb and fail when there is none.
+// Open), on the test database, never the pipeline's. The tests need a
+// running immudb and fail when there is none.
 func openTestStore(t *testing.T) Store {
 	t.Helper()
+	// immudbtest.Use, which this package cannot import: it imports immudb.
+	name := os.Getenv("IMMUDB_TEST_DB")
+	if name == "" {
+		name = "securesoftwaresupplychain_test"
+	}
+	if !strings.HasSuffix(name, "_test") {
+		t.Fatalf("IMMUDB_TEST_DB=%s does not end in _test; tests do not write to a pipeline database", name)
+	}
+	if err := CreateDatabase(name); err != nil {
+		t.Fatalf("immudb is required for these tests: %v", err)
+	}
+	t.Setenv("IMMUDB_DB", name)
 	s, err := Open()
 	if err != nil {
 		t.Fatalf("immudb is required for these tests: %v", err)
@@ -219,5 +234,31 @@ func TestOpenFailsWithWrongPassword(t *testing.T) {
 	}
 	if !errors.Is(err, ErrConnect) {
 		t.Fatalf("Open with a wrong password = %v; want ErrConnect", err)
+	}
+}
+
+// TestCreateDatabase: a database is created once and can be opened; creating
+// it again is not an error.
+func TestCreateDatabase(t *testing.T) {
+	const name = "securesoftwaresupplychain_test"
+	for range 2 {
+		if err := CreateDatabase(name); err != nil {
+			t.Fatalf("CreateDatabase(%s): %v", name, err)
+		}
+	}
+	t.Setenv("IMMUDB_DB", name)
+	s, err := Open()
+	if err != nil {
+		t.Fatalf("Open of the created database: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	if s.Database() != name {
+		t.Fatalf("opened %s; want %s", s.Database(), name)
+	}
+}
+
+func TestCreateDatabaseRejectsBadName(t *testing.T) {
+	if err := CreateDatabase("not-allowed"); err == nil {
+		t.Fatal("CreateDatabase with a dash in the name = nil error")
 	}
 }

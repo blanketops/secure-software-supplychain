@@ -214,6 +214,33 @@ func (s *immudbStore) Root(tx uint64) ([]byte, error) {
 	return s.root(context.Background(), tx)
 }
 
+// CreateDatabase creates the database name on the immudb server configured
+// by the IMMUDB_* variables, if it does not exist. The login must be allowed
+// to create databases. A name is lowercase letters, digits and underscores,
+// as immudb requires.
+func CreateDatabase(name string) error {
+	if name == "" || strings.TrimFunc(name, func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
+	}) != "" {
+		return fmt.Errorf("immudb: %q is not a database name: use lowercase letters, digits and underscores", name)
+	}
+	s, err := New(
+		getenv("IMMUDB_ADDR", "127.0.0.1"),
+		getenvInt("IMMUDB_PORT", 3322),
+		getenv("IMMUDB_USER", "immudb"),
+		getenv("IMMUDB_PASSWORD", "immudb"),
+		"defaultdb",
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.(*immudbStore).c.SQLExec(context.Background(), "CREATE DATABASE IF NOT EXISTS "+name, nil); err != nil {
+		return fmt.Errorf("immudb: create database %s: %w", name, err)
+	}
+	return nil
+}
+
 // root returns the accumulated linear hash of transaction tx, read with a
 // proof against the client's trusted state.
 func (s *immudbStore) root(ctx context.Context, tx uint64) ([]byte, error) {

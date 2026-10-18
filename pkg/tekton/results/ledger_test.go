@@ -33,6 +33,7 @@ import (
 	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 	"github.com/blanketops/secure-software-supplychain/pkg/evidence"
 	"github.com/blanketops/secure-software-supplychain/pkg/immudb"
+	"github.com/blanketops/secure-software-supplychain/pkg/immudb/immudbtest"
 )
 
 // ledgerFixture is a succeeded build with collected evidence, for an image
@@ -76,8 +77,9 @@ func ledgerClient(t *testing.T, objects ...client.Object) client.Client {
 		WithStatusSubresource(&supplyv1alpha1.ImageBuildResult{}).Build()
 }
 
-// openImmudb connects to the immudb server from the environment. These tests
-// need a running immudb and fail when there is none.
+// openImmudb connects to the immudb server from the environment: the test
+// database once immudbtest.Use has run. These tests need a running immudb
+// and fail when there is none.
 func openImmudb() (immudb.Store, error) { return immudb.Open() }
 
 func storedResult(t *testing.T, c client.Client, ib *supplyv1alpha1.ImageBuild) *supplyv1alpha1.ImageBuildResult {
@@ -92,6 +94,7 @@ func storedResult(t *testing.T, c client.Client, ib *supplyv1alpha1.ImageBuild) 
 // TestStoreEvidenceWritesTheBuildToImmudb: the evidence of a finished build
 // lands in immudb as one transaction, which the ImageBuildResult records.
 func TestStoreEvidenceWritesTheBuildToImmudb(t *testing.T) {
+	immudbtest.Use(t)
 	ib, result := ledgerFixture(t)
 	c := ledgerClient(t, result)
 	r := &Recorder{Client: c, Log: logr.Discard(), OpenLedger: openImmudb}
@@ -100,15 +103,11 @@ func TestStoreEvidenceWritesTheBuildToImmudb(t *testing.T) {
 		t.Fatalf("StoreEvidence: %v", err)
 	}
 	ledger := storedResult(t, c, ib).Status.Evidence.Ledger
-	if ledger == nil || ledger.Tx == 0 || ledger.Root == "" || ledger.Records != 3 || ledger.Database == "" {
-		t.Fatalf("ledger = %+v; want the transaction holding 3 records", ledger)
+	if ledger == nil || ledger.Tx == 0 || ledger.Root == "" || ledger.Records != 3 || ledger.Database != immudbtest.DefaultDatabase {
+		t.Fatalf("ledger = %+v; want the transaction holding 3 records in %s", ledger, immudbtest.DefaultDatabase)
 	}
 
-	s, err := immudb.Open()
-	if err != nil {
-		t.Fatalf("immudb is required for this test: %v", err)
-	}
-	defer func() { _ = s.Close() }()
+	s := immudbtest.Open(t)
 	stored, err := evidence.ReadBuildEvidence(s, result.Status.ImageDigest)
 	if err != nil {
 		t.Fatalf("ReadBuildEvidence: %v", err)
@@ -138,6 +137,7 @@ func TestStoreEvidenceWritesTheBuildToImmudb(t *testing.T) {
 // write was lost, the next call records the stored transaction instead of
 // failing on the duplicate.
 func TestStoreEvidenceFindsWhatIsAlreadyStored(t *testing.T) {
+	immudbtest.Use(t)
 	ib, result := ledgerFixture(t)
 	first := ledgerClient(t, result.DeepCopy())
 	r := &Recorder{Client: first, Log: logr.Discard(), OpenLedger: openImmudb}

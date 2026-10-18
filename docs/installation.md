@@ -414,7 +414,9 @@ SELECT n, signed_by, subject, rekor_log_index FROM signatures WHERE digest = 'sh
 ```
 
 The unit tests of `pkg/immudb`, `pkg/evidence` and `pkg/tekton/results` need an immudb at `127.0.0.1:3322`
-(override with the same `IMMUDB_*` variables) and fail without one.
+(override with the same `IMMUDB_*` variables) and fail without one. They write to their own database,
+`securesoftwaresupplychain_test` (`IMMUDB_TEST_DB`, which must end in `_test`), created on first use, never to the
+pipeline's.
 
 ## 3. Store the credentials
 

@@ -17,6 +17,7 @@ an error when the server cannot be reached or rejects the login.
 | `ExecAll(stmts...)` | Runs SQL statements in one transaction: all are committed or none. Inserting an existing primary key is `ErrDuplicate`. Statements that change nothing commit no transaction and return tx 0 |
 | `QueryVerified(table, pk, sql, params)` | Runs a `SELECT` on one table and verifies every returned row (`VerifyRow`); each `Row` carries its values by column name and the transaction that wrote it. The query must select the primary key columns `pk` |
 | `Root(tx)` | The accumulated hash (Alh) of transaction `tx`, verified |
+| `CreateDatabase(name)` | Creates a database if it does not exist, on the server the `IMMUDB_*` variables name |
 | `Put`, `PutAll`, `Get`, `Verify` | Key-value writes and verified reads; `PutAll` writes every key in one transaction, each under `KeyMustNotExist` |
 
 The evidence itself (tables `builds`, `signatures`, `provenances`, `sboms`, `attestations`) is defined in `pkg/evidence/immudb.go`, and
@@ -24,7 +25,9 @@ described in [installation](../../docs/installation.md#where-the-evidence-is-sto
 
 ## Tests
 
-The tests run against a real immudb and fail without one:
+The tests run against a real immudb and fail without one. They use the database `securesoftwaresupplychain_test`
+(`IMMUDB_TEST_DB`, created on first use), never the pipeline's; a name that does not end in `_test` is refused.
+Tests in other packages get it from `pkg/immudb/immudbtest` (`Use`, `Open`):
 
 ```sh
 go test ./pkg/immudb/... -v

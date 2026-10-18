@@ -31,21 +31,18 @@ import (
 
 	supplychainv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 	immudb "github.com/blanketops/secure-software-supplychain/pkg/immudb"
+	"github.com/blanketops/secure-software-supplychain/pkg/immudb/immudbtest"
 )
 
 // ptr returns a pointer to v, for the pointer fields of a record.
 func ptr[T any](v T) *T { return &v }
 
-// openStore connects to the immudb server from the environment. These tests
-// need a running immudb and fail when there is none.
+// openStore connects to the immudb server from the environment, on the test
+// database (immudbtest). These tests need a running immudb and fail when
+// there is none.
 func openStore(t *testing.T) immudb.Store {
 	t.Helper()
-	s, err := immudb.Open()
-	if err != nil {
-		t.Fatalf("immudb is required for these tests: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	return immudbtest.Open(t)
 }
 
 // testBuild is a build no earlier run has stored evidence for: immudb keeps
