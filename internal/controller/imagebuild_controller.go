@@ -244,11 +244,7 @@ func pipelineRunName(ib *supplychainv1alpha1.ImageBuild) string {
 	}
 	return strings.TrimRight(name, "-.")
 }
-func (r *ImageBuildReconciler) reconcilePipelineRun(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-	sc *supplychainv1alpha1.SupplyChain,
-) (*tektonv1.PipelineRun, *ctrl.Result, error) {
+func (r *ImageBuildReconciler) reconcilePipelineRun(ctx context.Context, ib *supplychainv1alpha1.ImageBuild, sc *supplychainv1alpha1.SupplyChain) (*tektonv1.PipelineRun, *ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	prName := pipelineRunName(ib)
@@ -346,11 +342,7 @@ func (r *ImageBuildReconciler) reconcilePipelineRun(
 	return pr, nil, nil
 }
 
-func (r *ImageBuildReconciler) syncStatus(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-	pr *tektonv1.PipelineRun,
-) {
+func (r *ImageBuildReconciler) syncStatus(ctx context.Context, ib *supplychainv1alpha1.ImageBuild, pr *tektonv1.PipelineRun) {
 	if pr == nil {
 		return
 	}
@@ -388,10 +380,7 @@ func (r *ImageBuildReconciler) syncStatus(
 // stepStatuses reports each pipeline task of pr and how far it got. The
 // PipelineRun only lists its TaskRuns by name, so their conditions are read
 // from the TaskRuns themselves.
-func (r *ImageBuildReconciler) stepStatuses(
-	ctx context.Context,
-	pr *tektonv1.PipelineRun,
-) []supplychainv1alpha1.StepStatus {
+func (r *ImageBuildReconciler) stepStatuses(ctx context.Context, pr *tektonv1.PipelineRun) []supplychainv1alpha1.StepStatus {
 	var taskRuns tektonv1.TaskRunList
 	if err := r.List(ctx, &taskRuns,
 		client.InNamespace(pr.Namespace),
@@ -435,10 +424,7 @@ const conditionRunDeleted = "PipelineRunDeleted"
 // recorded when the run finished; without one, for example when the operator
 // was down from before the run ended until after it was pruned, the build is
 // Failed, as nothing shows it succeeded. The run is never created again.
-func (r *ImageBuildReconciler) settleIfRunDeleted(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-) (bool, error) {
+func (r *ImageBuildReconciler) settleIfRunDeleted(ctx context.Context, ib *supplychainv1alpha1.ImageBuild) (bool, error) {
 	if ib.Status.PipelineRunRef == "" {
 		return false, nil
 	}
@@ -493,11 +479,7 @@ func (r *ImageBuildReconciler) settleIfRunDeleted(
 	return true, nil
 }
 
-func (r *ImageBuildReconciler) setFailed(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-	err error,
-) (ctrl.Result, error) {
+func (r *ImageBuildReconciler) setFailed(ctx context.Context, ib *supplychainv1alpha1.ImageBuild, err error) (ctrl.Result, error) {
 	ib.Status.Phase = phaseFailed
 	_ = r.Status().Update(ctx, ib)
 	return ctrl.Result{}, err
@@ -507,10 +489,7 @@ func (r *ImageBuildReconciler) setFailed(
 // Tekton Chains is done with the run. Chains signs a run after it completes
 // and stores that provenance with the image, so the first record, taken the
 // moment the run finished, cannot have it.
-func (r *ImageBuildReconciler) completeEvidence(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-) (ctrl.Result, error) {
+func (r *ImageBuildReconciler) completeEvidence(ctx context.Context, ib *supplychainv1alpha1.ImageBuild) (ctrl.Result, error) {
 	var result supplychainv1alpha1.ImageBuildResult
 	if err := r.Get(ctx, client.ObjectKeyFromObject(ib), &result); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -541,11 +520,7 @@ func (r *ImageBuildReconciler) completeEvidence(
 // finalize stores the final evidence of a build in immudb and then publishes
 // its ImageBuildResult to Tekton. An error leaves the build unpublished, to be
 // reconciled again.
-func (r *ImageBuildReconciler) finalize(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-	pipelineRun string,
-) error {
+func (r *ImageBuildReconciler) finalize(ctx context.Context, ib *supplychainv1alpha1.ImageBuild, pipelineRun string) error {
 	if err := r.Recorder.StoreEvidence(ctx, ib); err != nil {
 		return err
 	}
@@ -572,11 +547,7 @@ func (r *ImageBuildReconciler) recordSignature(ctx context.Context, ib *supplych
 
 // publishResult creates the CustomRun that shows the ImageBuildResult in
 // Tekton. It is created once, when nothing more will be added to the record.
-func (r *ImageBuildReconciler) publishResult(
-	ctx context.Context,
-	ib *supplychainv1alpha1.ImageBuild,
-	pipelineRun string,
-) error {
+func (r *ImageBuildReconciler) publishResult(ctx context.Context, ib *supplychainv1alpha1.ImageBuild, pipelineRun string) error {
 	if pipelineRun == "" {
 		return nil
 	}
