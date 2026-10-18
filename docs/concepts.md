@@ -34,7 +34,7 @@ How a workload proves who it is to Fulcio is a cluster-wide choice, made at inst
 With `spiffe`, the installer also installs SPIRE (server, agent, CSI driver, OIDC discovery), tells Fulcio to accept
 identities from the trust domain and nothing else, and gives Tekton Chains the Workload API socket. Fulcio then
 refuses Kubernetes ServiceAccount tokens: a pod cannot get a certificate with the token it already has, only
-with an identity that was registered for it. The pipeline's sign, attest and
+with an identity that was registered for it. The pipeline's sign and
 verify steps and the default signers of every `SupplyChainPolicy` follow, because they all read the identity from
 the Chains config (`signers.x509.fulcio.provider` and `.issuer`) and the trust domain from Tekton's `config-spire`.
 

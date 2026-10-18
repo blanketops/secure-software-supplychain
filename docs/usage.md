@@ -25,7 +25,6 @@ spec:
   steps:
     trivy: true
     sign: true
-    attest: true
     sonarQube:
       serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token

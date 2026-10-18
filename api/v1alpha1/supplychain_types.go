@@ -84,7 +84,9 @@ type StepsSpec struct {
 	// Sign enables image signing via Cosign + Sigstore
 	// +kubebuilder:default=true
 	Sign bool `json:"sign,omitempty"`
-	// Attest enables provenance attestation via Tekton Chains
+	// Attest has no effect: Tekton Chains attests the provenance of every
+	// build, from the image the push task reports and from the run as a whole.
+	// It is kept so that existing SupplyChains stay valid.
 	// +kubebuilder:default=true
 	Attest bool `json:"attest,omitempty"`
 }

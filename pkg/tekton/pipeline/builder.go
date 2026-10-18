@@ -36,7 +36,6 @@ const (
 	stepPushImage  = "push-image-docker"
 	stepTrivy      = "vulnerability-scan-trivy"
 	stepSign       = "sign-image-cosign"
-	stepAttest     = "attest-image-rekor-fulcio"
 	stepVerify     = "verify-image-policy"
 	cosignImage    = "gcr.io/projectsigstore/cosign:v2.2.3@sha256:8fc9cad121611e8479f65f79f2e5bea58949e8a87ffac2a42cb99cf0ff079ba7"
 	curlImage      = "docker.io/curlimages/curl:8.23.0@sha256:a134550be58ab783810e613ae96fd253c38f7bdd16d9bf9be350700c7a29ac06"
@@ -262,14 +261,11 @@ func buildTaskList(sc *supplyv1alpha1.SupplyChain, imageRef string, sigCtx *sign
 		last = stepSign
 	}
 
-	// Step 8: attest (Rekor) — record attestation of the signed image
-	// Rekor logs the signature, not the raw image — sign must come first
-	if sc.Spec.Steps.Attest {
-		tasks = append(tasks, attestTask(imageRef, last))
-		last = stepAttest
-	}
+	// Provenance needs no task of its own: Tekton Chains signs and attests
+	// the image the push task reports, and attests the run as a whole. A
+	// second task reporting the image would only publish a duplicate of each.
 
-	// Step 9: verify — check the published image the way admission will.
+	// Step 8: verify — check the published image the way admission will.
 	// A build only succeeds if what it produced can actually be deployed.
 	if sc.Spec.Steps.Sign && sigCtx != nil {
 		tasks = append(tasks, verifyTask(sc, imageRef, last, sigCtx.SigningIdentity()))
@@ -755,55 +751,6 @@ until skopeo inspect --raw --authfile /workspace/dockerconfig/config.json "${sig
 done
 echo "Tekton Chains signed ${IMAGE}@${DIGEST}"
 `,
-	}
-}
-
-func attestTask(imageRef, runAfter string) tektonv1.PipelineTask {
-	return tektonv1.PipelineTask{
-		Name:     stepAttest,
-		RunAfter: after(runAfter),
-		Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-			{Name: "dockerconfig", Workspace: workspaceDockerConfig},
-		},
-		TaskSpec: &tektonv1.EmbeddedTask{
-			TaskSpec: tektonv1.TaskSpec{
-				Params: []tektonv1.ParamSpec{
-					{Name: "IMAGE", Type: tektonv1.ParamTypeString},
-				},
-				Workspaces: []tektonv1.WorkspaceDeclaration{
-					{Name: "dockerconfig"},
-				},
-				Results: []tektonv1.TaskResult{
-					{Name: "IMAGE_URL", Description: "Image URL for Tekton Chains"},
-					{Name: "IMAGE_DIGEST", Description: "Image digest for Tekton Chains attestation"},
-				},
-				Steps: []tektonv1.Step{
-					{
-						Name:  "attest",
-						Image: skopeoImage,
-						Script: `#!/bin/sh
-set -e
-# --format, not grep: the JSON also lists a digest per layer.
-digest=$(skopeo inspect \
-  --authfile /workspace/dockerconfig/config.json \
-  --format '{{.Digest}}' \
-  docker://$(params.IMAGE))
-if [ -z "$digest" ]; then
-  echo "ERROR: could not resolve digest for $(params.IMAGE)"
-  exit 1
-fi
-printf '%s' "$(params.IMAGE)" > $(results.IMAGE_URL.path)
-printf '%s' "${digest}" > $(results.IMAGE_DIGEST.path)
-echo "IMAGE_URL=$(params.IMAGE)"
-echo "IMAGE_DIGEST=${digest}"
-`,
-					},
-				},
-			},
-		},
-		Params: tektonv1.Params{
-			{Name: "IMAGE", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: imageRef}},
-		},
 	}
 }
 

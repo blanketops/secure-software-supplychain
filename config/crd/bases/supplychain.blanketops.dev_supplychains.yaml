@@ -134,8 +134,10 @@ spec:
                 properties:
                   attest:
                     default: true
-                    description: Attest enables provenance attestation via Tekton
-                      Chains
+                    description: |-
+                      Attest has no effect: Tekton Chains attests the provenance of every
+                      build, from the image the push task reports and from the run as a whole.
+                      It is kept so that existing SupplyChains stay valid.
                     type: boolean
                   buildpacks:
                     default: true

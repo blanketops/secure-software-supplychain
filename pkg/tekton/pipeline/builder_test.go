@@ -146,8 +146,8 @@ func TestVerifiesTheImageAgainstThePolicyLast(t *testing.T) {
 	if verify.Name != stepVerify {
 		t.Fatalf("last task = %q, want %q", verify.Name, stepVerify)
 	}
-	if len(verify.RunAfter) != 1 || verify.RunAfter[0] != stepAttest {
-		t.Errorf("verify runs after %v, want %q", verify.RunAfter, stepAttest)
+	if len(verify.RunAfter) != 1 || verify.RunAfter[0] != stepSign {
+		t.Errorf("verify runs after %v, want %q", verify.RunAfter, stepSign)
 	}
 
 	if got, want := param(t, verify.Params, "DIGEST"), "$(tasks."+stepPushImage+".results.IMAGE_DIGEST)"; got != want {
@@ -460,6 +460,25 @@ func TestNoSBOMWithoutTheScan(t *testing.T) {
 		for _, step := range findTask(t, pr, name).TaskSpec.Steps {
 			if strings.Contains(step.Name, "sbom") {
 				t.Errorf("%s has step %s without a scan", name, step.Name)
+			}
+		}
+	}
+}
+
+// Tekton Chains signs every TaskRun that reports an image, and the run as a
+// whole. Only the push reports one, so each build gets one Chains signature,
+// one TaskRun provenance and the run's provenance; a second task reporting
+// the same image only published a duplicate of each.
+func TestOnlyThePushReportsTheImage(t *testing.T) {
+	pr := testPipelineRunWith(t, signing.Identity{}, supplyv1alpha1.StepsSpec{Sign: true, Attest: true, Trivy: true})
+	for _, task := range pr.Spec.PipelineSpec.Tasks {
+		if task.TaskSpec == nil {
+			continue
+		}
+		for _, result := range task.TaskSpec.Results {
+			if (result.Name == "IMAGE_URL" || result.Name == "IMAGE_DIGEST") && task.Name != stepPushImage {
+				t.Errorf("task %s reports %s; only %s may, or Chains signs and attests the image twice",
+					task.Name, result.Name, stepPushImage)
 			}
 		}
 	}
