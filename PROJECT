@@ -16,7 +16,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: SupplyChain
-  path: ithub.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1
+  path: ithub.com/blanketops/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -25,7 +25,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageBuild
-  path: ithub.com/ntlaletsi70/secure-software-supply-chain/api/v1alpha1
+  path: ithub.com/blanketops/secure-software-supply-chain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -34,7 +34,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: RepositorySource
-  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supplychain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -43,7 +43,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageSignature
-  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supplychain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -51,7 +51,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: ImageBuildResult
-  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supplychain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -60,7 +60,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: GitHubWebhook
-  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supplychain/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -69,6 +69,7 @@ resources:
   domain: blanketops.dev
   group: supplychain
   kind: SupplyChainPolicy
-  path: github.com/blanketops/secure-software-supply-chain/api/v1alpha1
+  path: github.com/blanketops/secure-software-supplychain/api/v1alpha1
   version: v1alpha1
 version: "3"
+
