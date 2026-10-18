@@ -94,7 +94,24 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
-      volumes: []
+        # immudb, where each build's evidence is stored: IMMUDB_ADDR, _PORT,
+        # _USER, _PASSWORD and _DB come from the Secret "immudb". Without it
+        # the controller cannot store evidence, and every finished build says
+        # so in its ImageBuildResult (status.evidence.ledgerMessage).
+        envFrom:
+        - secretRef:
+            name: immudb
+            optional: true
+        env:
+        - name: IMMUDB_STATE_DIR
+          value: /var/lib/immudb-client
+        volumeMounts:
+        - name: immudb-client-state
+          mountPath: /var/lib/immudb-client
+      volumes:
+      # The immudb client's verified state: what it has proven about the
+      # database so far. It starts over when the pod is replaced.
+      - name: immudb-client-state
+        emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

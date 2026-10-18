@@ -17,6 +17,8 @@ package results
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -26,19 +28,23 @@ import (
 
 	supplyv1alpha1 "github.com/blanketops/secure-software-supplychain/api/v1alpha1"
 	"github.com/blanketops/secure-software-supplychain/pkg/evidence"
+	"github.com/blanketops/secure-software-supplychain/pkg/immudb"
 )
 
 // phaseSucceeded is the ImageBuild phase for a run that finished successfully.
 const phaseSucceeded = "Succeeded"
 
-// Recorder extracts PipelineRun results and writes them to an ImageBuildResult CR.
+// Recorder extracts PipelineRun results and writes them to an ImageBuildResult
+// CR, and stores each build's evidence in immudb.
 type Recorder struct {
 	Client client.Client
 	Log    logr.Logger
+	// OpenLedger opens the immudb store the evidence is written to.
+	OpenLedger func() (immudb.Store, error)
 }
 
 func New(c client.Client, log logr.Logger) *Recorder {
-	return &Recorder{Client: c, Log: log}
+	return &Recorder{Client: c, Log: log, OpenLedger: immudb.Open}
 }
 
 // Record extracts all results from a completed PipelineRun and creates or
@@ -185,7 +191,83 @@ func (r *Recorder) collectEvidence(
 	if collected.Message != "" {
 		r.Log.Info("Collected evidence with gaps", "imageBuild", ib.Name, "message", collected.Message)
 	}
+	if have != nil {
+		// Where the evidence is stored is not something the registry says.
+		collected.Ledger, collected.LedgerMessage = have.Ledger, have.LedgerMessage
+	}
 	return collected
+}
+
+// StoreEvidence writes the evidence recorded for the build of ib to immudb,
+// all of it in one transaction, and records that transaction on the
+// ImageBuildResult. Call it once the record is final: a build's evidence is
+// written once.
+//
+// It does nothing for a build that did not succeed, has no evidence, or whose
+// evidence is already stored. A failure is recorded on the ImageBuildResult
+// and returned, so the build is reconciled again.
+func (r *Recorder) StoreEvidence(ctx context.Context, ib *supplyv1alpha1.ImageBuild) error {
+	var result supplyv1alpha1.ImageBuildResult
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(ib), &result); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	ev := result.Status.Evidence
+	if result.Status.Phase != phaseSucceeded || ev == nil || ev.Ledger != nil || len(ev.Signatures) == 0 {
+		return nil
+	}
+
+	ledger, err := r.storeEvidence(result.Status.ImageDigest, ev.Signatures)
+	if err != nil {
+		err = fmt.Errorf("storing the evidence of %s in immudb: %w", result.Status.ImageDigest, err)
+		ev.LedgerMessage = err.Error()
+		if updateErr := r.Client.Status().Update(ctx, &result); updateErr != nil {
+			return errors.Join(err, fmt.Errorf("updating ImageBuildResult status: %w", updateErr))
+		}
+		return err
+	}
+	ev.Ledger, ev.LedgerMessage = ledger, ""
+	if err := r.Client.Status().Update(ctx, &result); err != nil {
+		return fmt.Errorf("recording the immudb transaction of the evidence: %w", err)
+	}
+	r.Log.Info("Evidence stored in immudb", "imageBuild", ib.Name, "digest", result.Status.ImageDigest,
+		"database", ledger.Database, "tx", ledger.Tx, "records", ledger.Records)
+	return nil
+}
+
+func (r *Recorder) storeEvidence(
+	digest string,
+	records []supplyv1alpha1.SignatureRecord,
+) (*supplyv1alpha1.EvidenceLedger, error) {
+	if r.OpenLedger == nil {
+		return nil, errors.New("no immudb evidence store is configured")
+	}
+	s, err := r.OpenLedger()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+
+	tx, root, err := evidence.PutBuildEvidence(s, digest, records)
+	n := len(records)
+	if errors.Is(err, immudb.ErrDuplicate) {
+		// Stored by an earlier reconcile whose status update was lost, or by
+		// another build of the same image: what is stored is the record.
+		stored, readErr := evidence.ReadBuildEvidence(s, digest)
+		if readErr != nil {
+			return nil, fmt.Errorf("already stored, but it does not read back: %w", readErr)
+		}
+		tx, root, n, err = stored.Tx, stored.Root, len(stored.Records), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &supplyv1alpha1.EvidenceLedger{
+		Database: s.Database(),
+		Tx:       int64(tx),
+		Root:     hex.EncodeToString(root),
+		Records:  int32(n),
+		StoredAt: metav1.Now(),
+	}, nil
 }
 
 // ExtractAllResults pulls the full set of results from all 9 pipeline steps.

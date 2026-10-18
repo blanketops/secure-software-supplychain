@@ -182,7 +182,13 @@ func (r *ImageBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{RequeueAfter: evidenceRetry}, nil
 		}
 
-		// 4c. The record is final: publish it to Tekton.
+		// 4c. The record is final: store the evidence in immudb, then publish
+		// the record to Tekton. A build whose evidence is not stored is
+		// reconciled again, and not published.
+		if err := r.Recorder.StoreEvidence(ctx, &ib); err != nil {
+			logger.Error(err, "Failed to store the build's evidence in immudb")
+			return ctrl.Result{}, err
+		}
 		if err := r.publishResult(ctx, &ib, pr.Name); err != nil {
 			logger.Error(err, "Failed to publish ImageBuildResult to Tekton")
 		}
@@ -510,7 +516,7 @@ func (r *ImageBuildReconciler) completeEvidence(
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if result.Status.Evidence != nil && result.Status.Evidence.Complete {
-		return ctrl.Result{}, r.publishResult(ctx, ib, ib.Status.PipelineRunRef)
+		return ctrl.Result{}, r.finalize(ctx, ib, ib.Status.PipelineRunRef)
 	}
 
 	var pr tektonv1.PipelineRun
@@ -529,7 +535,21 @@ func (r *ImageBuildReconciler) completeEvidence(
 		time.Since(pr.Status.CompletionTime.Time) < evidenceWait {
 		return ctrl.Result{RequeueAfter: evidenceRetry}, nil
 	}
-	return ctrl.Result{}, r.publishResult(ctx, ib, pr.Name)
+	return ctrl.Result{}, r.finalize(ctx, ib, pr.Name)
+}
+
+// finalize stores the final evidence of a build in immudb and then publishes
+// its ImageBuildResult to Tekton. An error leaves the build unpublished, to be
+// reconciled again.
+func (r *ImageBuildReconciler) finalize(
+	ctx context.Context,
+	ib *supplychainv1alpha1.ImageBuild,
+	pipelineRun string,
+) error {
+	if err := r.Recorder.StoreEvidence(ctx, ib); err != nil {
+		return err
+	}
+	return r.publishResult(ctx, ib, pipelineRun)
 }
 
 // recordSignature completes the ImageSignature of a build from the evidence

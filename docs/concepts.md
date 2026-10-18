@@ -237,6 +237,8 @@ $ kubectl get imagebuildresult your-app-1 -o jsonpath='{.status.evidence}' | jq
 | `trustAnchors` | Fingerprints of the Fulcio root, the Rekor key and the CT log key in use |
 | `provenanceLogEntry` | Where Chains logged the provenance of the whole run |
 | `complete` | True once Chains has finished with the run and nothing more will be added |
+| `ledger` | Where the evidence is stored in immudb: the `database`, the transaction `tx` that holds every record of the build, its `root` hash, the number of `records`, and `storedAt` |
+| `ledgerMessage` | Why the evidence is not in immudb yet, if it is not |
 
 The same record is published to Tekton as a `CustomRun` named `<pipelinerun>-result`, whose results are a summary
 of it, so a build's outcome and evidence can be read in Tekton next to the run that produced them

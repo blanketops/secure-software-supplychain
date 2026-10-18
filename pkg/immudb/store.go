@@ -58,6 +58,8 @@ type Store interface {
 	// Verify reports whether transaction tx wrote value under key and its
 	// root is root.
 	Verify(key string, root []byte, tx uint64, value string) (ok bool, err error)
+	// Database is the immudb database the store reads and writes.
+	Database() string
 	Close() error
 }
 
@@ -68,8 +70,11 @@ type Entry struct {
 }
 
 type immudbStore struct {
-	c immudbclient.ImmuClient
+	c        immudbclient.ImmuClient
+	database string
 }
+
+func (s *immudbStore) Database() string { return s.database }
 
 // Open connects to the immudb server configured by IMMUDB_ADDR, IMMUDB_PORT,
 // IMMUDB_USER, IMMUDB_PASSWORD and IMMUDB_DB (defaults: the immudb container's
@@ -107,7 +112,7 @@ func New(addr string, port int, user, password, database string) (Store, error) 
 	if err := c.OpenSession(context.Background(), []byte(user), []byte(password), database); err != nil {
 		return nil, fmt.Errorf("%w at %s:%d (user %s, database %s): %w", ErrConnect, addr, port, user, database, err)
 	}
-	return &immudbStore{c: c}, nil
+	return &immudbStore{c: c, database: database}, nil
 }
 
 func (s *immudbStore) Put(key, value string) (uint64, []byte, error) {

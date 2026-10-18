@@ -190,6 +190,34 @@ type BuildEvidence struct {
 	// collectedAt is when the registry and the log were last read.
 	// +optional
 	CollectedAt *metav1.Time `json:"collectedAt,omitempty"`
+
+	// ledger is where this evidence is stored in immudb: every record of the
+	// build, written once, in a single transaction.
+	// +optional
+	Ledger *EvidenceLedger `json:"ledger,omitempty"`
+
+	// ledgerMessage says why the evidence is not stored in immudb yet.
+	// +optional
+	LedgerMessage string `json:"ledgerMessage,omitempty"`
+}
+
+// EvidenceLedger locates the evidence of a build in immudb.
+type EvidenceLedger struct {
+	// database is the immudb database the evidence is stored in.
+	Database string `json:"database"`
+
+	// tx is the immudb transaction that wrote the evidence.
+	Tx int64 `json:"tx"`
+
+	// root is the accumulated hash of that transaction, hex encoded. It
+	// commits to the evidence and to everything stored before it.
+	Root string `json:"root"`
+
+	// records is how many evidence records the transaction holds.
+	Records int32 `json:"records"`
+
+	// storedAt is when the controller wrote, or found, the transaction.
+	StoredAt metav1.Time `json:"storedAt"`
 }
 
 // ImageBuildResultSpec defines the desired state of ImageBuildResult.

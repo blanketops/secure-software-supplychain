@@ -376,6 +376,27 @@ mage install deploy
 `config/manager/manager.yaml` sets `imagePullPolicy: Never`, which is what a loaded image needs; change it to
 `IfNotPresent` when the image comes from a registry.
 
+### Where the evidence is stored: immudb
+
+When a build is over, the operator writes its evidence (every signature and attestation record) to
+[immudb](https://immudb.io), all of it in one transaction, and only then publishes the build's result. It reads
+the server and the login from the Secret `immudb` in the operator's namespace:
+
+```bash
+kubectl -n secure-software-supply-chain-system create secret generic immudb \
+  --from-literal=IMMUDB_ADDR=<host> --from-literal=IMMUDB_PORT=3322 \
+  --from-literal=IMMUDB_USER=<user> --from-literal=IMMUDB_PASSWORD=<password> \
+  --from-literal=IMMUDB_DB=securesoftwaresupplychain
+```
+
+On a kind cluster, an immudb running in Docker on the same machine is reached at the gateway of the `kind`
+network (`docker network inspect kind`, usually `172.18.0.1`), on the port it publishes. Without the Secret, or
+when immudb cannot be reached, nothing falls back: the build's result is not published,
+`status.evidence.ledgerMessage` of its `ImageBuildResult` says why, and the operator tries again.
+
+The unit tests of `pkg/immudb`, `pkg/evidence` and `pkg/tekton/results` need an immudb at `127.0.0.1:3322`
+(override with the same `IMMUDB_*` variables) and fail without one.
+
 ## 3. Store the credentials
 
 Builds need four credentials. They are kept in [HashiCorp Vault](https://www.vaultproject.io), which the

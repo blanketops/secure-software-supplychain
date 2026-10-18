@@ -231,6 +231,45 @@ spec:
                     description: fulcioURL is the certificate authority that issued
                       the certificates.
                     type: string
+                  ledger:
+                    description: |-
+                      ledger is where this evidence is stored in immudb: every record of the
+                      build, written once, in a single transaction.
+                    properties:
+                      database:
+                        description: database is the immudb database the evidence
+                          is stored in.
+                        type: string
+                      records:
+                        description: records is how many evidence records the transaction
+                          holds.
+                        format: int32
+                        type: integer
+                      root:
+                        description: |-
+                          root is the accumulated hash of that transaction, hex encoded. It
+                          commits to the evidence and to everything stored before it.
+                        type: string
+                      storedAt:
+                        description: storedAt is when the controller wrote, or found,
+                          the transaction.
+                        format: date-time
+                        type: string
+                      tx:
+                        description: tx is the immudb transaction that wrote the evidence.
+                        format: int64
+                        type: integer
+                    required:
+                    - database
+                    - records
+                    - root
+                    - storedAt
+                    - tx
+                    type: object
+                  ledgerMessage:
+                    description: ledgerMessage says why the evidence is not stored
+                      in immudb yet.
+                    type: string
                   message:
                     description: message says what could not be collected, if anything.
                     type: string
