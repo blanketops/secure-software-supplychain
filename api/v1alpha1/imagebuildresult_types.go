@@ -150,6 +150,31 @@ type SignatureRecord struct {
 	IntegratedAt *metav1.Time `json:"integratedAt,omitempty"`
 }
 
+// RunLogEntry is the transparency log entry Tekton Chains made when it signed
+// one of the build's runs. Chains signs every TaskRun and the PipelineRun;
+// only what is about the image is attached to it in the registry, so most of
+// these entries are found only in the log.
+type RunLogEntry struct {
+	// run is the pipeline task of the TaskRun Chains signed, or PipelineRun
+	// for the run as a whole.
+	Run string `json:"run"`
+
+	// rekorLogIndex is the index of the entry in the transparency log.
+	RekorLogIndex int64 `json:"rekorLogIndex"`
+
+	// rekorUUID identifies the entry in the log.
+	// +optional
+	RekorUUID string `json:"rekorUUID,omitempty"`
+
+	// rekorLogID identifies the log, by the SHA-256 of its public key.
+	// +optional
+	RekorLogID string `json:"rekorLogID,omitempty"`
+
+	// integratedAt is when the log accepted the entry.
+	// +optional
+	IntegratedAt *metav1.Time `json:"integratedAt,omitempty"`
+}
+
 // BuildEvidence is everything that vouches for the built image: who signed
 // and attested it, with which keys, where that is logged, and which trust
 // anchors those claims are checked against.
@@ -177,6 +202,12 @@ type BuildEvidence struct {
 	// whole run.
 	// +optional
 	ProvenanceLogEntry string `json:"provenanceLogEntry,omitempty"`
+
+	// runLogEntries are the transparency log entries Tekton Chains made for
+	// the run and each of its TaskRuns, in log order.
+	// +optional
+	// +listType=atomic
+	RunLogEntries []RunLogEntry `json:"runLogEntries,omitempty"`
 
 	// complete is true once Tekton Chains has finished with the run, so
 	// nothing more will be added to the image.

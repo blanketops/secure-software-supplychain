@@ -20,7 +20,7 @@ an error when the server cannot be reached or rejects the login.
 | `CreateDatabase(name)` | Creates a database if it does not exist, on the server the `IMMUDB_*` variables name |
 | `Put`, `PutAll`, `Get`, `Verify` | Key-value writes and verified reads; `PutAll` writes every key in one transaction, each under `KeyMustNotExist` |
 
-The evidence itself (tables `builds`, `signatures`, `provenances`, `sboms`, `attestations`) is defined in `pkg/evidence/immudb.go`, and
+The evidence itself (tables `builds`, `signatures`, `provenances`, `sboms`, `attestations`, `rekor_entries`) is defined in `pkg/evidence/immudb.go`, and
 described in [installation](../../docs/installation.md#where-the-evidence-is-stored-immudb).
 
 ## Tests

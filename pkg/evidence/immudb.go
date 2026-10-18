@@ -92,9 +92,50 @@ var schema = []string{
 	git_commit VARCHAR,
 	records INTEGER NOT NULL,
 	stored_at TIMESTAMP,
+	provenance_log_index INTEGER,
+	log_entries INTEGER,
 	PRIMARY KEY (digest))`,
 	`CREATE TABLE IF NOT EXISTS ` + TableSignatures + ` (` + recordColumns + `
 	PRIMARY KEY (digest, n))`,
+	`CREATE TABLE IF NOT EXISTS ` + TableRekorEntries + ` (
+	digest VARCHAR[128] NOT NULL,
+	run VARCHAR[128] NOT NULL,
+	rekor_log_index INTEGER NOT NULL,
+	rekor_uuid VARCHAR,
+	rekor_log_id VARCHAR,
+	integrated_at TIMESTAMP,
+	PRIMARY KEY (digest, run))`,
+}
+
+// TableRekorEntries holds the transparency log entries Tekton Chains made
+// when it signed a build's PipelineRun and each of its TaskRuns, keyed by
+// (digest, run): most of them are not attached to the image, so they are
+// found only here and in the log.
+const TableRekorEntries = "rekor_entries"
+
+// column is a column a table made by an earlier version lacks.
+type column struct{ name, sqlType string }
+
+// buildsAddedColumns are the columns of builds added after it was first
+// made; a builds table that lacks them gets them.
+var buildsAddedColumns = []column{{"provenance_log_index", "INTEGER"}, {"log_entries", "INTEGER"}}
+
+// addMissingColumns adds to table the columns it does not have. Rows written
+// before read NULL in them.
+func addMissingColumns(s immudb.Store, table string, columns []column) error {
+	have, err := s.Columns(table)
+	if err != nil {
+		return err
+	}
+	for _, c := range columns {
+		if slices.Contains(have, c.name) {
+			continue
+		}
+		if _, _, err := s.ExecAll(immudb.Statement{SQL: "ALTER TABLE " + table + " ADD COLUMN " + c.name + " " + c.sqlType}); err != nil {
+			return fmt.Errorf("evidence: adding %s to %s: %w", c.name, table, err)
+		}
+	}
+	return nil
 }
 
 func init() {
@@ -135,13 +176,18 @@ type Build struct {
 type StoredBuildEvidence struct {
 	Build   Build
 	Records []supplychainv1alpha1.SignatureRecord
+	// LogEntries are the transparency log entries of the build's runs, in
+	// log order, and ProvenanceLogIndex the PipelineRun's among them.
+	LogEntries         []supplychainv1alpha1.RunLogEntry
+	ProvenanceLogIndex *int64
 	// Tx is the immudb transaction that wrote the build's evidence and Root
 	// that transaction's root.
 	Tx   uint64
 	Root []byte
 }
 
-// EnsureSchema creates the evidence tables that do not exist yet.
+// EnsureSchema creates the evidence tables that do not exist yet, and adds
+// to a builds table made by an earlier version the columns it lacks.
 func EnsureSchema(s immudb.Store) error {
 	stmts := make([]immudb.Statement, len(schema))
 	for i, sql := range schema {
@@ -150,26 +196,36 @@ func EnsureSchema(s immudb.Store) error {
 	if _, _, err := s.ExecAll(stmts...); err != nil {
 		return fmt.Errorf("evidence: creating the evidence tables: %w", err)
 	}
-	return nil
+	return addMissingColumns(s, TableBuilds, buildsAddedColumns)
 }
 
-// PutBuildEvidence writes the build's row and one row per evidence record
-// (its signatures and attestations) to immudb in a single transaction.
-// A build is written once: if its evidence is already stored, nothing is
-// written and the error is immudb.ErrDuplicate.
-func PutBuildEvidence(s immudb.Store, b Build, records []supplychainv1alpha1.SignatureRecord) (tx uint64, root []byte, err error) {
+// PutBuildEvidence writes the build's row, one row per evidence record (its
+// signatures and attestations) and one row per transparency log entry of its
+// runs to immudb in a single transaction. A build is written once: if its
+// evidence is already stored, nothing is written and the error is
+// immudb.ErrDuplicate.
+func PutBuildEvidence(s immudb.Store, b Build, records []supplychainv1alpha1.SignatureRecord, entries []supplychainv1alpha1.RunLogEntry) (tx uint64, root []byte, err error) {
 	if b.Digest == "" {
 		return 0, nil, errors.New("evidence: no image digest")
 	}
 	if len(records) == 0 {
 		return 0, nil, fmt.Errorf("evidence: no records for %s", b.Digest)
 	}
+	var provenanceLogIndex any
+	for _, e := range entries {
+		if e.Run == PipelineRunEntry {
+			provenanceLogIndex = e.RekorLogIndex
+		}
+	}
 	stmts := []immudb.Statement{{
-		SQL: `INSERT INTO ` + TableBuilds + ` (digest, image, image_build, git_commit, records, stored_at)
-			VALUES (@digest, @image, @image_build, @git_commit, @records, @stored_at)`,
+		SQL: `INSERT INTO ` + TableBuilds + ` (digest, image, image_build, git_commit, records, stored_at,
+				provenance_log_index, log_entries)
+			VALUES (@digest, @image, @image_build, @git_commit, @records, @stored_at,
+				@provenance_log_index, @log_entries)`,
 		Params: map[string]any{
 			"digest": b.Digest, "image": orNull(b.Image), "image_build": orNull(b.ImageBuild),
 			"git_commit": orNull(b.Commit), "records": len(records), "stored_at": time.Now().UTC(),
+			"provenance_log_index": provenanceLogIndex, "log_entries": len(entries),
 		},
 	}}
 	for n, r := range records {
@@ -178,6 +234,17 @@ func PutBuildEvidence(s immudb.Store, b Build, records []supplychainv1alpha1.Sig
 			return 0, nil, err
 		}
 		stmts = append(stmts, stmt)
+	}
+	for _, e := range entries {
+		stmts = append(stmts, immudb.Statement{
+			SQL: `INSERT INTO ` + TableRekorEntries + ` (digest, run, rekor_log_index, rekor_uuid, rekor_log_id, integrated_at)
+				VALUES (@digest, @run, @rekor_log_index, @rekor_uuid, @rekor_log_id, @integrated_at)`,
+			Params: map[string]any{
+				"digest": b.Digest, "run": e.Run, "rekor_log_index": e.RekorLogIndex,
+				"rekor_uuid": orNull(e.RekorUUID), "rekor_log_id": orNull(e.RekorLogID),
+				"integrated_at": timeOrNull(e.IntegratedAt),
+			},
+		})
 	}
 	if err := EnsureSchema(s); err != nil {
 		return 0, nil, err
@@ -228,7 +295,7 @@ func ReadBuildEvidence(s immudb.Store, digest string) (*StoredBuildEvidence, err
 	}
 	params := map[string]any{"digest": digest}
 	builds, err := s.QueryVerified(TableBuilds, []string{"digest"},
-		`SELECT digest, image, image_build, git_commit, records FROM `+TableBuilds+` WHERE digest = @digest`, params)
+		`SELECT digest, image, image_build, git_commit, records, provenance_log_index, log_entries FROM `+TableBuilds+` WHERE digest = @digest`, params)
 	if err != nil {
 		return nil, fmt.Errorf("evidence: reading the build %s: %w", digest, err)
 	}
@@ -284,6 +351,33 @@ func ReadBuildEvidence(s immudb.Store, digest string) (*StoredBuildEvidence, err
 		}
 		out.Records = append(out.Records, byPosition[n])
 	}
+
+	if i, ok := row.Values["provenance_log_index"].(int64); ok {
+		out.ProvenanceLogIndex = &i
+	}
+	// NULL in a row written before log entries were stored: there are none.
+	wantEntries, _ := row.Values["log_entries"].(int64)
+	entries, err := s.QueryVerified(TableRekorEntries, []string{"digest", "run"},
+		`SELECT digest, run, rekor_log_index, rekor_uuid, rekor_log_id, integrated_at FROM `+TableRekorEntries+
+			` WHERE digest = @digest`, params)
+	if err != nil {
+		return nil, fmt.Errorf("evidence: reading the %s of %s: %w", TableRekorEntries, digest, err)
+	}
+	for _, r := range entries {
+		if r.Tx != out.Tx {
+			return nil, fmt.Errorf("evidence: %s row %s of %s was written in tx %d, not in the build's tx %d",
+				TableRekorEntries, str(r.Values["run"]), digest, r.Tx, out.Tx)
+		}
+		index, _ := r.Values["rekor_log_index"].(int64)
+		out.LogEntries = append(out.LogEntries, supplychainv1alpha1.RunLogEntry{
+			Run: str(r.Values["run"]), RekorLogIndex: index, RekorUUID: str(r.Values["rekor_uuid"]),
+			RekorLogID: str(r.Values["rekor_log_id"]), IntegratedAt: metaTime(r.Values["integrated_at"]),
+		})
+	}
+	if int64(len(out.LogEntries)) != wantEntries {
+		return nil, fmt.Errorf("evidence: the build %s has %d log entries; its table holds %d", digest, wantEntries, len(out.LogEntries))
+	}
+	sort.Slice(out.LogEntries, func(i, j int) bool { return out.LogEntries[i].RekorLogIndex < out.LogEntries[j].RekorLogIndex })
 	return out, nil
 }
 

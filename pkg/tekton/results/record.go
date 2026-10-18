@@ -209,7 +209,7 @@ func (r *Recorder) StoreEvidence(ctx context.Context, ib *supplyv1alpha1.ImageBu
 		return nil
 	}
 
-	ledger, err := r.storeEvidence(buildOf(ib, &result), ev.Signatures)
+	ledger, err := r.storeEvidence(buildOf(ib, &result), ev.Signatures, ev.RunLogEntries)
 	if err != nil {
 		err = fmt.Errorf("storing the evidence of %s in immudb: %w", result.Status.ImageDigest, err)
 		ev.LedgerMessage = err.Error()
@@ -241,7 +241,7 @@ func buildOf(ib *supplyv1alpha1.ImageBuild, result *supplyv1alpha1.ImageBuildRes
 	return b
 }
 
-func (r *Recorder) storeEvidence(b evidence.Build, records []supplyv1alpha1.SignatureRecord) (*supplyv1alpha1.EvidenceLedger, error) {
+func (r *Recorder) storeEvidence(b evidence.Build, records []supplyv1alpha1.SignatureRecord, entries []supplyv1alpha1.RunLogEntry) (*supplyv1alpha1.EvidenceLedger, error) {
 	if r.OpenLedger == nil {
 		return nil, errors.New("no immudb evidence store is configured")
 	}
@@ -251,7 +251,7 @@ func (r *Recorder) storeEvidence(b evidence.Build, records []supplyv1alpha1.Sign
 	}
 	defer func() { _ = s.Close() }()
 
-	tx, root, err := evidence.PutBuildEvidence(s, b, records)
+	tx, root, err := evidence.PutBuildEvidence(s, b, records, entries)
 	n := len(records)
 	if errors.Is(err, immudb.ErrDuplicate) {
 		// Stored by an earlier reconcile whose status update was lost, or by

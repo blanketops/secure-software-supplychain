@@ -67,6 +67,8 @@ type Store interface {
 	// Root returns the root of transaction tx, verified against the
 	// client's trusted state.
 	Root(tx uint64) ([]byte, error)
+	// Columns returns the columns of table, in order.
+	Columns(table string) ([]string, error)
 	// Database is the immudb database the store reads and writes.
 	Database() string
 	Close() error
@@ -219,9 +221,7 @@ func (s *immudbStore) Root(tx uint64) ([]byte, error) {
 // to create databases. A name is lowercase letters, digits and underscores,
 // as immudb requires.
 func CreateDatabase(name string) error {
-	if name == "" || strings.TrimFunc(name, func(r rune) bool {
-		return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
-	}) != "" {
+	if !isIdentifier(name) {
 		return fmt.Errorf("immudb: %q is not a database name: use lowercase letters, digits and underscores", name)
 	}
 	s, err := New(
@@ -239,6 +239,15 @@ func CreateDatabase(name string) error {
 		return fmt.Errorf("immudb: create database %s: %w", name, err)
 	}
 	return nil
+}
+
+// isIdentifier reports whether name is a database or table name immudb
+// accepts and that is safe to place in SQL text: lowercase letters, digits
+// and underscores.
+func isIdentifier(name string) bool {
+	return name != "" && strings.TrimFunc(name, func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_'
+	}) == ""
 }
 
 // root returns the accumulated linear hash of transaction tx, read with a

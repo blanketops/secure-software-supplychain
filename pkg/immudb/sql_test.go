@@ -18,6 +18,7 @@ package immudb
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,6 +115,24 @@ func TestRootOfTransaction(t *testing.T) {
 	got, err := s.Root(tx)
 	if err != nil || string(got) != string(root) {
 		t.Fatalf("Root(%d) = %x, %v; want %x", tx, got, err, root)
+	}
+}
+
+// TestColumns: a table's columns, in order; an unknown table is an error.
+func TestColumns(t *testing.T) {
+	s := sqlTestStore(t)
+	got, err := s.Columns(sqlTestTable)
+	if err != nil {
+		t.Fatalf("Columns: %v", err)
+	}
+	if strings.Join(got, ",") != "id,n,s,at,ok" {
+		t.Fatalf("Columns(%s) = %v; want id,n,s,at,ok", sqlTestTable, got)
+	}
+	if _, err := s.Columns("no_such_table"); err == nil {
+		t.Fatal("Columns of a table that does not exist = nil error")
+	}
+	if _, err := s.Columns("x') OR ('1"); err == nil {
+		t.Fatal("Columns of a name that is not an identifier = nil error")
 	}
 }
 

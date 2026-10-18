@@ -394,15 +394,17 @@ network (`docker network inspect kind`, usually `172.18.0.1`), on the port it pu
 when immudb cannot be reached, nothing falls back: the build's result is not published,
 `status.evidence.ledgerMessage` of its `ImageBuildResult` says why, and the operator tries again.
 
-The evidence is stored in five SQL tables of that database, which the operator creates on its first write:
+The evidence is stored in six SQL tables of that database, which the operator creates on its first write (and to
+which it adds columns a newer version needs):
 
 | Table | One row per | Primary key |
 |---|---|---|
-| `builds` | Built image: its `digest`, `image`, `image_build` (namespace/name), `git_commit`, the number of `records`, and `stored_at` | `digest` |
+| `builds` | Built image: its `digest`, `image`, `image_build` (namespace/name), `git_commit`, the number of `records` and of `log_entries`, the `provenance_log_index` of the run's provenance, and `stored_at` | `digest` |
 | `signatures` | Signature on the image: `signed_by` (`Build`, `Chains` or `Other`), the certificate `subject` and `issuer`, `key_fingerprint`, `certificate_fingerprint`, the PEM `certificate`, `not_before`, `not_after`, and its transparency log entry (`rekor_log_index`, `rekor_log_id`, `integrated_at`) | `digest`, `n` |
 | `provenances` | SLSA provenance attestation (`predicate_type` `https://slsa.dev/provenance/...`): the same columns as `signatures`, and `predicate_type` | `digest`, `n` |
 | `sboms` | SBOM attestation (CycloneDX or SPDX): the same columns as `provenances` | `digest`, `n` |
 | `attestations` | Any other attestation, such as the build's authorization proofs: the same columns as `provenances` | `digest`, `n` |
+| `rekor_entries` | Transparency log entry Tekton Chains made when it signed one of the build's runs: the `run` (the TaskRun's pipeline task, or `PipelineRun`), `rekor_log_index`, `rekor_uuid`, `rekor_log_id`, `integrated_at`. Chains signs every TaskRun, but only what is about the image is attached to it in the registry; the rest is found here and in Rekor | `digest`, `run` |
 
 A build's row and all of its record rows are written in one transaction, the one `status.evidence.ledger.tx`
 names; `n` is the record's position in `status.evidence.signatures`. A record of more than 64 KB fails the write

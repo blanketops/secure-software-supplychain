@@ -105,6 +105,13 @@ func ForBuild(ctx context.Context, c client.Reader, sc *supplyv1alpha1.SupplyCha
 		problems = append(problems, err.Error())
 	}
 	result.Signatures = records
+	// Chains also signs every TaskRun and the run itself; what is not about
+	// the image is only in the log, found from Chains' annotations.
+	entries, err := RunLogEntries(ctx, c, run, &rekor{base: endpoints.RekorURL, http: HTTPClient(roots.Data[signing.RootsCAKey])})
+	if err != nil {
+		problems = append(problems, fmt.Sprintf("run log entries: %v", err))
+	}
+	result.RunLogEntries = entries
 	result.Message = strings.Join(problems, "; ")
 	return result
 }

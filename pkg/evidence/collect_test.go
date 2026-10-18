@@ -134,6 +134,15 @@ func (f *fakeRekor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			found = append(found, map[string]any{uuid: f.byUUID[uuid]})
 		}
 		_ = json.NewEncoder(w).Encode(found)
+	case "/api/v1/log/entries":
+		// GET ?logIndex=N answers {uuid: entry}, as Rekor does.
+		for uuid, entry := range f.byUUID {
+			if fmt.Sprint(entry["logIndex"]) == r.URL.Query().Get("logIndex") {
+				_ = json.NewEncoder(w).Encode(map[string]any{uuid: entry})
+				return
+			}
+		}
+		http.NotFound(w, r)
 	default:
 		http.NotFound(w, r)
 	}

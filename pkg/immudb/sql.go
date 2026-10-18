@@ -132,6 +132,26 @@ func (s *immudbStore) QueryVerified(table string, pk []string, sql string, param
 	return rows, nil
 }
 
+// Columns returns the columns of table, in order. It reads the catalog, which
+// has no proofs; it tells what a table looks like, not what it holds.
+func (s *immudbStore) Columns(table string) ([]string, error) {
+	if !isIdentifier(table) {
+		return nil, fmt.Errorf("immudb: %q is not a table name", table)
+	}
+	res, err := s.c.SQLQuery(context.Background(), "SELECT name FROM COLUMNS('"+table+"')", nil, false)
+	if err != nil {
+		return nil, fmt.Errorf("immudb: columns of %s: %w", table, err)
+	}
+	names := make([]string, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		names = append(names, r.Values[0].GetS())
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("immudb: table %s has no columns", table)
+	}
+	return names, nil
+}
+
 // columnName reduces the server's "(table.column)" to "column".
 func columnName(selector string) string {
 	name := strings.TrimSuffix(strings.TrimPrefix(selector, "("), ")")

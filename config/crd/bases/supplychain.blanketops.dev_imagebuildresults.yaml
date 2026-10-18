@@ -282,6 +282,44 @@ spec:
                     description: rekorURL is the transparency log the entries are
                       in.
                     type: string
+                  runLogEntries:
+                    description: |-
+                      runLogEntries are the transparency log entries Tekton Chains made for
+                      the run and each of its TaskRuns, in log order.
+                    items:
+                      description: |-
+                        RunLogEntry is the transparency log entry Tekton Chains made when it signed
+                        one of the build's runs. Chains signs every TaskRun and the PipelineRun;
+                        only what is about the image is attached to it in the registry, so most of
+                        these entries are found only in the log.
+                      properties:
+                        integratedAt:
+                          description: integratedAt is when the log accepted the entry.
+                          format: date-time
+                          type: string
+                        rekorLogID:
+                          description: rekorLogID identifies the log, by the SHA-256
+                            of its public key.
+                          type: string
+                        rekorLogIndex:
+                          description: rekorLogIndex is the index of the entry in
+                            the transparency log.
+                          format: int64
+                          type: integer
+                        rekorUUID:
+                          description: rekorUUID identifies the entry in the log.
+                          type: string
+                        run:
+                          description: |-
+                            run is the pipeline task of the TaskRun Chains signed, or PipelineRun
+                            for the run as a whole.
+                          type: string
+                      required:
+                      - rekorLogIndex
+                      - run
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
                   signatures:
                     description: |-
                       signatures lists every signature and attestation on the image, in the

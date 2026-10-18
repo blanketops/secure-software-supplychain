@@ -242,6 +242,7 @@ $ kubectl get imagebuildresult your-app-1 -o jsonpath='{.status.evidence}' | jq
 | `signatures[]` | Every signature and attestation on the image: `kind`, `predicateType`, `signedBy` (`Build`, `Chains` or `Other`), the certificate `subject` and `issuer`, the `keyFingerprint` and `certificateFingerprint`, and its transparency log entry (`rekorLogIndex`, `rekorLogID`, `integratedAt`) |
 | `trustAnchors` | Fingerprints of the Fulcio root, the Rekor key and the CT log key in use |
 | `provenanceLogEntry` | Where Chains logged the provenance of the whole run |
+| `runLogEntries[]` | The transparency log entry Chains made for the run and for each TaskRun it signed: `run` (pipeline task or `PipelineRun`), `rekorLogIndex`, `rekorUUID`, `rekorLogID`, `integratedAt`. Most of these are not attached to the image, only logged |
 | `complete` | True once Chains has finished with the run and nothing more will be added |
 | `ledger` | Where the evidence is stored in immudb: the `database`, the transaction `tx` that holds every record of the build, its `root` hash, the number of `records`, and `storedAt` |
 | `ledgerMessage` | Why the evidence is not in immudb yet, if it is not |

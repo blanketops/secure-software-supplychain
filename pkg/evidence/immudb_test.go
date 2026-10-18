@@ -99,7 +99,7 @@ func TestBuildEvidenceIsOneTransaction(t *testing.T) {
 	s := openStore(t)
 	b, records := testBuild(t), buildRecords()
 
-	tx, root, err := PutBuildEvidence(s, b, records)
+	tx, root, err := PutBuildEvidence(s, b, records, runEntries())
 	if err != nil {
 		t.Fatalf("PutBuildEvidence: %v", err)
 	}
@@ -119,6 +119,94 @@ func TestBuildEvidenceIsOneTransaction(t *testing.T) {
 		t.Fatalf("build read back = %+v; want %+v", got.Build, b)
 	}
 	sameRecords(t, got.Records, records)
+	g, _ := json.Marshal(got.LogEntries)
+	w, _ := json.Marshal(runEntries())
+	if string(g) != string(w) {
+		t.Fatalf("run log entries read back differ:\n got %s\nwant %s", g, w)
+	}
+	if got.ProvenanceLogIndex == nil || *got.ProvenanceLogIndex != 53 {
+		t.Fatalf("provenance log index = %v; want the PipelineRun's entry, 53", got.ProvenanceLogIndex)
+	}
+}
+
+// runEntries are the transparency log entries Chains made for a build's run:
+// two TaskRuns and the PipelineRun.
+func runEntries() []supplychainv1alpha1.RunLogEntry {
+	at := ptr(metav1.NewTime(time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)))
+	return []supplychainv1alpha1.RunLogEntry{
+		{Run: "git-clone", RekorLogIndex: 41, RekorUUID: "uuid-41", RekorLogID: "sha256:rekor", IntegratedAt: at},
+		{Run: "vulnerability-scan-trivy", RekorLogIndex: 45, RekorUUID: "uuid-45", RekorLogID: "sha256:rekor", IntegratedAt: at},
+		{Run: PipelineRunEntry, RekorLogIndex: 53},
+	}
+}
+
+// TestRunLogEntriesTable: each entry is a row of rekor_entries, written in
+// the build's transaction, and the build's row points at the run's
+// provenance entry.
+func TestRunLogEntriesTable(t *testing.T) {
+	s := openStore(t)
+	b := testBuild(t)
+	tx, _, err := PutBuildEvidence(s, b, buildRecords(), runEntries())
+	if err != nil {
+		t.Fatalf("PutBuildEvidence: %v", err)
+	}
+	rows, err := s.QueryVerified(TableRekorEntries, []string{"digest", "run"},
+		"SELECT digest, run, rekor_log_index FROM "+TableRekorEntries+" WHERE digest = @digest", map[string]any{"digest": b.Digest})
+	if err != nil {
+		t.Fatalf("%s: %v", TableRekorEntries, err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("%s holds %d rows; want 3", TableRekorEntries, len(rows))
+	}
+	for _, r := range rows {
+		if r.Tx != tx {
+			t.Errorf("%s row %v in tx %d; want %d", TableRekorEntries, r.Values["run"], r.Tx, tx)
+		}
+	}
+	builds, err := s.QueryVerified(TableBuilds, []string{"digest"},
+		"SELECT digest, provenance_log_index, log_entries FROM "+TableBuilds+" WHERE digest = @digest", map[string]any{"digest": b.Digest})
+	if err != nil || len(builds) != 1 || builds[0].Values["provenance_log_index"] != int64(53) || builds[0].Values["log_entries"] != int64(3) {
+		t.Fatalf("builds row = %+v, %v; want provenance_log_index 53, log_entries 3", builds, err)
+	}
+}
+
+// TestReadBuildEvidenceRejectsMissingLogEntry: a build counting more log
+// entries than its table holds is incomplete.
+func TestReadBuildEvidenceRejectsMissingLogEntry(t *testing.T) {
+	s := openStore(t)
+	b := testBuild(t)
+	if err := EnsureSchema(s); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+	params := map[string]any{"digest": b.Digest, "image": b.Image}
+	if _, _, err := s.ExecAll(
+		immudb.Statement{SQL: "INSERT INTO " + TableBuilds + " (digest, image, records, log_entries) VALUES (@digest, @image, 1, 1)", Params: params},
+		immudb.Statement{SQL: "INSERT INTO " + TableSignatures + " (digest, n, signed_by) VALUES (@digest, 0, 'Build')", Params: params},
+	); err != nil {
+		t.Fatalf("inserting: %v", err)
+	}
+	if _, err := ReadBuildEvidence(s, b.Digest); err == nil {
+		t.Fatal("ReadBuildEvidence accepted a build missing its log entry")
+	}
+}
+
+// TestAddMissingColumns: a table made before a column existed gets it; one
+// that has it is left alone.
+func TestAddMissingColumns(t *testing.T) {
+	s := openStore(t)
+	const table = "migration_test"
+	if _, _, err := s.ExecAll(immudb.Statement{SQL: "CREATE TABLE IF NOT EXISTS " + table + " (id INTEGER, PRIMARY KEY id)"}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := addMissingColumns(s, table, []column{{"added", "INTEGER"}}); err != nil {
+			t.Fatalf("addMissingColumns: %v", err)
+		}
+	}
+	got, err := s.Columns(table)
+	if err != nil || strings.Join(got, ",") != "id,added" {
+		t.Fatalf("columns = %v, %v; want id,added", got, err)
+	}
 }
 
 // TestBuildEvidenceTables: each kind of record lands in its own table, one
@@ -127,7 +215,7 @@ func TestBuildEvidenceIsOneTransaction(t *testing.T) {
 func TestBuildEvidenceTables(t *testing.T) {
 	s := openStore(t)
 	b := testBuild(t)
-	tx, _, err := PutBuildEvidence(s, b, buildRecords())
+	tx, _, err := PutBuildEvidence(s, b, buildRecords(), runEntries())
 	if err != nil {
 		t.Fatalf("PutBuildEvidence: %v", err)
 	}
@@ -167,11 +255,11 @@ func TestBuildEvidenceTables(t *testing.T) {
 func TestBuildEvidenceWrittenOnce(t *testing.T) {
 	s := openStore(t)
 	b := testBuild(t)
-	tx, _, err := PutBuildEvidence(s, b, buildRecords())
+	tx, _, err := PutBuildEvidence(s, b, buildRecords(), nil)
 	if err != nil {
 		t.Fatalf("PutBuildEvidence: %v", err)
 	}
-	if _, _, err := PutBuildEvidence(s, b, buildRecords()[:1]); !errors.Is(err, immudb.ErrDuplicate) {
+	if _, _, err := PutBuildEvidence(s, b, buildRecords()[:1], nil); !errors.Is(err, immudb.ErrDuplicate) {
 		t.Fatalf("second PutBuildEvidence = %v; want ErrDuplicate", err)
 	}
 	got, err := ReadBuildEvidence(s, b.Digest)
@@ -238,7 +326,7 @@ func TestPutBuildEvidenceRecordTooLarge(t *testing.T) {
 	b := testBuild(t)
 	records := buildRecords()
 	records[2].Certificate = strings.Repeat("A", MaxRecordBytes)
-	if _, _, err := PutBuildEvidence(s, b, records); err == nil {
+	if _, _, err := PutBuildEvidence(s, b, records, nil); err == nil {
 		t.Fatalf("PutBuildEvidence with a record over %d bytes = nil error", MaxRecordBytes)
 	}
 	if _, err := ReadBuildEvidence(s, b.Digest); !errors.Is(err, immudb.ErrNotFound) {
@@ -248,13 +336,13 @@ func TestPutBuildEvidenceRecordTooLarge(t *testing.T) {
 
 func TestPutBuildEvidenceRejectsBadInput(t *testing.T) {
 	b := Build{Digest: "sha256:abc"}
-	if _, _, err := PutBuildEvidence(nil, Build{}, buildRecords()); err == nil {
+	if _, _, err := PutBuildEvidence(nil, Build{}, buildRecords(), nil); err == nil {
 		t.Error("PutBuildEvidence with no digest = nil error")
 	}
-	if _, _, err := PutBuildEvidence(nil, b, nil); err == nil {
+	if _, _, err := PutBuildEvidence(nil, b, nil, nil); err == nil {
 		t.Error("PutBuildEvidence with no records = nil error")
 	}
-	if _, _, err := PutBuildEvidence(nil, b, []supplychainv1alpha1.SignatureRecord{{Kind: "Sbom"}}); err == nil {
+	if _, _, err := PutBuildEvidence(nil, b, []supplychainv1alpha1.SignatureRecord{{Kind: "Sbom"}}, nil); err == nil {
 		t.Error("PutBuildEvidence with a record of unknown kind = nil error")
 	}
 }

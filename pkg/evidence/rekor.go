@@ -103,6 +103,46 @@ func (r *rekor) find(ctx context.Context, hash string) ([]logEntry, error) {
 	return entries, nil
 }
 
+// byIndex returns the entry at index in the log, and its UUID.
+func (r *rekor) byIndex(ctx context.Context, index int64) (string, logEntry, error) {
+	if r.base == "" {
+		return "", logEntry{}, fmt.Errorf("no Rekor URL configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/log/entries?logIndex=%d", r.base, index), nil)
+	if err != nil {
+		return "", logEntry{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := r.http.Do(req)
+	if err != nil {
+		return "", logEntry{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBlobSize))
+	if err != nil {
+		return "", logEntry{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", logEntry{}, fmt.Errorf("rekor log entry %d: HTTP %d: %.200s", index, resp.StatusCode, data)
+	}
+	var found map[string]struct {
+		IntegratedTime int64  `json:"integratedTime"`
+		LogID          string `json:"logID"`
+		LogIndex       int64  `json:"logIndex"`
+	}
+	if err := json.Unmarshal(data, &found); err != nil {
+		return "", logEntry{}, fmt.Errorf("rekor log entry %d: %w", index, err)
+	}
+	for uuid, e := range found {
+		if e.LogIndex != index {
+			return "", logEntry{}, fmt.Errorf("rekor answered entry %d for log index %d", e.LogIndex, index)
+		}
+		return uuid, logEntry{LogIndex: e.LogIndex, LogID: e.LogID, IntegratedTime: e.IntegratedTime}, nil
+	}
+	return "", logEntry{}, fmt.Errorf("rekor has no entry at log index %d", index)
+}
+
 func (r *rekor) post(ctx context.Context, path string, request, response any) error {
 	payload, err := json.Marshal(request)
 	if err != nil {
