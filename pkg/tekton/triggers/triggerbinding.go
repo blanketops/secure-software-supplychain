@@ -32,12 +32,7 @@ import (
 // EnsureTriggerBinding ensures the TriggerBinding exists for the given
 // SupplyChain. Extracts fields from the GitHub push payload and maps
 // them to parameters consumed by the TriggerTemplate.
-func EnsureTriggerBinding(
-	ctx context.Context,
-	c client.Client,
-	scheme *runtime.Scheme,
-	sc *supplyv1alpha1.SupplyChain,
-) error {
+func EnsureTriggerBinding(ctx context.Context, c client.Client, scheme *runtime.Scheme, sc *supplyv1alpha1.SupplyChain) error {
 	namespace, supplyChainName := sc.Namespace, sc.Name
 	name := fmt.Sprintf("secure-software-supplychain-github-binding-%s", supplyChainName)
 

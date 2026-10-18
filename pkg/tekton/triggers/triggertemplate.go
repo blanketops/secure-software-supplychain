@@ -38,12 +38,7 @@ import (
 //
 // Note: Kubernetes label values cannot contain '/' so repo-full-name
 // (e.g. "your-org/your-app") lives in annotations only.
-func EnsureTriggerTemplate(
-	ctx context.Context,
-	c client.Client,
-	scheme *runtime.Scheme,
-	sc *supplyv1alpha1.SupplyChain,
-) error {
+func EnsureTriggerTemplate(ctx context.Context, c client.Client, scheme *runtime.Scheme, sc *supplyv1alpha1.SupplyChain) error {
 	namespace, supplyChainName := sc.Namespace, sc.Name
 	name := fmt.Sprintf("secure-software-supplychain-imagebuild-template-%s", supplyChainName)
 

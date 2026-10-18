@@ -45,12 +45,7 @@ type Mediator struct {
 	GitHubTokenSecretReconciler *githubsecret.GitHubTokenSecretReconciler
 }
 
-func New(
-	c client.Client,
-	scheme *runtime.Scheme,
-	log logr.Logger,
-	recorder record.EventRecorder,
-) *Mediator {
+func New(c client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *Mediator {
 	return &Mediator{
 		Client:                      c,
 		Scheme:                      scheme,
@@ -65,10 +60,7 @@ func New(
 //
 // Gate 1: reconcile ExternalSecrets (idempotent create)
 // Gate 2: wait for ESO to materialise the Secrets
-func (m *Mediator) EnsurePrerequisites(
-	ctx context.Context,
-	ghw *supplyv1alpha1.GitHubWebhook,
-) (bool, error) {
+func (m *Mediator) EnsurePrerequisites(ctx context.Context, ghw *supplyv1alpha1.GitHubWebhook) (bool, error) {
 	log := m.Log.WithValues(
 		"githubwebhook", ghw.Name,
 		"namespace", ghw.Namespace,
@@ -107,19 +99,13 @@ func (m *Mediator) EnsurePrerequisites(
 
 // ResolveToken reads the GitHub API token from the materialised Secret.
 // Call this after EnsurePrerequisites returns true.
-func (m *Mediator) ResolveToken(
-	ctx context.Context,
-	ghw *supplyv1alpha1.GitHubWebhook,
-) (string, error) {
+func (m *Mediator) ResolveToken(ctx context.Context, ghw *supplyv1alpha1.GitHubWebhook) (string, error) {
 	return m.resolveSecretKey(ctx, ghw.Namespace, ghw.Spec.SecretRef.Name, "token")
 }
 
 // ResolveWebhookSecret reads the shared webhook signing secret.
 // Returns empty string if WebhookSecretRef is not set.
-func (m *Mediator) ResolveWebhookSecret(
-	ctx context.Context,
-	ghw *supplyv1alpha1.GitHubWebhook,
-) (string, error) {
+func (m *Mediator) ResolveWebhookSecret(ctx context.Context, ghw *supplyv1alpha1.GitHubWebhook) (string, error) {
 	if ghw.Spec.WebhookSecretRef == nil {
 		return "", nil
 	}
@@ -127,10 +113,7 @@ func (m *Mediator) ResolveWebhookSecret(
 }
 
 // resolveSecretKey fetches a single key from a Kubernetes Secret.
-func (m *Mediator) resolveSecretKey(
-	ctx context.Context,
-	namespace, name, key string,
-) (string, error) {
+func (m *Mediator) resolveSecretKey(ctx context.Context, namespace, name, key string) (string, error) {
 	var secret corev1.Secret
 	if err := m.Client.Get(ctx, client.ObjectKey{
 		Name:      name,
@@ -147,11 +130,7 @@ func (m *Mediator) resolveSecretKey(
 	return string(val), nil
 }
 
-func (m *Mediator) secretExists(
-	ctx context.Context,
-	name string,
-	namespace string,
-) bool {
+func (m *Mediator) secretExists(ctx context.Context, name string, namespace string) bool {
 	var s corev1.Secret
 	err := m.Client.Get(ctx, client.ObjectKey{
 		Name:      name,
@@ -160,11 +139,7 @@ func (m *Mediator) secretExists(
 	return err == nil
 }
 
-func (m *Mediator) recordWarning(
-	ghw *supplyv1alpha1.GitHubWebhook,
-	reason string,
-	err error,
-) {
+func (m *Mediator) recordWarning(ghw *supplyv1alpha1.GitHubWebhook, reason string, err error) {
 	if m.Recorder != nil {
 		m.Recorder.Event(
 			ghw,

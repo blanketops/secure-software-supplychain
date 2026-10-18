@@ -225,10 +225,7 @@ func (r *GitHubWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 // handleDeletion removes the webhook from GitHub then removes the finalizer.
-func (r *GitHubWebhookReconciler) handleDeletion(
-	ctx context.Context,
-	ghw *supplychainv1alpha1.GitHubWebhook,
-) (ctrl.Result, error) {
+func (r *GitHubWebhookReconciler) handleDeletion(ctx context.Context, ghw *supplychainv1alpha1.GitHubWebhook) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(ghw, githubWebhookFinalizer) {
@@ -261,11 +258,7 @@ func (r *GitHubWebhookReconciler) handleDeletion(
 }
 
 // markReady updates status to Ready with the registered webhook ID.
-func (r *GitHubWebhookReconciler) markReady(
-	ctx context.Context,
-	ghw *supplychainv1alpha1.GitHubWebhook,
-	webhookID int64,
-) (ctrl.Result, error) {
+func (r *GitHubWebhookReconciler) markReady(ctx context.Context, ghw *supplychainv1alpha1.GitHubWebhook, webhookID int64) (ctrl.Result, error) {
 	now := metav1.Now()
 	ghw.Status.Phase = conditionReady
 	ghw.Status.WebhookID = webhookID
@@ -290,12 +283,7 @@ func (r *GitHubWebhookReconciler) markReady(
 }
 
 // setPhase updates status phase and condition, optionally requeuing.
-func (r *GitHubWebhookReconciler) setPhase(
-	ctx context.Context,
-	ghw *supplychainv1alpha1.GitHubWebhook,
-	phase, reason, message string,
-	result *ctrl.Result,
-) (ctrl.Result, error) {
+func (r *GitHubWebhookReconciler) setPhase(ctx context.Context, ghw *supplychainv1alpha1.GitHubWebhook, phase, reason, message string, result *ctrl.Result) (ctrl.Result, error) {
 	if err := r.setPhaseOnly(ctx, ghw, phase, reason, message); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -306,11 +294,7 @@ func (r *GitHubWebhookReconciler) setPhase(
 }
 
 // setPhaseOnly updates phase and condition without returning a result.
-func (r *GitHubWebhookReconciler) setPhaseOnly(
-	ctx context.Context,
-	ghw *supplychainv1alpha1.GitHubWebhook,
-	phase, reason, message string,
-) error {
+func (r *GitHubWebhookReconciler) setPhaseOnly(ctx context.Context, ghw *supplychainv1alpha1.GitHubWebhook, phase, reason, message string) error {
 	ghw.Status.Phase = phase
 
 	condStatus := metav1.ConditionFalse
