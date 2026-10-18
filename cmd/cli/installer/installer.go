@@ -1044,7 +1044,10 @@ func chainsConfig(opts Options) map[string]any {
 		provenanceFormat = "slsa/v2alpha4"
 	)
 	config := map[string]any{
-		"artifacts.taskrun.format":                     provenanceFormat,
+		"artifacts.taskrun.format": provenanceFormat,
+		// TaskRun provenance stays on although the PipelineRun's covers more:
+		// the PipelineRun's is only written once the run has finished, so the
+		// pipeline's own verify step can only check the push TaskRun's.
 		"artifacts.taskrun.storage":                    "oci",
 		"artifacts.taskrun.signer":                     "x509",
 		"artifacts.oci.storage":                        "oci",
