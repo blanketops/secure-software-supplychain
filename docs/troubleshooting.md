@@ -113,12 +113,13 @@ changed, and the same two steps make Vault trust the new ones.
 
 **Deploying a signed image fails with "failed calling webhook ... context deadline exceeded".** The policy
 controller reads the image's signatures and attestations from the registry, once for each of the policies (four,
-five with the SBOM),
-and the API server gives it ten seconds. On a slow connection to the registry that is not always enough. The
-webhook fails closed, so nothing unverified is admitted; apply the workload again. On a lossy uplink, where one
-dropped DNS reply costs five seconds, raise `timeoutSeconds` on the `policy.sigstore.dev` validating and mutating
-webhooks to 30, the most Kubernetes allows; policy-controller keeps the value when it updates its own webhook
-configuration. Admitting a signed image was measured at 4 to 12 seconds on a link losing a sixth of its packets.
+five with the SBOM), within the time the API server gives its admission webhook. The installer (and, on the read
+cluster, `gitops/policy/policy-controller/webhook-timeout.yaml`) sets that to 30 seconds, the most Kubernetes
+allows, on the `policy.sigstore.dev` validating and mutating webhooks; policy-controller keeps the value when it
+updates its own webhook configuration. On a slow connection to the registry that is not always enough. The
+webhook fails closed, so nothing unverified is admitted; apply the workload again. If the error names
+`?timeout=10s`, the webhooks are at the default: run `supplychain install policy-controller` again. Admitting a
+signed image was measured at 4 to 12 seconds on a link losing a sixth of its packets.
 
 **A build is `Failed` with the condition `PipelineRunDeleted`, reason `NoRecordedOutcome`.** Its PipelineRun was
 deleted before the operator recorded how it ended, usually because the operator was down from before the run

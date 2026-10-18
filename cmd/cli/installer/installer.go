@@ -360,8 +360,9 @@ var installOrder = []step{
 		// Admission side of signing: serves the ClusterImagePolicy and
 		// TrustRoot CRDs that SupplyChainPolicy renders. It only enforces in
 		// namespaces labelled policy.sigstore.dev/include=true.
-		Name:  "Policy Controller",
-		Paths: []string{"dependencies/sigstore/policy-controller"},
+		Name:   "Policy Controller",
+		Paths:  []string{"dependencies/sigstore/policy-controller"},
+		Mutate: longestAdmissionTimeout,
 		PostHook: func(ctx context.Context, i *Installer) error {
 			waitSp := newSpinner("Waiting for Policy Controller to be ready...")
 			waitSp.start()
