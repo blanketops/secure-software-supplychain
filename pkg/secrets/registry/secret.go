@@ -33,21 +33,38 @@ type RegistrySecretReconciler struct {
 	Log    logr.Logger
 }
 
-func NewRegistrySecretReconciler(
-	c client.Client,
-	log logr.Logger,
-) *RegistrySecretReconciler {
+// -------------------------------------------------------------------------
+// ExternalSecret builder
+// -------------------------------------------------------------------------
+
+type externalSecretParams struct {
+	name               string
+	namespace          string
+	sc                 *supplyv1alpha1.SupplyChain
+	ib                 *supplyv1alpha1.ImageBuild
+	secretType         string // "Opaque" or "kubernetes.io/dockerconfigjson"
+	secretKey          string // "config.json" or ".dockerconfigjson"
+	registryAnnotation string
+}
+
+// -------------------------------------------------------------------------
+// Secret spec types
+// -------------------------------------------------------------------------
+
+type kanikoSecretSpec struct {
+	name               string
+	namespace          string
+	registryAnnotation string
+}
+
+func NewRegistrySecretReconciler(c client.Client, log logr.Logger) *RegistrySecretReconciler {
 	return &RegistrySecretReconciler{
 		Client: c,
 		Log:    log,
 	}
 }
 
-func (r *RegistrySecretReconciler) Reconcile(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-) error {
+func (r *RegistrySecretReconciler) Reconcile(ctx context.Context, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) error {
 	if sc.Spec.Image.RegistrySecretRef == "" {
 		return nil
 	}
@@ -83,16 +100,6 @@ func ChainsSecretName(registrySecret string) string {
 	return registrySecret + "-chains"
 }
 
-// -------------------------------------------------------------------------
-// Secret spec types
-// -------------------------------------------------------------------------
-
-type kanikoSecretSpec struct {
-	name               string
-	namespace          string
-	registryAnnotation string
-}
-
 func (s kanikoSecretSpec) toUnstructured(
 	sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild,
 ) *unstructured.Unstructured {
@@ -113,9 +120,7 @@ type chainsSecretSpec struct {
 	registryAnnotation string
 }
 
-func (s chainsSecretSpec) toUnstructured(
-	sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild,
-) *unstructured.Unstructured {
+func (s chainsSecretSpec) toUnstructured(sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) *unstructured.Unstructured {
 	return newExternalSecret(externalSecretParams{
 		name:               s.name,
 		namespace:          s.namespace,
@@ -136,12 +141,7 @@ type secretSpec interface {
 // Shared reconcile logic
 // -------------------------------------------------------------------------
 
-func (r *RegistrySecretReconciler) reconcileExternalSecret(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-	spec secretSpec,
-) error {
+func (r *RegistrySecretReconciler) reconcileExternalSecret(ctx context.Context, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild, spec secretSpec) error {
 	desired := spec.toUnstructured(sc, ib)
 
 	if err := controllerutil.SetControllerReference(
@@ -161,20 +161,6 @@ func (r *RegistrySecretReconciler) reconcileExternalSecret(
 			"outcome", outcome, "supply-chain", sc.Name, "image-build", ib.Name, "secret", desired.GetName())
 	}
 	return nil
-}
-
-// -------------------------------------------------------------------------
-// ExternalSecret builder
-// -------------------------------------------------------------------------
-
-type externalSecretParams struct {
-	name               string
-	namespace          string
-	sc                 *supplyv1alpha1.SupplyChain
-	ib                 *supplyv1alpha1.ImageBuild
-	secretType         string // "Opaque" or "kubernetes.io/dockerconfigjson"
-	secretKey          string // "config.json" or ".dockerconfigjson"
-	registryAnnotation string
 }
 
 func newExternalSecret(p externalSecretParams) *unstructured.Unstructured {

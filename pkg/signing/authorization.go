@@ -89,11 +89,7 @@ func AuthorizationPolicyCUE(principal string) string {
 // AuthorizeSigner runs the three checks for a build ServiceAccount. It always
 // runs all three, so the returned proofs show everything that is missing; the
 // error is non-nil if any was denied or could not be evaluated.
-func AuthorizeSigner(
-	ctx context.Context,
-	c client.Client,
-	namespace, serviceAccount string,
-) (*AuthorizationPredicate, error) {
+func AuthorizeSigner(ctx context.Context, c client.Client, namespace, serviceAccount string) (*AuthorizationPredicate, error) {
 	var errs []error
 	verify := func(check AuthorizationCheck) *authz.AuthzProof {
 		proof, err := authz.VerifyAuthorization(ctx, c, serviceAccount, namespace, check.Resource, check.Verb)

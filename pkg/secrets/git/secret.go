@@ -32,21 +32,14 @@ type GitSSHSecretReconciler struct {
 	Log    logr.Logger
 }
 
-func NewGitSSHSecretReconciler(
-	c client.Client,
-	log logr.Logger,
-) *GitSSHSecretReconciler {
+func NewGitSSHSecretReconciler(c client.Client, log logr.Logger) *GitSSHSecretReconciler {
 	return &GitSSHSecretReconciler{
 		Client: c,
 		Log:    log,
 	}
 }
 
-func (r *GitSSHSecretReconciler) Reconcile(
-	ctx context.Context,
-	sc *supplyv1alpha1.SupplyChain,
-	ib *supplyv1alpha1.ImageBuild,
-) error {
+func (r *GitSSHSecretReconciler) Reconcile(ctx context.Context, sc *supplyv1alpha1.SupplyChain, ib *supplyv1alpha1.ImageBuild) error {
 
 	secretName := sc.Spec.Image.CloneSecretRef
 	namespace := ib.Namespace

@@ -39,10 +39,7 @@ type GitHubTokenSecretReconciler struct {
 	Log    logr.Logger
 }
 
-func NewGitHubTokenSecretReconciler(
-	c client.Client,
-	log logr.Logger,
-) *GitHubTokenSecretReconciler {
+func NewGitHubTokenSecretReconciler(c client.Client, log logr.Logger) *GitHubTokenSecretReconciler {
 	return &GitHubTokenSecretReconciler{
 		Client: c,
 		Log:    log,
@@ -52,10 +49,7 @@ func NewGitHubTokenSecretReconciler(
 // Reconcile ensures the GitHub token ExternalSecret exists and is up-to-date
 // for the given GitHubWebhook. Mirrors the git SSH secret pattern exactly:
 // ownership set to GitHubWebhook, create on first run, update on spec drift.
-func (r *GitHubTokenSecretReconciler) Reconcile(
-	ctx context.Context,
-	ghw *supplyv1alpha1.GitHubWebhook,
-) error {
+func (r *GitHubTokenSecretReconciler) Reconcile(ctx context.Context, ghw *supplyv1alpha1.GitHubWebhook) error {
 	if ghw.Spec.SecretRef.Name == "" {
 		return fmt.Errorf("spec.secretRef.name is required")
 	}

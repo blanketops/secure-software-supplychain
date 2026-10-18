@@ -37,6 +37,25 @@ import (
 //     read back from the registry and the transparency log. Only then, and
 //     only if it was found, does the phase become Signed.
 //  3. MarkFailed — called when PipelineRun fails, transitions to Phase=Failed.
+//
+
+// ConditionSigned is the condition that says whether the build's signature
+// was found on the image and in the transparency log.
+const ConditionSigned = "Signed"
+
+// ConditionEvidenceGathered says whether the transparency log entries were
+// queried successfully. A build can be Signed without all log entries being
+// present, but this condition tells you whether the lookups themselves
+// completed or whether they are still in flight / were throttled.
+const ConditionEvidenceGathered = "EvidenceGathered"
+
+// Phases of an ImageSignature.
+const (
+	PhasePending = "Pending"
+	PhaseSigned  = "Signed"
+	PhaseFailed  = "Failed"
+)
+
 type SignatureReconciler struct {
 	Client client.Client
 	Log    logr.Logger
@@ -52,13 +71,7 @@ func NewSignatureReconciler(c client.Client, log logr.Logger) *SignatureReconcil
 // EnsureSignature creates the ImageSignature CR with Phase=Pending.
 // Called immediately after the PipelineRun is created.
 // Idempotent — safe to call on every reconcile.
-func (s *SignatureReconciler) EnsureSignature(
-	ctx context.Context,
-	ib *supplyv1alpha1.ImageBuild,
-	sc *supplyv1alpha1.SupplyChain,
-	sigCtx *RunSigningContext,
-	imageRef string,
-) error {
+func (s *SignatureReconciler) EnsureSignature(ctx context.Context, ib *supplyv1alpha1.ImageBuild, sc *supplyv1alpha1.SupplyChain, sigCtx *RunSigningContext, imageRef string) error {
 	log := s.Log.WithValues(
 		"imageBuild", ib.Name,
 		"namespace", ib.Namespace,
@@ -125,23 +138,6 @@ func (s *SignatureReconciler) EnsureSignature(
 	return nil
 }
 
-// ConditionSigned is the condition that says whether the build's signature
-// was found on the image and in the transparency log.
-const ConditionSigned = "Signed"
-
-// ConditionEvidenceGathered says whether the transparency log entries were
-// queried successfully. A build can be Signed without all log entries being
-// present, but this condition tells you whether the lookups themselves
-// completed or whether they are still in flight / were throttled.
-const ConditionEvidenceGathered = "EvidenceGathered"
-
-// Phases of an ImageSignature.
-const (
-	PhasePending = "Pending"
-	PhaseSigned  = "Signed"
-	PhaseFailed  = "Failed"
-)
-
 // Record completes the ImageSignature from the build's signature as it was
 // read back from the registry and the transparency log.
 //
@@ -149,13 +145,7 @@ const (
 // Pending and says why: that a pipeline succeeded is not evidence that the
 // image carries a signature, and nothing here is filled in from what the
 // controller expects to be true.
-func (s *SignatureReconciler) Record(
-	ctx context.Context,
-	ib *supplyv1alpha1.ImageBuild,
-	imageDigest string,
-	signature *supplyv1alpha1.SignatureRecord,
-	missing string,
-) error {
+func (s *SignatureReconciler) Record(ctx context.Context, ib *supplyv1alpha1.ImageBuild, imageDigest string, signature *supplyv1alpha1.SignatureRecord, missing string) error {
 	log := s.Log.WithValues("imageBuild", ib.Name)
 
 	var sig supplyv1alpha1.ImageSignature
@@ -223,10 +213,7 @@ func (s *SignatureReconciler) Record(
 }
 
 // MarkFailed transitions the ImageSignature to Phase=Failed.
-func (s *SignatureReconciler) MarkFailed(
-	ctx context.Context,
-	ib *supplyv1alpha1.ImageBuild,
-) error {
+func (s *SignatureReconciler) MarkFailed(ctx context.Context, ib *supplyv1alpha1.ImageBuild) error {
 	log := s.Log.WithValues("imageBuild", ib.Name)
 
 	var sig supplyv1alpha1.ImageSignature

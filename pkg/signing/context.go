@@ -32,6 +32,7 @@ import (
 // from Fulcio, inside the build, with the build's identity; the controller
 // never has signing material for an image.
 type RunSigningContext struct {
+
 	// ScopeProof — get supplychains
 	// "I can see the chain I am claiming to execute against."
 	ScopeProof *authz.AuthzProof
@@ -67,12 +68,7 @@ func (c *RunSigningContext) SigningIdentity() Identity {
 //
 // The proofs are attested to the image by the pipeline, so admission can
 // require that the build was authorized and not only that it was signed.
-func EstablishSigningContext(
-	ctx context.Context,
-	c client.Client,
-	serviceAccount string,
-	namespace string,
-) (*RunSigningContext, error) {
+func EstablishSigningContext(ctx context.Context, c client.Client, serviceAccount string, namespace string) (*RunSigningContext, error) {
 	proofs, err := AuthorizeSigner(ctx, c, namespace, serviceAccount)
 	if err != nil {
 		return nil, fmt.Errorf("authorization failed: %w", err)
