@@ -48,6 +48,11 @@ func TestImmudbManifests(t *testing.T) {
 		t.Errorf("immudb has %d replicas; more would be separate ledgers", replicas)
 	}
 	containers, _, _ := unstructured.NestedSlice(sts.Object, "spec", "template", "spec", "containers")
+	// A Service named immudb makes Kubernetes inject IMMUDB_PORT=tcp://...,
+	// which immudb reads as its port: it then listens on port 0.
+	if links, found, _ := unstructured.NestedBool(sts.Object, "spec", "template", "spec", "enableServiceLinks"); !found || links {
+		t.Error("immudb's pod has service links: IMMUDB_PORT would be tcp://<service>:3322 and immudb would listen on port 0")
+	}
 	server := containers[0].(map[string]any)
 	if image := server["image"].(string); !strings.Contains(image, "@sha256:") {
 		t.Errorf("immudb image %s is not pinned by digest", image)

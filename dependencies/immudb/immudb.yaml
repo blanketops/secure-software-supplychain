@@ -69,6 +69,10 @@ spec:
         app.kubernetes.io/name: immudb
     spec:
       automountServiceAccountToken: false
+      # The Service immudb would otherwise make Kubernetes inject
+      # IMMUDB_PORT=tcp://<service>:3322, which immudb reads as its own port
+      # setting and then listens on port 0.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 3322
