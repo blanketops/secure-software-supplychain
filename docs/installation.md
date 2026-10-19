@@ -106,14 +106,14 @@ full `spiffe`, `--key-residency vault` install.
 | 14 | Tekton Chains | always |
 | 15 | Policy Controller | always |
 | 16 | Tekton Dashboard | always |
-| 17 | Tekton Tasks | always |
-| 18 | Tekton Results | always |
-| 19 | Tekton Pruner | always |
-| 20 | MetalLB Dependencies | always |
-| 21 | NGINX Ingress Controller | always |
-| 22 | Ingress Routes | always |
-| 23 | Secret Store Identity | `--signing-identity spiffe`, unless `--vault-addr`/`--external-secret-store` |
-| 24 | Secret Store | unless `--external-secret-store` |
+| 17 | Tekton Results | always |
+| 18 | Tekton Pruner | always |
+| 19 | MetalLB Dependencies | always |
+| 20 | NGINX Ingress Controller | always |
+| 21 | Ingress Routes | always |
+| 22 | Secret Store Identity | `--signing-identity spiffe`, unless `--vault-addr`/`--external-secret-store` |
+| 23 | Secret Store | unless `--external-secret-store` |
+| 24 | immudb | always |
 | 25 | SonarQube | always |
 
 The order is not arbitrary — later steps depend on earlier ones. SPIRE comes
@@ -143,6 +143,7 @@ The table below is the same steps grouped by what they set up.
 | NGINX Ingress Controller, Ingress Routes | The webhook route on `--webhook-host`, the UIs on `--ui-host` |
 | Secret Store Identity | *`spiffe` only.* The store's own SPIFFE identity: SPIRE issues it to one ServiceAccount, and a small pod keeps the current JWT-SVID where External Secrets can present it. Skipped with `--vault-addr` and with `--external-secret-store`. |
 | Secret Store | A login to Vault for External Secrets, limited to reading the secure software supply chain's secrets, and the `ClusterSecretStore` that uses it. With `spiffe` the login is that SPIFFE identity and nothing else. Skipped with `--external-secret-store`. |
+| immudb | The ledger of the builds' evidence, in `immudb-system`: one replica on a volume of its own, reachable only from the operator's namespace. Its admin password is generated into Vault (`supplychain/immudb/password`) once and never replaced; with `--external-secret-store`, put it in your store first. |
 | SonarQube | Static analysis, on a PostgreSQL database and volumes of its own |
 
 It also collects the sigstore trust anchors (Fulcio root, Rekor key, CT log key) into the
@@ -379,19 +380,13 @@ mage install deploy
 ### Where the evidence is stored: immudb
 
 When a build is over, the operator writes its evidence (every signature and attestation record) to
-[immudb](https://immudb.io), all of it in one transaction, and only then publishes the build's result. It reads
-the server and the login from the Secret `immudb` in the operator's namespace:
+[immudb](https://immudb.io), all of it in one transaction, and only then publishes the build's result. immudb
+runs in the cluster, in `immudb-system` (the `immudb` install step). The operator reads its login from the Secret
+`immudb` in its own namespace, which the ExternalSecret in `config/manager/immudb.yaml` fills: the address
+`immudb.immudb-system.svc.cluster.local:3322`, the database `securesoftwaresupplychain`, which is created on the
+first write, and the admin password from Vault (`supplychain/immudb/password`). Nothing is copied by hand.
 
-```bash
-kubectl -n secure-software-supply-chain-system create secret generic immudb \
-  --from-literal=IMMUDB_ADDR=<host> --from-literal=IMMUDB_PORT=3322 \
-  --from-literal=IMMUDB_USER=<user> --from-literal=IMMUDB_PASSWORD=<password> \
-  --from-literal=IMMUDB_DB=securesoftwaresupplychain
-```
-
-On a kind cluster, an immudb running in Docker on the same machine is reached at the gateway of the `kind`
-network (`docker network inspect kind`, usually `172.18.0.1`), on the port it publishes. Without the Secret, or
-when immudb cannot be reached, nothing falls back: the build's result is not published,
+When immudb cannot be reached, nothing falls back: the build's result is not published,
 `status.evidence.ledgerMessage` of its `ImageBuildResult` says why, and the operator tries again.
 
 The evidence is stored in six SQL tables of that database, which the operator creates on its first write (and to
@@ -409,14 +404,23 @@ which it adds columns a newer version needs):
 A build's row and all of its record rows are written in one transaction, the one `status.evidence.ledger.tx`
 names; `n` is the record's position in `status.evidence.signatures`. A record of more than 64 KB fails the write
 and nothing of the build is stored: a build's rows are read back in one message of at most 4 MB. Read the tables
-with any immudb SQL client, for example the immudb web console (port 8080) or `immuclient`:
+with any immudb SQL client, for example the immudb web console. Only the operator's namespace may connect to
+immudb, so reach it with a port-forward (`kubectl -n immudb-system port-forward svc/immudb 8080`) and sign in
+as `immudb` with the password from Vault:
 
 ```sql
 SELECT n, signed_by, subject, rekor_log_index FROM signatures WHERE digest = 'sha256:<digest>';
 ```
 
-The unit tests of `pkg/immudb`, `pkg/evidence` and `pkg/tekton/results` need an immudb at `127.0.0.1:3322`
-(override with the same `IMMUDB_*` variables) and fail without one. They write to their own database,
+The unit tests of `pkg/immudb`, `pkg/evidence` and `pkg/tekton/results` need an immudb of their own at
+`127.0.0.1:3322`, not the cluster's (override with the same `IMMUDB_*` variables), and fail without one:
+
+```bash
+docker run -d --name immudb-test --restart unless-stopped -p 127.0.0.1:3322:3322 \
+  -v immudb-test-data:/var/lib/immudb -e IMMUDB_ADMIN_PASSWORD=<password> codenotary/immudb:1.11.0
+```
+
+They write to their own database,
 `securesoftwaresupplychain_test` (`IMMUDB_TEST_DB`, which must end in `_test`), created on first use, never to the
 pipeline's.
 
@@ -456,6 +460,7 @@ and every build asks the store for exactly these:
 | `supplychain/registry/config` | A Docker `config.json` with push access: `{"auths":{"https://index.docker.io/v1/":{"auth":"<base64 of user:token>"}}}` |
 | `supplychain/github/token` | A token that can manage the repository's webhooks |
 | `supplychain/sonarqube/token` | Written for you in phase 4 |
+| `supplychain/immudb/password` | immudb's admin password, generated by the `immudb` install step |
 
 The CLI takes a key without the `supplychain/` they all share. `secrets get` is the same read as Vault's own
 client makes, if you would rather look there:

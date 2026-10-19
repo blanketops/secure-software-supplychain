@@ -26,7 +26,7 @@ spec:
     trivy: true
     sign: true
     sonarQube:
-      serverURL: http://sonarqube-sonarqube.default.svc.cluster.local:9000/sonarqube
+      serverURL: http://sonarqube-sonarqube.sonarqube-system.svc.cluster.local:9000/sonarqube
       tokenSecretRef: sonarqube-token
       projectKey: your-org_your-app
   signing:

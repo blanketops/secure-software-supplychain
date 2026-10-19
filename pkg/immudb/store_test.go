@@ -17,12 +17,15 @@ package immudb
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/codenotary/immudb/pkg/api/schema"
 )
 
 // openTestStore connects to the immudb server from the environment (see
@@ -254,6 +257,37 @@ func TestCreateDatabase(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	if s.Database() != name {
 		t.Fatalf("opened %s; want %s", s.Database(), name)
+	}
+}
+
+// TestOpenCreatesAMissingDatabase: a fresh immudb has only defaultdb; Open
+// creates the database it is pointed at, so the operator's first write works.
+func TestOpenCreatesAMissingDatabase(t *testing.T) {
+	name := "opencreates" + strconv.FormatInt(time.Now().UnixNano(), 10) + "_test"
+	t.Setenv("IMMUDB_DB", name)
+	s, err := Open()
+	if err != nil {
+		t.Fatalf("Open of a database that does not exist yet: %v", err)
+	}
+	if s.Database() != name {
+		t.Fatalf("opened %s; want %s", s.Database(), name)
+	}
+	_ = s.Close()
+
+	// Leave the test server as it was.
+	admin, err := New(getenv("IMMUDB_ADDR", "127.0.0.1"), getenvInt("IMMUDB_PORT", 3322),
+		getenv("IMMUDB_USER", "immudb"), getenv("IMMUDB_PASSWORD", "immudb"), "defaultdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	c := admin.(*immudbStore).c
+	ctx := context.Background()
+	if _, err := c.UnloadDatabase(ctx, &schema.UnloadDatabaseRequest{Database: name}); err != nil {
+		t.Logf("unloading %s: %v", name, err)
+	}
+	if _, err := c.DeleteDatabase(ctx, &schema.DeleteDatabaseRequest{Database: name}); err != nil {
+		t.Logf("deleting %s: %v", name, err)
 	}
 }
 

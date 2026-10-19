@@ -94,9 +94,12 @@ var statusGroups = []statusGroup{
 	{Title: "Credentials", Optional: "not with --vault-addr or --external-secret-store", Workloads: []workload{
 		{"StatefulSet", vaultNamespace, vaultSTS, "Vault"},
 	}},
+	{Title: "Evidence", Workloads: []workload{
+		{"StatefulSet", immudbNamespace, "immudb", "immudb"},
+	}},
 	{Title: "Code analysis", Workloads: []workload{
-		{"StatefulSet", "default", "sonarqube-sonarqube", "SonarQube"},
-		{"StatefulSet", "default", "sonarqube-postgresql", "SonarQube database"},
+		{"StatefulSet", sonarNamespace, "sonarqube-sonarqube", "SonarQube"},
+		{"StatefulSet", sonarNamespace, "sonarqube-postgresql", "SonarQube database"},
 	}},
 }
 

@@ -42,7 +42,7 @@ func TestSonarQubeKeepsItsState(t *testing.T) {
 
 	for _, want := range []string{
 		"name: SONAR_JDBC_URL",
-		"jdbc:postgresql://sonarqube-postgresql.default.svc.cluster.local:5432/sonarqube",
+		"jdbc:postgresql://sonarqube-postgresql." + sonarNamespace + ".svc.cluster.local:5432/sonarqube",
 		"claimName: sonarqube-data",
 	} {
 		if !strings.Contains(release, want) {

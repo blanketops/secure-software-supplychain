@@ -90,16 +90,27 @@ func (s *immudbStore) Database() string { return s.database }
 // Open connects to the immudb server configured by IMMUDB_ADDR, IMMUDB_PORT,
 // IMMUDB_USER, IMMUDB_PASSWORD and IMMUDB_DB (defaults: the immudb container's
 // 127.0.0.1:3322, immudb/immudb, database securesoftwaresupplychain). It
-// returns an error if the server cannot be reached or rejects the login.
+// returns an error if the server cannot be reached or rejects the login. A
+// database that does not exist yet, as on a fresh immudb, is created: the
+// login must be allowed to.
 func Open() (Store, error) {
-	return New(
-		getenv("IMMUDB_ADDR", "127.0.0.1"),
-		getenvInt("IMMUDB_PORT", 3322),
-		getenv("IMMUDB_USER", "immudb"),
-		getenv("IMMUDB_PASSWORD", "immudb"),
-		getenv("IMMUDB_DB", "securesoftwaresupplychain"),
-	)
+	addr, port := getenv("IMMUDB_ADDR", "127.0.0.1"), getenvInt("IMMUDB_PORT", 3322)
+	user, password := getenv("IMMUDB_USER", "immudb"), getenv("IMMUDB_PASSWORD", "immudb")
+	database := getenv("IMMUDB_DB", "securesoftwaresupplychain")
+	s, err := New(addr, port, user, password, database)
+	if err == nil || !strings.HasSuffix(err.Error(), errDatabaseNotExists) {
+		return s, err
+	}
+	if err := CreateDatabase(database); err != nil {
+		return nil, fmt.Errorf("%w: database %s does not exist and could not be created: %w", ErrConnect, database, err)
+	}
+	return New(addr, port, user, password, database)
 }
+
+// errDatabaseNotExists is how the server says a session's database does not
+// exist (pkg/database.ErrDatabaseNotExists, which this package does not
+// import: it pulls in the whole server).
+const errDatabaseNotExists = "database does not exist"
 
 // New opens a session on the given immudb server and database.
 func New(addr string, port int, user, password, database string) (Store, error) {

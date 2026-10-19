@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	sonarNamespace = "default"
+	sonarNamespace = "sonarqube-system"
 	sonarPod       = "sonarqube-sonarqube-0"
 	sonarPort      = 9000
 	// sonarContext is the path SonarQube is served under (SONAR_WEB_CONTEXT).

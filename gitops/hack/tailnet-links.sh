@@ -7,8 +7,8 @@
 # unchanged units are not restarted.
 #
 # usage: hack/tailnet-links.sh [-b build-context] [-r read-context] [-H host] [install|check]
-#   -b  build cluster context  (default: kind-blanketops)
-#   -r  read cluster context   (default: kind-blanketops-read)
+#   -b  build cluster context  (default: kind-software-eng-write)
+#   -r  read cluster context   (default: kind-software-eng-read)
 #   -H  Tailscale DNS name     (default: this node's, from `tailscale status`)
 #   -s  supplychain binary     (default: bin/supplychain of this repository)
 #   install (default) writes the units and serve entries, then runs check.
@@ -17,8 +17,8 @@
 # Needs the caller to be the Tailscale operator (once: sudo tailscale set --operator=$USER).
 set -euo pipefail
 
-build=kind-blanketops
-read=kind-blanketops-read
+build=kind-software-eng-write
+read=kind-software-eng-read
 host=""
 supplychain=$(cd "$(dirname "$0")/../.." && pwd)/bin/supplychain
 while getopts "b:r:H:s:" opt; do
@@ -43,7 +43,7 @@ links=(
   # authenticating proxy.
   "tornjak|$build|spire-server|svc/tornjak|3000:3000 10000:10000|-|http|/|Tornjak UI (SPIRE)"
   "tekton-dashboard|$build|tekton-pipelines|svc/tekton-dashboard|9097:9097|9097|http|/|Tekton Dashboard"
-  "sonarqube|$build|default|svc/sonarqube-sonarqube|9000:9000|9000|http|/sonarqube/|SonarQube"
+  "sonarqube|$build|sonarqube-system|svc/sonarqube-sonarqube|9000:9000|9000|http|/sonarqube/|SonarQube"
   "rekor|$build|rekor-system|svc/rekor-server|3443:443|3443|https|/api/v1/log|Rekor API"
   # Adminer has its own login; hack/trillian-ui.sh gives it a read-only account.
   "trillian-ui|$build|trillian-system|svc/trillian-adminer|8306:8080|8306|http|/|Trillian database (Adminer)"

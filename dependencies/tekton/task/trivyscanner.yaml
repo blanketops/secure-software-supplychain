@@ -2,7 +2,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: trivy-scanner
-  namespace: default
   labels:
     app.kubernetes.io/version: "0.4"
   annotations:

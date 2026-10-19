@@ -49,6 +49,7 @@ import (
 
 	manifests "github.com/blanketops/secure-software-supplychain"
 	"github.com/blanketops/secure-software-supplychain/pkg/secrets/store"
+	"github.com/blanketops/secure-software-supplychain/pkg/signing"
 )
 
 const (
@@ -90,9 +91,10 @@ const (
 	ctfePublicKeyNS     = "ctlog-system"
 )
 
-// sigstoreRootsNamespaces lists every namespace that needs the trust anchor
-// configmap mounted by pipeline tasks and Chains.
-var sigstoreRootsNamespaces = []string{"default", "tekton-chains"}
+// sigstoreRootsNamespaces lists every namespace the installer writes the
+// trust anchor configmap to: Chains', which the operator copies it from into
+// each namespace that runs builds or renders policies.
+var sigstoreRootsNamespaces = []string{signing.RootsSourceNamespace}
 
 // ---------------------------------------------------------------------------
 // step / installOrder
@@ -384,10 +386,6 @@ var installOrder = []step{
 		Paths: []string{"dependencies/tekton/dashboard"},
 	},
 	{
-		Name:  "Tekton Tasks",
-		Paths: []string{"dependencies/tekton/task"},
-	},
-	{
 		Name:  "Tekton Results",
 		Paths: []string{"dependencies/tekton/results"},
 		PreHook: func(ctx context.Context, i *Installer) error {
@@ -475,6 +473,26 @@ var installOrder = []step{
 				return err
 			}
 			storeSp.succeed("ClusterSecretStore " + store.Name + " logged in to Vault")
+			return nil
+		},
+	},
+	{
+		// The ledger the operator writes each build's evidence to, in
+		// immudb-system. Its admin password is generated into Vault first and
+		// reaches immudb through the secret store.
+		Name:  "immudb",
+		Paths: []string{"dependencies/immudb"},
+		PreHook: func(ctx context.Context, i *Installer) error {
+			return i.ensureImmudbPassword(ctx)
+		},
+		PostHook: func(ctx context.Context, i *Installer) error {
+			waitSp := newSpinner("Waiting for immudb...")
+			waitSp.start()
+			if err := i.waitForStatefulSet(ctx, immudbNamespace, "immudb"); err != nil {
+				waitSp.fail("immudb not ready")
+				return err
+			}
+			waitSp.succeed("immudb ready")
 			return nil
 		},
 	},

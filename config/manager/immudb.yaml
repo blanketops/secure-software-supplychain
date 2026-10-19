@@ -1,0 +1,33 @@
+# The operator's login to immudb, the ledger it stores each build's evidence
+# in (dependencies/immudb, installed by `supplychain install immudb`). The
+# password is immudb's admin password in Vault, read through the secret store
+# into this namespace; the rest is where immudb is. The operator reads the
+# Secret immudb through envFrom.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: immudb
+  namespace: system
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: secure-software-supply-chain-store
+    kind: ClusterSecretStore
+  target:
+    # Named here, so kustomize's namePrefix does not reach it: the Deployment
+    # refers to it as immudb.
+    name: immudb
+    template:
+      type: Opaque
+      engineVersion: v2
+      data:
+        IMMUDB_ADDR: immudb.immudb-system.svc.cluster.local
+        IMMUDB_PORT: "3322"
+        IMMUDB_USER: immudb
+        IMMUDB_DB: securesoftwaresupplychain
+        IMMUDB_PASSWORD: "{{ .password }}"
+  data:
+  - secretKey: password
+    remoteRef:
+      key: supplychain/immudb/password
+      property: value

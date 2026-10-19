@@ -62,7 +62,7 @@ func yourAppSupplyChain(name string) *supplychainv1alpha1.SupplyChain {
 				Attest:     true,
 				SonarQube: &supplychainv1alpha1.SonarQubeSpec{
 					Enabled:        true,
-					ServerURL:      "http://sonarqube-sonarqube.default.svc.cluster.local:9000",
+					ServerURL:      "http://sonarqube-sonarqube.sonarqube-system.svc.cluster.local:9000",
 					TokenSecretRef: "sonarqube-token",
 					ProjectKey:     "your-org_your-app",
 				},
@@ -149,7 +149,7 @@ var _ = Describe("SupplyChain Controller", func() {
 		var sc supplychainv1alpha1.SupplyChain
 		Expect(k8sClient.Get(ctx, namespacedName, &sc)).To(Succeed())
 		Expect(sc.Spec.Steps.SonarQube.Enabled).To(BeTrue())
-		Expect(sc.Spec.Steps.SonarQube.ServerURL).To(Equal("http://sonarqube-sonarqube.default.svc.cluster.local:9000"))
+		Expect(sc.Spec.Steps.SonarQube.ServerURL).To(Equal("http://sonarqube-sonarqube.sonarqube-system.svc.cluster.local:9000"))
 		Expect(sc.Spec.Steps.SonarQube.TokenSecretRef).To(Equal("sonarqube-token"))
 		Expect(sc.Spec.Steps.SonarQube.ProjectKey).To(Equal("your-org_your-app"))
 	})
