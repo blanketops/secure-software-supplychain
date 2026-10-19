@@ -37,7 +37,7 @@ contacted during verification, and their URLs are left as rendered.
 | Rekor through the ingress, Fulcio and CT log unreachable | signed image | admitted |
 | Rekor through the ingress, Fulcio and CT log unreachable | image signed by an earlier install | refused by all four policies |
 
-On two kind clusters on one machine (`kind-blanketops` building, `kind-blanketops-read` verifying), the read
+On two kind clusters on one machine (`kind-software-eng-write` building, `kind-software-eng-read` verifying), the read
 cluster admitted the build cluster's signed image, refused the same app signed under an earlier signing identity
 and refused an unsigned and a tampered image, and the build cluster's ingress logged the read cluster's Rekor
 lookups (`POST /api/v1/log/entries/retrieve`, 200).

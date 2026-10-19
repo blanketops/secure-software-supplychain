@@ -24,7 +24,7 @@ set -euo pipefail
 org=blanketops
 team=argocd-admins
 url=https://pop-os.tailf8145.ts.net:8081
-read=kind-blanketops-read
+read=kind-software-eng-read
 client_id=""
 keep=false
 usage="usage: $0 -i <client-id> [-k] [-o org] [-t team] [-u argocd-url] [-r read-context]"

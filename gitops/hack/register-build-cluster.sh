@@ -6,16 +6,16 @@
 # goes into Git. Safe to run again.
 #
 # usage: hack/register-build-cluster.sh [-b build-context] [-r read-context] [-s api-server]
-#   -b  build cluster context      (default: kind-blanketops)
-#   -r  read cluster context       (default: kind-blanketops-read)
+#   -b  build cluster context      (default: kind-software-eng-write)
+#   -r  read cluster context       (default: kind-software-eng-read)
 #   -s  build API server as the read cluster's pods reach it
-#       (default: https://blanketops-control-plane:6443, the kind node on the
+#       (default: https://software-eng-write-control-plane:6443, the kind node on the
 #       shared Docker network; the name is in the API server's certificate)
 set -euo pipefail
 
-build=kind-blanketops
-read=kind-blanketops-read
-server=https://blanketops-control-plane:6443
+build=kind-software-eng-write
+read=kind-software-eng-read
+server=https://software-eng-write-control-plane:6443
 while getopts "b:r:s:" opt; do
   case $opt in
     b) build=$OPTARG ;;
