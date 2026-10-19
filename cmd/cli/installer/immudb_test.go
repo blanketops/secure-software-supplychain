@@ -17,11 +17,18 @@ limitations under the License.
 package cli
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	manifests "github.com/blanketops/secure-software-supplychain"
 
@@ -176,5 +183,28 @@ func TestSonarQubeIsInItsOwnNamespace(t *testing.T) {
 	}
 	if sonarNamespace != "sonarqube-system" {
 		t.Errorf("sonarNamespace = %s; want sonarqube-system", sonarNamespace)
+	}
+}
+
+// SonarQube's password Secret is made before its manifests are applied, in a
+// namespace that is not default any more: the hook brings the namespace. The
+// fake refuses a Secret in a namespace that does not exist, as the API
+// server does.
+func TestSonarQubePasswordComesWithItsNamespace(t *testing.T) {
+	nsGVR := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
+	client := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	client.PrependReactor("create", "secrets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		ns := action.GetNamespace()
+		if _, err := client.Tracker().Get(nsGVR, "", ns); err != nil {
+			return true, nil, apierrors.NewNotFound(nsGVR.GroupResource(), ns)
+		}
+		return false, nil, nil
+	})
+	i := &Installer{dynamic: client}
+	if err := i.ensureSonarQubeDatabasePassword(context.Background()); err != nil {
+		t.Fatalf("ensureSonarQubeDatabasePassword: %v", err)
+	}
+	if _, err := client.Resource(secretGVR).Namespace(sonarNamespace).Get(context.Background(), sonarDatabaseSecret, metav1.GetOptions{}); err != nil {
+		t.Fatalf("no Secret %s/%s: %v", sonarNamespace, sonarDatabaseSecret, err)
 	}
 }

@@ -70,6 +70,10 @@ var (
 // reads it when it initialises an empty data directory, so a new password
 // would lock SonarQube out of the database it already has.
 func (i *Installer) ensureSonarQubeDatabasePassword(ctx context.Context) error {
+	// The hook runs before the step's manifests, the Namespace among them.
+	if err := i.ensureNamespace(ctx, sonarNamespace); err != nil {
+		return fmt.Errorf("creating namespace %s: %w", sonarNamespace, err)
+	}
 	secrets := i.dynamic.Resource(secretGVR).Namespace(sonarNamespace)
 	_, err := secrets.Get(ctx, sonarDatabaseSecret, metav1.GetOptions{})
 	if err == nil {
